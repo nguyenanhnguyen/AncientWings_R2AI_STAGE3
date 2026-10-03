@@ -6,17 +6,17 @@ Ngày đối chiếu: **03/10/2026, giờ Việt Nam**. Phạm vi: lấy danh s�
 
 **Kết quả thực tế:** [`CRAWL_RESULT_1000.md`](CRAWL_RESULT_1000.md), gồm 976 tài liệu vượt kiểm tra tự động, 13 cần xem lại và 11 rejected; corpus đã xuất JSONL/Parquet.
 
-Tài liệu này đi kèm script chạy được tại [`scripts/crawl_corpus.py`](scripts/crawl_corpus.py). Kết quả chạy lưu riêng trong `runs/`; các mục về browser, OCR, parser đặc thù và hệ thống crawl quy mô lớn là hướng mở rộng, được ghi rõ bên dưới.
+Logic crawl nằm tại [`src/vibiomir/crawl/crawler.py`](../../src/vibiomir/crawl/crawler.py); điểm chạy giữ tại [`scripts/crawl_corpus.py`](../../scripts/crawl_corpus.py). Kết quả chạy lưu riêng trong `runs/`; các mục về browser, OCR, parser đặc thù và hệ thống crawl quy mô lớn là hướng mở rộng, được ghi rõ bên dưới.
 
 ## 1. Kết luận từ các tài liệu đã đọc
 
 | Nguồn | Yêu cầu liên quan trực tiếp đến crawl | Quyết định cho pipeline |
 | --- | --- | --- |
-| [`overview.pdf`](overview.pdf), trang 1–2 | Bài toán truy hồi y sinh đa ngôn ngữ; đội thi chủ động thu thập nguồn | Giữ nguyên ngôn ngữ gốc, không dịch hoặc viết lại tài liệu |
-| [`data.pdf`](data.pdf), trang 1–2 | URL và ID trong `links_corpus.parquet`; tài liệu ngoài danh sách không được tính là nhãn dương trong bản đánh giá này | Danh sách Parquet là nguồn công việc; giữ nguyên ID số nguyên và URL gốc |
-| [`evaluation.pdf`](evaluation.pdf), trang 1–2 | Chấm theo tài liệu và đoạn; đối chiếu đoạn trong cùng `doc_id`; LCS token sau chuẩn hóa, ngưỡng overlap 40%; Precision/Recall/F2 macro | Ưu tiên giữ đầy đủ nội dung thật và thứ tự đoạn; chất lượng crawl là phép đo riêng, không gọi tỷ lệ HTTP 200 là điểm contest |
-| [`submission.pdf`](submission.pdf), trang 2–3 | `doc_id` là ID gốc; `chunk_text` phải trích từ nguồn, không sinh lại; nộp đủ 1.200 truy vấn | Corpus phải truy vết được đến ID/URL/raw; không lấy query làm tài liệu; chưa tạo submission trong giai đoạn crawl |
-| [`LEGALQA_CORPUS_MEMORY.md`](LEGALQA_CORPUS_MEMORY.md), mục 4, 10–11 | Tách raw, tài liệu sạch, artifact; chuẩn hóa nhẹ, provenance, kiểm tra lỗi | Kế thừa tổ chức dữ liệu; không áp dụng schema pháp luật, regex Điều, thông số chunk hay xóa ID trùng text của LegalQA |
+| [`overview.pdf`](../references/overview.pdf), trang 1–2 | Bài toán truy hồi y sinh đa ngôn ngữ; đội thi chủ động thu thập nguồn | Giữ nguyên ngôn ngữ gốc, không dịch hoặc viết lại tài liệu |
+| [`data.pdf`](../references/data.pdf), trang 1–2 | URL và ID trong `links_corpus.parquet`; tài liệu ngoài danh sách không được tính là nhãn dương trong bản đánh giá này | Danh sách Parquet là nguồn công việc; giữ nguyên ID số nguyên và URL gốc |
+| [`evaluation.pdf`](../references/evaluation.pdf), trang 1–2 | Chấm theo tài liệu và đoạn; đối chiếu đoạn trong cùng `doc_id`; LCS token sau chuẩn hóa, ngưỡng overlap 40%; Precision/Recall/F2 macro | Ưu tiên giữ đầy đủ nội dung thật và thứ tự đoạn; chất lượng crawl là phép đo riêng, không gọi tỷ lệ HTTP 200 là điểm contest |
+| [`submission.pdf`](../references/submission.pdf), trang 2–3 | `doc_id` là ID gốc; `chunk_text` phải trích từ nguồn, không sinh lại; nộp đủ 1.200 truy vấn | Corpus phải truy vết được đến ID/URL/raw; không lấy query làm tài liệu; chưa tạo submission trong giai đoạn crawl |
+| [`LEGALQA_CORPUS_MEMORY.md`](../references/LEGALQA_CORPUS_MEMORY.md), mục 4, 10–11 | Tách raw, tài liệu sạch, artifact; chuẩn hóa nhẹ, provenance, kiểm tra lỗi | Kế thừa tổ chức dữ liệu; không áp dụng schema pháp luật, regex Điều, thông số chunk hay xóa ID trùng text của LegalQA |
 | [ViBioMIR dataset card](https://huggingface.co/datasets/AIGuruTinix/ViBioMIR/blob/0148f6f80ffafed5c005af6d506ccfd9d3fb47a7/README.md) | Hai config `corpus` và `query`; file nguồn là Parquet | Đọc file trực tiếp, không scrape bảng HTML của Dataset Viewer |
 
 Quy định chuẩn hóa của evaluator gồm NFKC, giải mã HTML entity, chữ thường và gộp khoảng trắng. Đây là phép biến đổi **khi so khớp**, không phải lý do phá hủy bản văn gốc trong corpus. Bản clean ở đây dùng NFC, giữ hoa/thường, dấu tiếng Việt, số, đơn vị, công thức và đoạn văn. Raw luôn được giữ để trích lại.
@@ -242,42 +242,44 @@ Ngưỡng đề xuất để chuyển từ pilot sang batch 10.000: mapping/hash
 
 ## 9. Lệnh chạy trên PowerShell
 
-**Run đúng yêu cầu ID hiện hành:** dùng các lệnh ở [`CRAWL_1000_IDS.md`](CRAWL_1000_IDS.md). Đoạn dưới minh họa chế độ cân bằng hostname cũ; không dùng lại tên `pilot1000` nếu thư mục đã tồn tại.
+**Run đúng yêu cầu ID hiện hành:** dùng các lệnh ở [`CRAWL_1000_IDS.md`](CRAWL_1000_IDS.md). Đoạn dưới minh họa chế độ cân bằng hostname cũ; không dùng lại tên `pilot_balanced_example` nếu thư mục đã tồn tại.
 
 Chạy từ thư mục gốc dự án; không cần GPU hoặc tải model.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-crawl.lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/crawl.lock.txt
 
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/pilot1000 --size 1000 --seed 42
+.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/pilot_balanced_example --size 1000 --seed 42
 
 # Thử 30 URL trong đúng mẫu đã chọn trước khi chạy phần còn lại.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot1000 --workers 12 --delay 1 --attempts 3 --max-new 30
+.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3 --max-new 30
 
 # Hoàn tất các URL chưa có checkpoint; dùng cùng cấu hình và mã nguồn.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot1000 --workers 12 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3
 
 # Tính lại báo cáo và kiểm tra hash mà không truy cập mạng.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/pilot1000
+.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/pilot_balanced_example
 ```
 
-`prepare` không ghi đè run đã tồn tại. Nếu đã có `runs/pilot1000/manifest.json`, dùng thẳng `crawl`/`report`; muốn chọn mẫu mới, đổi `--out`. Trong môi trường hạn chế network, lệnh crawl cần được phép kết nối đến các URL công khai; chạy báo cáo không cần network.
+`prepare` không ghi đè run đã tồn tại. Nếu đã có `runs/pilot_balanced_example/manifest.json`, dùng thẳng `crawl`/`report`; muốn chọn mẫu mới, đổi `--out`. Trong môi trường hạn chế network, lệnh crawl cần được phép kết nối đến các URL công khai; chạy báo cáo không cần network.
 
-`requirements-crawl.txt` liệt kê thư viện trực tiếp; `requirements-crawl.lock.txt` khóa cả dependency đã cài trong lần triển khai. Môi trường đã kiểm tra: Windows, Python 3.14. Không cam kết dependency lock này dùng nguyên vẹn trên mọi phiên bản Python.
+`requirements/crawl.txt` liệt kê thư viện trực tiếp; `requirements/crawl.lock.txt` khóa cả dependency đã cài trong lần triển khai. Môi trường đã kiểm tra: Windows, Python 3.14. Không cam kết dependency lock này dùng nguyên vẹn trên mọi phiên bản Python.
 
 ### Đọc nhanh kết quả
 
 ```powershell
-Get-Content -Encoding UTF8 runs/pilot1000/QUALITY_REPORT.md
-Get-Content -Encoding UTF8 runs/pilot1000/quality_report.json
+Get-Content -Encoding UTF8 runs/pilot_balanced_example/QUALITY_REPORT.md
+Get-Content -Encoding UTF8 runs/pilot_balanced_example/quality_report.json
 ```
 
 Từ bản v2, phiếu `manual_review.jsonl` chỉ sinh khi đủ checkpoint cho toàn mẫu. Script không ghi đè phiếu để giữ nhãn thủ công. Báo cáo tự động được tính lại từ toàn bộ checkpoint hiện có.
 
 ### Các run cũ giữ làm bằng chứng
+
+Các lệnh dưới mô tả quy trình lịch sử. Khi resume run cũ, dùng snapshot khớp hash trong `crawl_config.json`; code hiện hành sẽ từ chối cấu hình khác. Output reprocess phải là thư mục mới.
 
 `runs/pilot1000` là smoke run v1 gồm 30 URL. Sau khi phát hiện lỗi charset và nhiễu template, đã tạo **`runs/pilot1000_v2`** bằng raw đã lưu, rồi crawl tiếp các URL chưa có checkpoint. Không trộn phiên bản parser trong run cũ và không tải lại 30 trang chỉ để sửa extraction.
 
@@ -316,4 +318,4 @@ Việc nguồn ngoài được phép sử dụng có điều kiện theo `overvi
 - [API rows của Hugging Face](https://huggingface.co/docs/dataset-viewer/rows): nếu không có file local, có thể lấy lát dữ liệu qua API; không cần điều khiển UI. Chạy hiện tại không phụ thuộc API này.
 - [Trafilatura API](https://trafilatura.readthedocs.io/en/latest/corefunctions.html): tùy chọn extraction, metadata, tables, comments; pipeline không đặt bộ lọc chỉ nhận một ngôn ngữ.
 
-Báo cáo thực nghiệm hiện hành nằm ở [`runs/ids_583_1582_clean/QUALITY_REPORT.md`](runs/ids_583_1582_clean/QUALITY_REPORT.md), còn chi tiết máy đọc ở `quality_report.json` cùng thư mục. Corpus accepted vẫn là **bản ứng viên đã qua heuristic**, cần audit trước khi tuyên bố đạt độ đầy đủ và độ sạch mục tiêu.
+Báo cáo thực nghiệm hiện hành nằm ở [`runs/ids_583_1582_clean/QUALITY_REPORT.md`](../../runs/ids_583_1582_clean/QUALITY_REPORT.md), còn chi tiết máy đọc ở `quality_report.json` cùng thư mục. Corpus accepted vẫn là **bản ứng viên đã qua heuristic**, cần audit trước khi tuyên bố đạt độ đầy đủ và độ sạch mục tiêu.

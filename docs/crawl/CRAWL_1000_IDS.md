@@ -15,27 +15,27 @@ Tài liệu thiết kế đầy đủ, đối chiếu 4 PDF contest và file mem
 
 ## Lệnh chạy
 
-Chạy tại thư mục gốc dự án bằng PowerShell:
+Chạy tại thư mục gốc dự án bằng PowerShell. Đoạn này tạo run mới `runs/crawl_1000_example`; đổi tên nếu output đã có manifest. Để resume run v3 hiện có, xem phần bên dưới:
 
 ```powershell
 # Chỉ cần thiết lập khi chưa có môi trường.
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-crawl.lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/crawl.lock.txt
 
 # Kiểm tra parser, ID, lấy mẫu, redirect và retry bằng fixture local.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
 # Chỉ chạy prepare một lần. Không ghi đè run đã tồn tại.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/ids_583_1582 --size 1000 --id-start 583 --id-stop 1583
+.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/crawl_1000_example --size 1000 --id-start 583 --id-stop 1583
 
 # Chạy mới hoặc tiếp tục URL chưa có checkpoint.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/ids_583_1582 --workers 4 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/crawl_1000_example --workers 4 --delay 1 --attempts 3
 
 # Tính lại báo cáo, kiểm tra raw/text hash; không cần mạng.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/ids_583_1582
+.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/crawl_1000_example
 ```
 
-Trong workspace hiện tại, **prepare đã hoàn tất**. Lần prepare thực tế có thêm `--reuse-run runs/pilot1000_v2`, tái sử dụng 8 trang đã tải: 583, 667, 821, 873, 1015, 1122, 1146, 1247. Raw được kiểm tra SHA-256 và trích lại bằng parser hiện tại, không copy nguyên text của parser cũ.
+Trong workspace hiện tại, **run `runs/ids_583_1582` đã hoàn tất**. Lần prepare thực tế có thêm `--reuse-run runs/pilot1000_v2`, tái sử dụng 8 trang đã tải: 583, 667, 821, 873, 1015, 1122, 1146, 1247. Raw được kiểm tra SHA-256 và trích lại bằng parser lúc đó, không copy nguyên text của parser cũ.
 
 ### Tiếp tục đúng phiên bản sau ngắt quãng
 
@@ -44,10 +44,10 @@ Run tải nguồn bắt đầu bằng crawler v3; mã nguồn khớp SHA-256 đ�
 ```powershell
 .\.venv\Scripts\python.exe -u runs/ids_583_1582/crawler_snapshot.py crawl --out runs/ids_583_1582 --workers 4 --delay 1 --attempts 3
 
-# Chỉ thực hiện khi lượt tải đủ 1.000 checkpoint; output mới phải chưa tồn tại.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py reprocess --source-run runs/ids_583_1582 --out runs/ids_583_1582_clean
-.\.venv\Scripts\python.exe scripts/audit_corpus.py --out runs/ids_583_1582_clean
-.\.venv\Scripts\python.exe scripts/export_corpus.py --out runs/ids_583_1582_clean
+# Chỉ thực hiện khi lượt tải đủ 1.000 checkpoint; output clean_next phải chưa tồn tại.
+.\.venv\Scripts\python.exe scripts/crawl_corpus.py reprocess --source-run runs/ids_583_1582 --out runs/ids_583_1582_clean_next
+.\.venv\Scripts\python.exe scripts/audit_corpus.py --out runs/ids_583_1582_clean_next
+.\.venv\Scripts\python.exe scripts/export_corpus.py --out runs/ids_583_1582_clean_next
 ```
 
 Reprocess v4 không truy cập mạng; giữ nguyên mẫu ID/URL/raw, bỏ mã Word trong HTML comments, thêm cờ các bài chủ yếu là ảnh. Nếu thư mục clean đã có kết quả, chỉ chạy `report`/`audit_corpus.py`, hoặc chọn tên phiên bản khác khi cần reprocess lần nữa.
@@ -71,19 +71,19 @@ Không chạy hai lệnh `crawl` cùng một thư mục đồng thời. Snapshot
 
 | File | Vai trò |
 | --- | --- |
-| [`sample.jsonl`](runs/ids_583_1582/sample.jsonl) | 1.000 ID/URL gốc đã chốt |
-| [`manifest.json`](runs/ids_583_1582/manifest.json) | Hash Parquet và mẫu, giới hạn ID |
-| [`reuse_manifest.json`](runs/ids_583_1582/reuse_manifest.json) | Nguồn và 8 ID đã reuse |
-| [`corpus.parquet`](runs/ids_583_1582_clean/corpus.parquet) | Corpus gọn 976 tài liệu, ID int64, thuận tiện để đọc bằng PyArrow |
-| [`corpus.jsonl`](runs/ids_583_1582_clean/corpus.jsonl) | Cùng corpus gọn ở dạng JSONL UTF-8 |
-| [`corpus.accepted.jsonl`](runs/ids_583_1582_clean/corpus.accepted.jsonl) | Corpus v4 ứng viên qua kiểm tra tự động |
-| [`documents.jsonl`](runs/ids_583_1582_clean/documents.jsonl) | Toàn bộ kết quả extraction v4, kèm quality flags |
-| [`quarantine.jsonl`](runs/ids_583_1582_clean/quarantine.jsonl) | Trang lỗi hoặc cần review |
-| [`QUALITY_REPORT.md`](runs/ids_583_1582_clean/QUALITY_REPORT.md) | Báo cáo kết quả sau sửa parser |
-| [`quality_report.json`](runs/ids_583_1582_clean/quality_report.json) | Thống kê chi tiết máy đọc |
+| [`sample.jsonl`](../../runs/ids_583_1582/sample.jsonl) | 1.000 ID/URL gốc đã chốt |
+| [`manifest.json`](../../runs/ids_583_1582/manifest.json) | Hash Parquet và mẫu, giới hạn ID |
+| [`reuse_manifest.json`](../../runs/ids_583_1582/reuse_manifest.json) | Nguồn và 8 ID đã reuse |
+| [`corpus.parquet`](../../runs/ids_583_1582_clean/corpus.parquet) | Corpus gọn 976 tài liệu, ID int64, thuận tiện để đọc bằng PyArrow |
+| [`corpus.jsonl`](../../runs/ids_583_1582_clean/corpus.jsonl) | Cùng corpus gọn ở dạng JSONL UTF-8 |
+| [`corpus.accepted.jsonl`](../../runs/ids_583_1582_clean/corpus.accepted.jsonl) | Corpus v4 ứng viên qua kiểm tra tự động |
+| [`documents.jsonl`](../../runs/ids_583_1582_clean/documents.jsonl) | Toàn bộ kết quả extraction v4, kèm quality flags |
+| [`quarantine.jsonl`](../../runs/ids_583_1582_clean/quarantine.jsonl) | Trang lỗi hoặc cần review |
+| [`QUALITY_REPORT.md`](../../runs/ids_583_1582_clean/QUALITY_REPORT.md) | Báo cáo kết quả sau sửa parser |
+| [`quality_report.json`](../../runs/ids_583_1582_clean/quality_report.json) | Thống kê chi tiết máy đọc |
 | `records/`, `raw/`, `robots/` | Checkpoint, body nguồn nén gzip và bằng chứng tải |
 
-**Bản dùng tiếp:** các file tương ứng trong [`runs/ids_583_1582_clean`](runs/ids_583_1582_clean) sau reprocess. Bản clean bổ sung `AUDIT_REPORT.md`, `audit_summary.json`, `audit_cases.jsonl`, `review_100.jsonl` và `review_100.html` để đọc nguồn/đầu ra cạnh nhau. Phiếu 100 bài chưa có nhãn của người đánh giá; không tự báo là 100 bài đã được audit thủ công.
+**Bản dùng tiếp:** các file tương ứng trong [`runs/ids_583_1582_clean`](../../runs/ids_583_1582_clean) sau reprocess. Bản clean bổ sung `AUDIT_REPORT.md`, `audit_summary.json`, `audit_cases.jsonl`, `review_100.jsonl` và `review_100.html` để đọc nguồn/đầu ra cạnh nhau. Phiếu 100 bài chưa có nhãn của người đánh giá; không tự báo là 100 bài đã được audit thủ công.
 
 Không xóa ID khi text trùng. Mọi tài liệu vẫn giữ ID nguyên của contest; nhóm trùng nằm riêng trong `duplicates.jsonl`.
 

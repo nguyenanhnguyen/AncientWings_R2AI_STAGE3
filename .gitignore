@@ -14,6 +14,10 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 
+# Generated crawl outputs and local scratch files
+/runs/
+/tmp/
+
 # Local environment secrets (keep example configuration trackable)
 .env
 .env.*

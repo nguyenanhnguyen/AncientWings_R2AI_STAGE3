@@ -22,11 +22,11 @@ ID/URL đã đối chiếu lại với Parquet nguồn. Raw và text đã kiểm
 
 ## Corpus dùng tiếp
 
-- **[corpus.parquet](runs/ids_583_1582_clean/corpus.parquet)**: 976 tài liệu, ID `int64`, khoảng 1,93 MB; đã kiểm tra đọc–ghi lại không đổi dữ liệu.
-- **[corpus.jsonl](runs/ids_583_1582_clean/corpus.jsonl)**: cùng 976 tài liệu, khoảng 5,82 MB; UTF-8, mỗi record trên một dòng LF/CRLF.
-- [export_manifest.json](runs/ids_583_1582_clean/export_manifest.json): số bản ghi, dung lượng và SHA-256 hai file.
-- [documents.jsonl](runs/ids_583_1582_clean/documents.jsonl): đủ 1.000 kết quả extraction và metadata/quality flags, gồm cả bản rỗng.
-- [quarantine.jsonl](runs/ids_583_1582_clean/quarantine.jsonl): 24 ID chưa được đưa vào corpus accepted.
+- **[corpus.parquet](../../runs/ids_583_1582_clean/corpus.parquet)**: 976 tài liệu, ID `int64`, khoảng 1,93 MB; đã kiểm tra đọc–ghi lại không đổi dữ liệu.
+- **[corpus.jsonl](../../runs/ids_583_1582_clean/corpus.jsonl)**: cùng 976 tài liệu, khoảng 5,82 MB; UTF-8, mỗi record trên một dòng LF/CRLF.
+- [export_manifest.json](../../runs/ids_583_1582_clean/export_manifest.json): số bản ghi, dung lượng và SHA-256 hai file.
+- [documents.jsonl](../../runs/ids_583_1582_clean/documents.jsonl): đủ 1.000 kết quả extraction và metadata/quality flags, gồm cả bản rỗng.
+- [quarantine.jsonl](../../runs/ids_583_1582_clean/quarantine.jsonl): 24 ID chưa được đưa vào corpus accepted.
 
 Schema gọn gồm `id`, `url`, `final_url`, `title`, `text`, `domain`, `extractor`, `published_at`, `raw_path`, `raw_sha256`, `text_sha256`, `duplicate_doc_ids`. Nội dung trùng vẫn giữ ID gốc riêng; bản raw/checkpoint và request trace nằm trong thư mục run.
 
@@ -65,9 +65,9 @@ Hai nhóm trùng text: `[801, 1453]` và `[1350, 1351]`. Nhóm đầu là nội 
 ## Báo cáo và khả năng tái lập
 
 - [Pipeline tổng thể](CRAWL_PIPELINE.md) và [lệnh chạy đúng 1.000 ID](CRAWL_1000_IDS.md).
-- [Báo cáo crawl tự động](runs/ids_583_1582_clean/QUALITY_REPORT.md).
-- [Báo cáo kiểm tra offline](runs/ids_583_1582_clean/AUDIT_REPORT.md), [chi tiết từng ID](runs/ids_583_1582_clean/audit_cases.jsonl).
-- [Phiếu đọc nguồn và corpus cạnh nhau](runs/ids_583_1582_clean/review_100.html), [phiếu chấm 100 bài](runs/ids_583_1582_clean/review_100.jsonl). Phiếu chưa có nhãn của người đánh giá.
+- [Báo cáo crawl tự động](../../runs/ids_583_1582_clean/QUALITY_REPORT.md).
+- [Báo cáo kiểm tra offline](../../runs/ids_583_1582_clean/AUDIT_REPORT.md), [chi tiết từng ID](../../runs/ids_583_1582_clean/audit_cases.jsonl).
+- [Phiếu đọc nguồn và corpus cạnh nhau](../../runs/ids_583_1582_clean/review_100.html), [phiếu chấm 100 bài](../../runs/ids_583_1582_clean/review_100.jsonl). Phiếu chưa có nhãn của người đánh giá.
 - Run tải gốc: `runs/ids_583_1582`; run làm sạch: `runs/ids_583_1582_clean`. Raw gzip của bản clean chiếm 55.591.476 byte. Mã nguồn crawler và dependency lock đã lưu cùng bản clean.
 
 Các artifact sinh ra nằm trong `runs/` và được `.gitignore` bỏ qua; tài liệu, code và dependency files có thể đưa vào Git. Không có bước train/index trong công việc này.
