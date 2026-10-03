@@ -1,5 +1,7 @@
 # Local documents
 *.pdf
+!#17 - Reranking và đánh giá retrieval.pdf
+!#19 - GraphRAG - Từ văn bản tới Knowledge Graph.pdf
 
 # Codex / project memory
 *_MEMORY.md
