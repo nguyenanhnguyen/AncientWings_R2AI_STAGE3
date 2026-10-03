@@ -1,0 +1,24 @@
+# Local documents
+*.pdf
+
+# Codex / project memory
+*_MEMORY.md
+
+# Python environments and generated caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local environment secrets (keep example configuration trackable)
+.env
+.env.*
+!.env.example
+
+# Operating system metadata
+.DS_Store
+Thumbs.db
