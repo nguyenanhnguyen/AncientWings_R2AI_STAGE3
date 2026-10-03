@@ -54,6 +54,7 @@ class KaggleNotebookTests(unittest.TestCase):
                     exec(self.code[1], namespace)
                     self.assertEqual(install.call_count, 1)
                 exec(self.code[2], namespace)
+                self.assertTrue(namespace['diagnostics_archive'].is_file())
                 for snapshot, module in [('crawler_snapshot.py', 'crawler.py'),
                                          ('audit_snapshot.py', 'audit.py'),
                                          ('export_snapshot.py', 'export.py'),
@@ -62,6 +63,14 @@ class KaggleNotebookTests(unittest.TestCase):
                                      (ROOT / 'src/vibiomir/crawl' / module).read_bytes())
                 namespace['SOURCE_SHA256'] = hashlib.sha256(fixture.read_bytes()).hexdigest()
                 namespace['SOURCE_PARQUET'] = str(fixture)
+                valid_hash = namespace['SOURCE_SHA256']
+                namespace['SOURCE_SHA256'] = 'wrong_hash'
+                with self.assertRaisesRegex(ValueError, 'Parquet'):
+                    exec(self.code[3], namespace)
+                with zipfile.ZipFile(namespace['diagnostics_archive']) as archive:
+                    self.assertIn('logs/notebook_errors.log', archive.namelist())
+                    self.assertIn(b'ValueError', archive.read('logs/notebook_errors.log'))
+                namespace['SOURCE_SHA256'] = valid_hash
                 exec(self.code[3], namespace)
                 exec(self.code[4], namespace)
                 self.assertEqual([r['id'] for r in namespace['selected']], [583, 585])
@@ -88,6 +97,7 @@ class KaggleNotebookTests(unittest.TestCase):
                 self.assertFalse((run / 'audit_summary.json').exists())
                 self.assertEqual(pq.read_table(run / 'corpus.parquet').num_rows, 1)
                 exec(self.code[7], namespace)
+                exec(self.code[8], namespace)
                 self.assertFalse(json.loads((run / 'notebook_manifest.json').read_text())['complete'])
                 with zipfile.ZipFile(namespace['diagnostics_archive']) as archive:
                     self.assertIsNone(archive.testzip())
@@ -96,6 +106,10 @@ class KaggleNotebookTests(unittest.TestCase):
                     self.assertEqual(diagnosis['pending'], 1)
                     self.assertIn('overview.html', archive.namelist())
                     self.assertIn('logs/pip_install.log', archive.namelist())
+                    self.assertIn('environment.json', archive.namelist())
+                    self.assertIn('code/crawler_snapshot.py', archive.namelist())
+                    self.assertIn('samples/records/583.json', archive.namelist())
+                    self.assertTrue(any(name.startswith('samples/raw/') for name in archive.namelist()))
                     self.assertFalse(any(name.startswith('raw/') or name.endswith('corpus.parquet') for name in archive.namelist()))
 
                 record = crawler.crawl_one(sample[1], OfflineFetcher(), run)
@@ -103,6 +117,7 @@ class KaggleNotebookTests(unittest.TestCase):
                 exec(self.code[5], namespace)  # Both checkpoints exist: zero network requests.
                 exec(self.code[6], namespace)
                 exec(self.code[7], namespace)
+                exec(self.code[8], namespace)
                 self.assertEqual(namespace['summary']['pending'], 0)
                 with zipfile.ZipFile(namespace['diagnostics_archive']) as archive:
                     self.assertEqual(json.loads(archive.read('summary.json'))['pending'], 0)
@@ -113,12 +128,7 @@ class KaggleNotebookTests(unittest.TestCase):
                     self.assertIn(f'{run.name}/crawler_snapshot.py', archive.namelist())
                     self.assertIn(f'{run.name}/records/583.json', archive.namelist())
                 records_before = {p.name: p.read_bytes() for p in (run / 'records').glob('*.json')}
-                addon = (ROOT / 'notebooks/kaggle_diagnostics_cell.py').read_text(encoding='utf-8')
-                addon = addon.replace("Path('/kaggle/working/runs/ids_1583_2582')", f'Path({str(run)!r})')
-                addon_namespace = {}
-                exec(addon, addon_namespace)
-                self.assertEqual(addon_namespace['diagnostic_summary']['completed'], 2)
-                self.assertTrue(addon_namespace['diagnostic_zip'].is_file())
+                self.assertEqual(namespace['diagnostic_summary']['completed'], 2)
 
                 restore_config = configuration.replace('RUN_TAG = None', "RUN_TAG = 'restored'")
                 restore_config = restore_config.replace('RESUME_RUN_PATH = None', f'RESUME_RUN_PATH = {str(run)!r}')

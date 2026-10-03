@@ -64,8 +64,13 @@ class DiagnosticsTests(unittest.TestCase):
                 self.assertIn('&lt;script&gt;timeout&lt;/script&gt;', html)
                 rows = list(csv.DictReader(io.StringIO(bundle.read('pending.csv').decode('utf-8-sig'))))
                 self.assertEqual([row['id'] for row in rows], ['12'])
-                for name in bundle.namelist():
+                for name in ('overview.html', 'records.csv', 'summary.json'):
                     self.assertNotIn(b'FULL_TEXT_MUST_NOT_BE_IN_DIAGNOSTICS', bundle.read(name))
+                self.assertIn('samples/records/10.json', bundle.namelist())
+                cases = json.loads(bundle.read('sample_manifest.json'))
+                self.assertEqual(len(cases), 2)
+                self.assertFalse(cases[0]['raw_included'])
+                self.assertIn('environment.json', bundle.namelist())
             self.assertEqual(before, {p.name: p.read_bytes() for p in (run / 'records').glob('*.json')})
 
     def test_active_invocation_eta(self):

@@ -5,8 +5,11 @@ import csv
 from datetime import datetime, timezone
 import html
 import io
+import importlib.metadata
 import json
 from pathlib import Path
+import platform
+import sys
 import zipfile
 
 
@@ -136,7 +139,7 @@ def build_archive(out, archive):
         '<style>body{font:15px system-ui;margin:24px;line-height:1.5}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:7px;text-align:left;vertical-align:top}td{overflow-wrap:anywhere}pre{white-space:pre-wrap}summary{cursor:pointer}</style>',
         f'<h1>Chẩn đoán crawl — {html.escape(out.name)}</h1>',
         f'<p>Snapshot: {html.escape(now.isoformat())}. Hoàn tất {len(records)}/{len(sample)}; còn chờ {len(pending)}.</p>',
-        '<p>Extracted là đã chạy extractor; accepted là qua kiểm tra tự động. File này không chứa raw hoặc toàn văn corpus.</p>',
+        '<p>Extracted là đã chạy extractor; accepted là qua kiểm tra tự động. ZIP có một số mẫu record/raw để debug, không chứa toàn bộ corpus.</p>',
         '<p>Đây là snapshot tại thời điểm tạo ZIP; dữ liệu có thể tiếp tục thay đổi khi crawler đang chạy.</p>',
         '<h2>Tốc độ lượt crawl gần nhất</h2><pre>' + html.escape(json.dumps(timing, ensure_ascii=False, indent=2)) + '</pre>',
         '<h2>Trang cần xem lại / lỗi / có cờ</h2>',
@@ -155,16 +158,28 @@ Mở `overview.html` sau khi giải nén để xem tổng quan.
 - `flagged.csv`: lỗi, review/rejected, các bản ghi có cờ hoặc thiếu raw.
 - `pending.csv`: ID/URL chưa có checkpoint ở thời điểm tạo ZIP.
 - `requests.csv`: thời điểm request, retry, HTTP status và lỗi theo ID.
+- `redirects.csv`: chuỗi chuyển hướng theo ID.
+- `environment.json`: Python, hệ điều hành và phiên bản thư viện.
+- `code/`: snapshot crawler, audit, export và diagnostics đang dùng.
+- `samples/`: tối đa 5 bản ghi có cờ/lỗi và 5 bản ghi khác, kèm raw nếu có; xem sample_manifest.json.
+- `robots/`: tối đa 10 bằng chứng robots.txt, mỗi file tối đa 1 MiB.
 - `metadata/`: manifest, cấu hình và báo cáo có sẵn; báo cáo có thể cũ hơn snapshot khi run đang chạy.
 - `logs/`: log cài dependencies, lệnh chạy và tiến độ (tối đa 1 MiB cuối mỗi log).
 
-ZIP này không chứa raw, toàn văn document hoặc index/model. `elapsed_seconds` trong records.csv
+ZIP chỉ chứa một số mẫu record/raw để debug, không chứa toàn bộ corpus. Raw mẫu có tổng ngân sách 10 MiB;
+mỗi JSON record mẫu tối đa 1 MiB. `elapsed_seconds` trong records.csv
 bao gồm cả chờ khóa/rate limit cùng domain; không dùng nó thay tốc độ toàn lượt crawl.
 ZIP không chạy lại crawler, không kiểm tra toàn bộ hash raw/text và không thay checkpoint.
 Hoàn tất: {len(records)}/{len(sample)}; còn chờ: {len(pending)}.
 '''
     archive.parent.mkdir(parents=True, exist_ok=True)
     temporary = archive.with_name(archive.name + '.tmp')
+    environment = {'python': sys.version, 'platform': platform.platform(), 'packages': {}}
+    for package in ('pyarrow', 'requests', 'trafilatura', 'pymupdf', 'tld'):
+        try:
+            environment['packages'][package] = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            environment['packages'][package] = None
     try:
         with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
             bundle.writestr('README.md', readme.encode('utf-8'))
@@ -174,6 +189,53 @@ Hoàn tất: {len(records)}/{len(sample)}; còn chờ: {len(pending)}.
             bundle.writestr('flagged.csv', csv_bytes(flagged, fields))
             bundle.writestr('pending.csv', csv_bytes(pending, ('id', 'url', 'domain')))
             bundle.writestr('requests.csv', csv_bytes(requests, ('id', 'url', 'at', 'attempt', 'http_status', 'error')))
+            redirects = []
+            chosen = flagged[:5]
+            chosen_ids = {row['id'] for row in chosen}
+            chosen += [row for row in records if row['id'] not in chosen_ids][:5]
+            chosen_ids = {row['id'] for row in chosen}
+            sampled = []
+            raw_budget = 10 * 1024 * 1024
+            included_raw = set()
+            for row in records:
+                record = read_json(out / 'records' / f"{row['id']}.json", warnings)
+                redirects.extend({'id': row['id'], **event} for event in record.get('redirects', []))
+                if row['id'] not in chosen_ids:
+                    continue
+                record_path = out / 'records' / f"{row['id']}.json"
+                case = {'id': row['id'], 'status': row['status'], 'quality_status': row['quality_status'],
+                        'record_included': False, 'raw_included': False}
+                if record_path.stat().st_size <= 1024 * 1024:
+                    bundle.write(record_path, f"samples/records/{row['id']}.json")
+                    case['record_included'] = True
+                else:
+                    case['record_skip_reason'] = 'record_exceeds_1_MiB'
+                if row.get('raw_path'):
+                    raw = (out / row['raw_path']).resolve()
+                    if raw.is_relative_to((out / 'raw').resolve()) and raw.is_file():
+                        relative = raw.relative_to(out.resolve()).as_posix()
+                        if relative in included_raw:
+                            case['raw_included'] = True
+                        elif raw.stat().st_size <= raw_budget:
+                            bundle.write(raw, 'samples/' + relative)
+                            raw_budget -= raw.stat().st_size
+                            included_raw.add(relative)
+                            case['raw_included'] = True
+                        else:
+                            case['raw_skip_reason'] = 'raw_budget_exceeded'
+                    else:
+                        case['raw_skip_reason'] = 'missing_or_outside_raw_directory'
+                sampled.append(case)
+            bundle.writestr('redirects.csv', csv_bytes(redirects, ('id', 'from', 'to', 'status')))
+            bundle.writestr('sample_manifest.json', json.dumps(sampled, ensure_ascii=False, indent=2).encode('utf-8'))
+            bundle.writestr('environment.json', json.dumps(environment, ensure_ascii=False, indent=2).encode('utf-8'))
+            for name in ('crawler_snapshot.py', 'audit_snapshot.py', 'export_snapshot.py', 'diagnostics_snapshot.py'):
+                path = out / name
+                if path.is_file():
+                    bundle.write(path, 'code/' + name)
+            for path in sorted((out / 'robots').glob('*.json'))[:10]:
+                if path.stat().st_size <= 1024 * 1024:
+                    bundle.write(path, 'robots/' + path.name)
             for name in ('manifest.json', 'crawl_config.json', 'source_profile.json', 'quality_report.json',
                          'QUALITY_REPORT.md', 'audit_summary.json', 'AUDIT_REPORT.md', 'notebook_manifest.json',
                          'notebook_requirements.txt', 'export_manifest.json'):

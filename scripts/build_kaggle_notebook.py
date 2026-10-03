@@ -14,12 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def build():
     cells = []
 
-    def add(kind, source, hidden=False):
+    def add(kind, source, hidden=False, step=None):
+        source = textwrap.dedent(source).strip() + '\n'
+        if kind == 'code' and step:
+            source = f'with diagnostic_step({step!r}):\n' + textwrap.indent(source, '    ')
         cell = {
             'cell_type': kind,
             'id': f'crawl-{len(cells):02d}',
             'metadata': {'jupyter': {'source_hidden': True}} if hidden else {},
-            'source': textwrap.dedent(source).strip() + '\n',
+            'source': source,
         }
         if kind == 'code':
             cell.update(execution_count=None, outputs=[])
@@ -29,6 +32,7 @@ def build():
         # Crawl corpus ViBioMIR trên Kaggle
 
         Notebook tự chứa code crawl, không cần clone repo hoặc upload file Python.
+        Phần chẩn đoán đã tích hợp: Output tự tạo `<run>_diagnostics.zip` để debug.
         Bật **Internet** trong cài đặt notebook; dùng CPU, không cần GPU.
         Chỉnh ô **1. Cấu hình**, rồi chạy các ô theo thứ tự.
 
@@ -173,6 +177,37 @@ def build():
             DIAGNOSTICS = RUN_DIR / 'diagnostics_snapshot.py'
             DIAGNOSTICS.write_bytes(diagnostic_body)
             diagnostics_archive = WORKDIR / f'{RUN_DIR.name}_diagnostics.zip'
+            from contextlib import contextmanager
+            import traceback
+            LOG_DIR = RUN_DIR / 'logs'
+            LOG_DIR.mkdir(exist_ok=True)
+
+            def refresh_diagnostics(strict=False):
+                try:
+                    result = subprocess.run(
+                        [sys.executable, '-u', str(DIAGNOSTICS), '--out', str(RUN_DIR), '--archive', str(diagnostics_archive)],
+                        check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, encoding='utf-8', errors='replace',
+                    )
+                    with (LOG_DIR / 'diagnostics.log').open('a', encoding='utf-8') as stream:
+                        stream.write(result.stdout)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    with (LOG_DIR / 'diagnostics.log').open('a', encoding='utf-8') as stream:
+                        stream.write(str(exc) + '\\n' + str(getattr(exc, 'output', '') or '') + '\\n')
+                    if strict:
+                        raise
+                    print(f'Tạo ZIP chẩn đoán thất bại: {exc}', flush=True)
+
+            @contextmanager
+            def diagnostic_step(name):
+                try:
+                    yield
+                except BaseException:
+                    with (LOG_DIR / 'notebook_errors.log').open('a', encoding='utf-8') as stream:
+                        stream.write(f'Bước: {name}\\n' + traceback.format_exc() + '\\n')
+                    raise
+                finally:
+                    refresh_diagnostics()
             if (RUN_DIR / 'crawl_config.json').exists():
                 saved_config = json.loads((RUN_DIR / 'crawl_config.json').read_text(encoding='utf-8'))
                 if hashlib.sha256(CRAWLER.read_bytes()).hexdigest() != saved_config['script_sha256']:
@@ -180,6 +215,7 @@ def build():
             if not requirements_path.exists():
                 requirements_path.write_text(''.join(f'{k}=={v}\\n' for k, v in versions.items()), encoding='utf-8')
             print('Đã chuẩn bị snapshot và ghi phiên bản dependencies.')
+            refresh_diagnostics()
         '''), hidden=True)
     add('markdown', '''
         ## 4. Tải hoặc đọc danh sách URL
@@ -222,7 +258,7 @@ def build():
         if sha256_file(SOURCE_PATH) != SOURCE_SHA256:
             raise ValueError('Parquet không khớp nguồn đã chốt. Kiểm tra file Input.')
         print(f'Nguồn hợp lệ: {SOURCE_PATH} ({SOURCE_PATH.stat().st_size:,} byte)')
-    ''')
+    ''', step='source')
     add('markdown', '''
         ## 5. Chọn ID và tạo manifest
 
@@ -256,19 +292,6 @@ def build():
         def log_event(name, event):
             with (LOG_DIR / name).open('a', encoding='utf-8') as stream:
                 stream.write(json.dumps(event, ensure_ascii=False) + '\\n')
-
-        def refresh_diagnostics():
-            if (RUN_DIR / 'manifest.json').exists():
-                try:
-                    result = subprocess.run(
-                        [sys.executable, '-u', str(DIAGNOSTICS), '--out', str(RUN_DIR), '--archive', str(diagnostics_archive)],
-                        check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, encoding='utf-8', errors='replace',
-                    )
-                    with (LOG_DIR / 'diagnostics.log').open('a', encoding='utf-8') as stream:
-                        stream.write(result.stdout)
-                except (OSError, subprocess.CalledProcessError) as exc:
-                    print(f'Tạo ZIP chẩn đoán thất bại: {exc}', flush=True)
 
         def run_script(script, *arguments):
             # Output hiển thị trực tiếp để theo dõi tiến độ; không dùng shell.
@@ -342,7 +365,7 @@ def build():
             if {r['id']: r['url'] for r in sample} != {r['id']: r['url'] for r in selected} or len(sample) != len(selected):
                 raise ValueError('ID/URL của run cũ không khớp khoảng chọn.')
             print('Manifest hợp lệ; giữ checkpoint để resume.')
-    ''')
+    ''', step='prepare')
     add('markdown', '''
         ## 6. Crawl — chạy lại ô này để tiếp tục
 
@@ -351,7 +374,7 @@ def build():
         `WORKERS = 4` không có nghĩa bốn request đồng thời đến cùng website.
         ID đã có checkpoint, kể cả thất bại, sẽ được bỏ qua khi resume.
         ZIP `<run>_diagnostics.zip` được cập nhật sau mỗi log tiến độ và khi lệnh kết thúc,
-        kể cả ngắt ô crawl. File chỉ chứa chẩn đoán gọn, không nén lại toàn bộ raw.
+        kể cả ngắt ô crawl. File có một số mẫu record/raw để debug, không nén lại toàn bộ raw.
     ''')
     add('code', '''
         arguments = ['crawl', '--out', RUN_DIR, '--workers', WORKERS,
@@ -360,7 +383,7 @@ def build():
             arguments += ['--max-new', MAX_NEW]
         print('ZIP chẩn đoán tự cập nhật:', diagnostics_archive)
         run_script(CRAWLER, *arguments)
-    ''')
+    ''', step='crawl')
     add('markdown', '''
         ## 7. Báo cáo, kiểm tra và xuất corpus
 
@@ -383,9 +406,33 @@ def build():
             display(corpus.select(['id', 'url', 'title']).slice(0, 5).to_pylist())
         else:
             print('Chưa có tài liệu accepted; xem quarantine.jsonl và QUALITY_REPORT.md.')
+    ''', step='report_audit_export')
+    add('markdown', '''
+        ## 8. ZIP chẩn đoán — tích hợp trong Output
+
+        Chạy ô này để tạo lại gói debug từ checkpoint hiện có, kể cả khi crawl chưa xong.
+        Không cần file Python riêng, không tải lại URL. ZIP chứa:
+        - `overview.html`, `summary.json`: tiến độ, tốc độ/ETA, trạng thái HTTP và QC.
+        - CSV từng ID, lỗi/pending, request/retry và redirect.
+        - Log pip/crawl, traceback notebook, manifest/cấu hình và phiên bản môi trường.
+        - Snapshot code, bằng chứng robots và tối đa 10 mẫu record/raw để kiểm tra parser.
+
+        Raw mẫu có ngân sách 10 MiB; các mẫu bị bỏ qua được ghi trong `sample_manifest.json`.
+        Giải nén ZIP và mở `overview.html`. Có thể gửi nguyên ZIP này để chẩn đoán lỗi.
+    ''')
+    add('code', '''
+        from IPython.display import FileLink
+        import zipfile
+
+        refresh_diagnostics(strict=True)
+        with zipfile.ZipFile(diagnostics_archive) as diagnostic_bundle:
+            diagnostic_summary = json.loads(diagnostic_bundle.read('summary.json'))
+        display({key: diagnostic_summary[key] for key in ['selected', 'completed', 'pending', 'quality_status_counts', 'timing']})
+        print('ZIP chẩn đoán trong Output:', diagnostics_archive)
+        display(FileLink(str(diagnostics_archive.relative_to(WORKDIR))))
     ''')
     add('markdown', '''
-        ## 8. Đóng gói để tải về
+        ## 9. Đóng gói corpus đầy đủ để tải về
 
         ZIP chứa cả raw, records, snapshot code và corpus để truy vết/resume; có thể khá lớn.
         ZIP riêng `<run>_diagnostics.zip` nhỏ hơn: giải nén và mở `overview.html` để xem
@@ -407,7 +454,7 @@ def build():
             'exported_files': [name for name in ['corpus.parquet', 'corpus.jsonl'] if (RUN_DIR / name).exists()],
         }
         (RUN_DIR / 'notebook_manifest.json').write_text(json.dumps(notebook_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-        refresh_diagnostics()
+        refresh_diagnostics(strict=True)
         archive = shutil.make_archive(str(WORKDIR / RUN_DIR.name), 'zip', root_dir=RUN_DIR.parent, base_dir=RUN_DIR.name)
         print('ZIP:', archive)
         print('Corpus:', RUN_DIR / 'corpus.parquet')
@@ -431,35 +478,6 @@ def build():
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(notebook, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(output)
-    # Standalone cell for an existing Kaggle run; no crawler restart or pip install.
-    addon = textwrap.dedent('''
-        # Dán toàn bộ file này vào một ô Python mới sau khi crawl xong.
-        # Chỉnh RUN_DIR nếu dùng dải ID khác.
-        from pathlib import Path
-        import base64
-        import zlib
-        from IPython.display import display, FileLink
-
-        RUN_DIR = Path('/kaggle/working/runs/ids_1583_2582')
-        if not (RUN_DIR / 'manifest.json').is_file():
-            raise FileNotFoundError(f'Không có manifest.json trong {RUN_DIR}; chỉnh lại RUN_DIR.')
-    ''').strip() + '\n\n'
-    addon += 'DIAGNOSTICS_B85 = ' + repr(embedded['diagnostics_snapshot.py']) + '\n'
-    addon += textwrap.dedent('''
-
-        diagnostic_namespace = {'__name__': 'kaggle_diagnostics_addon'}
-        exec(compile(zlib.decompress(base64.b85decode(DIAGNOSTICS_B85)).decode('utf-8'),
-                     '<diagnostics_addon>', 'exec'), diagnostic_namespace)
-        diagnostic_zip = RUN_DIR.parent.parent / f'{RUN_DIR.name}_diagnostics.zip'
-        diagnostic_summary = diagnostic_namespace['build_archive'](RUN_DIR, diagnostic_zip)
-        display({key: diagnostic_summary[key] for key in ['selected', 'completed', 'pending', 'quality_status_counts', 'timing']})
-        print('ZIP chẩn đoán:', diagnostic_zip)
-        print('Giải nén và mở overview.html để xem. Có thể tải ZIP từ Output.')
-        display(FileLink(str(diagnostic_zip.relative_to(RUN_DIR.parent.parent))))
-    ''')
-    addon_path = ROOT / 'notebooks/kaggle_diagnostics_cell.py'
-    addon_path.write_text(addon, encoding='utf-8')
-    print(addon_path)
 
 
 if __name__ == '__main__':
