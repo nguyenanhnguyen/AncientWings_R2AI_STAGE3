@@ -50,12 +50,14 @@ class KaggleNotebookTests(unittest.TestCase):
             with patch.dict(sys.modules, {'IPython.display': display_module}), redirect_stdout(io.StringIO()):
                 exec(configuration, namespace)
                 with patch('subprocess.run') as install:
+                    install.return_value = types.SimpleNamespace(stdout='Offline installer fixture\\n', returncode=0)
                     exec(self.code[1], namespace)
                     self.assertEqual(install.call_count, 1)
                 exec(self.code[2], namespace)
                 for snapshot, module in [('crawler_snapshot.py', 'crawler.py'),
                                          ('audit_snapshot.py', 'audit.py'),
-                                         ('export_snapshot.py', 'export.py')]:
+                                         ('export_snapshot.py', 'export.py'),
+                                         ('diagnostics_snapshot.py', 'diagnostics.py')]:
                     self.assertEqual((namespace['RUN_DIR'] / snapshot).read_bytes(),
                                      (ROOT / 'src/vibiomir/crawl' / module).read_bytes())
                 namespace['SOURCE_SHA256'] = hashlib.sha256(fixture.read_bytes()).hexdigest()
@@ -87,6 +89,14 @@ class KaggleNotebookTests(unittest.TestCase):
                 self.assertEqual(pq.read_table(run / 'corpus.parquet').num_rows, 1)
                 exec(self.code[7], namespace)
                 self.assertFalse(json.loads((run / 'notebook_manifest.json').read_text())['complete'])
+                with zipfile.ZipFile(namespace['diagnostics_archive']) as archive:
+                    self.assertIsNone(archive.testzip())
+                    diagnosis = json.loads(archive.read('summary.json'))
+                    self.assertEqual(diagnosis['completed'], 1)
+                    self.assertEqual(diagnosis['pending'], 1)
+                    self.assertIn('overview.html', archive.namelist())
+                    self.assertIn('logs/pip_install.log', archive.namelist())
+                    self.assertFalse(any(name.startswith('raw/') or name.endswith('corpus.parquet') for name in archive.namelist()))
 
                 record = crawler.crawl_one(sample[1], OfflineFetcher(), run)
                 self.assertEqual(record['quality_status'], 'accepted')
@@ -94,6 +104,8 @@ class KaggleNotebookTests(unittest.TestCase):
                 exec(self.code[6], namespace)
                 exec(self.code[7], namespace)
                 self.assertEqual(namespace['summary']['pending'], 0)
+                with zipfile.ZipFile(namespace['diagnostics_archive']) as archive:
+                    self.assertEqual(json.loads(archive.read('summary.json'))['pending'], 0)
                 self.assertTrue((run / 'audit_summary.json').exists())
                 self.assertEqual(pq.read_table(run / 'corpus.parquet')['id'].to_pylist(), [583, 585])
                 with zipfile.ZipFile(namespace['archive']) as archive:
@@ -101,12 +113,19 @@ class KaggleNotebookTests(unittest.TestCase):
                     self.assertIn(f'{run.name}/crawler_snapshot.py', archive.namelist())
                     self.assertIn(f'{run.name}/records/583.json', archive.namelist())
                 records_before = {p.name: p.read_bytes() for p in (run / 'records').glob('*.json')}
+                addon = (ROOT / 'notebooks/kaggle_diagnostics_cell.py').read_text(encoding='utf-8')
+                addon = addon.replace("Path('/kaggle/working/runs/ids_1583_2582')", f'Path({str(run)!r})')
+                addon_namespace = {}
+                exec(addon, addon_namespace)
+                self.assertEqual(addon_namespace['diagnostic_summary']['completed'], 2)
+                self.assertTrue(addon_namespace['diagnostic_zip'].is_file())
 
                 restore_config = configuration.replace('RUN_TAG = None', "RUN_TAG = 'restored'")
                 restore_config = restore_config.replace('RESUME_RUN_PATH = None', f'RESUME_RUN_PATH = {str(run)!r}')
                 restored = {}
                 exec(restore_config, restored)
                 with patch('subprocess.run') as install:
+                    install.return_value = types.SimpleNamespace(stdout='', returncode=0)
                     exec(self.code[1], restored)
                     self.assertIn('-r', install.call_args.args[0])
                 exec(self.code[2], restored)

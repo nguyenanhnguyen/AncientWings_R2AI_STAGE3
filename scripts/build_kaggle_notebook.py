@@ -120,7 +120,18 @@ def build():
             install_args = ['-r', str(requirements_path)]
         else:
             install_args = package_names
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', *install_args], check=True)
+        RUN_DIR.mkdir(parents=True, exist_ok=True)
+        (RUN_DIR / 'logs').mkdir(exist_ok=True)
+        installation = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '--quiet', *install_args],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
+        )
+        with (RUN_DIR / 'logs' / 'pip_install.log').open('a', encoding='utf-8') as log:
+            log.write(installation.stdout or '')
+        if installation.stdout:
+            print(installation.stdout)
+        if installation.returncode:
+            raise subprocess.CalledProcessError(installation.returncode, installation.args, output=installation.stdout)
         versions = {name: importlib.metadata.version(name) for name in package_names}
         print(json.dumps(versions, indent=2))
     ''')
@@ -135,7 +146,8 @@ def build():
     hashes = {}
     for name, module in [('crawler_snapshot.py', 'crawler.py'),
                          ('audit_snapshot.py', 'audit.py'),
-                         ('export_snapshot.py', 'export.py')]:
+                         ('export_snapshot.py', 'export.py'),
+                         ('diagnostics_snapshot.py', 'diagnostics.py')]:
         raw = (ROOT / 'src/vibiomir/crawl' / module).read_bytes()
         embedded[name] = base64.b85encode(zlib.compress(raw, level=9)).decode('ascii')
         hashes[name] = hashlib.sha256(raw).hexdigest()
@@ -154,6 +166,13 @@ def build():
             CRAWLER = RUN_DIR / 'crawler_snapshot.py'
             AUDITOR = RUN_DIR / 'audit_snapshot.py'
             EXPORTER = RUN_DIR / 'export_snapshot.py'
+            # Diagnostics chỉ đọc output, có thể cập nhật riêng mà không đổi crawler/hash resume.
+            diagnostic_body = zlib.decompress(base64.b85decode(EMBEDDED_FILES['diagnostics_snapshot.py']))
+            if hashlib.sha256(diagnostic_body).hexdigest() != EMBEDDED_SHA256['diagnostics_snapshot.py']:
+                raise ValueError('Snapshot diagnostics bị hỏng.')
+            DIAGNOSTICS = RUN_DIR / 'diagnostics_snapshot.py'
+            DIAGNOSTICS.write_bytes(diagnostic_body)
+            diagnostics_archive = WORKDIR / f'{RUN_DIR.name}_diagnostics.zip'
             if (RUN_DIR / 'crawl_config.json').exists():
                 saved_config = json.loads((RUN_DIR / 'crawl_config.json').read_text(encoding='utf-8'))
                 if hashlib.sha256(CRAWLER.read_bytes()).hexdigest() != saved_config['script_sha256']:
@@ -216,6 +235,9 @@ def build():
         from collections import Counter
         from urllib.parse import urlsplit
         from IPython.display import display
+        from datetime import datetime, timezone
+        import time
+        import uuid
 
         selected = pq.read_table(SOURCE_PATH, filters=[('id', '>=', ID_FROM), ('id', '<=', ID_TO)]).to_pylist()
         selected.sort(key=lambda row: row['id'])
@@ -228,16 +250,59 @@ def build():
         print('Phân bố hostname:', dict(Counter(urlsplit(row['url']).hostname for row in selected)))
         display(selected[:5])
 
+        LOG_DIR = RUN_DIR / 'logs'
+        LOG_DIR.mkdir(exist_ok=True)
+
+        def log_event(name, event):
+            with (LOG_DIR / name).open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps(event, ensure_ascii=False) + '\\n')
+
+        def refresh_diagnostics():
+            if (RUN_DIR / 'manifest.json').exists():
+                try:
+                    result = subprocess.run(
+                        [sys.executable, '-u', str(DIAGNOSTICS), '--out', str(RUN_DIR), '--archive', str(diagnostics_archive)],
+                        check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, encoding='utf-8', errors='replace',
+                    )
+                    with (LOG_DIR / 'diagnostics.log').open('a', encoding='utf-8') as stream:
+                        stream.write(result.stdout)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    print(f'Tạo ZIP chẩn đoán thất bại: {exc}', flush=True)
+
         def run_script(script, *arguments):
             # Output hiển thị trực tiếp để theo dõi tiến độ; không dùng shell.
+            invocation_id = uuid.uuid4().hex
+            started = time.monotonic()
+            operation = str(arguments[0]) if script == CRAWLER else Path(script).stem
+            log_event('invocations.jsonl', {
+                'event': 'start', 'invocation_id': invocation_id, 'operation': operation,
+                'at': datetime.now(timezone.utc).isoformat(), 'arguments': list(map(str, arguments)),
+            })
             process = subprocess.Popen(
                 [sys.executable, '-u', str(script), *map(str, arguments)],
                 cwd=str(WORKDIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding='utf-8', errors='replace', bufsize=1,
             )
+            returncode = None
             try:
-                for line in process.stdout:
-                    print(line, end='', flush=True)
+                with (LOG_DIR / (Path(script).stem + '.log')).open('a', encoding='utf-8') as log:
+                    for line in process.stdout:
+                        print(line, end='', flush=True)
+                        log.write(line)
+                        log.flush()
+                        if operation == 'crawl':
+                            try:
+                                progress = json.loads(line)
+                            except ValueError:
+                                progress = {}
+                            if isinstance(progress, dict) and 'completed_this_invocation' in progress:
+                                log_event('progress.jsonl', {
+                                    **progress, 'invocation_id': invocation_id,
+                                    'at': datetime.now(timezone.utc).isoformat(),
+                                    'elapsed_seconds': time.monotonic() - started,
+                                })
+                                refresh_diagnostics()
                 returncode = process.wait()
             except BaseException:
                 process.terminate()
@@ -249,6 +314,13 @@ def build():
                 raise
             finally:
                 process.stdout.close()
+                log_event('invocations.jsonl', {
+                    'event': 'end', 'invocation_id': invocation_id, 'operation': operation,
+                    'at': datetime.now(timezone.utc).isoformat(),
+                    'elapsed_seconds': time.monotonic() - started,
+                    'returncode': process.returncode,
+                })
+                refresh_diagnostics()
             if returncode:
                 raise subprocess.CalledProcessError(returncode, process.args)
 
@@ -278,12 +350,15 @@ def build():
         giới hạn một request cùng registered domain, có retry và checkpoint theo ID.
         `WORKERS = 4` không có nghĩa bốn request đồng thời đến cùng website.
         ID đã có checkpoint, kể cả thất bại, sẽ được bỏ qua khi resume.
+        ZIP `<run>_diagnostics.zip` được cập nhật sau mỗi log tiến độ và khi lệnh kết thúc,
+        kể cả ngắt ô crawl. File chỉ chứa chẩn đoán gọn, không nén lại toàn bộ raw.
     ''')
     add('code', '''
         arguments = ['crawl', '--out', RUN_DIR, '--workers', WORKERS,
                      '--delay', DELAY, '--attempts', ATTEMPTS]
         if MAX_NEW is not None:
             arguments += ['--max-new', MAX_NEW]
+        print('ZIP chẩn đoán tự cập nhật:', diagnostics_archive)
         run_script(CRAWLER, *arguments)
     ''')
     add('markdown', '''
@@ -313,6 +388,8 @@ def build():
         ## 8. Đóng gói để tải về
 
         ZIP chứa cả raw, records, snapshot code và corpus để truy vết/resume; có thể khá lớn.
+        ZIP riêng `<run>_diagnostics.zip` nhỏ hơn: giải nén và mở `overview.html` để xem
+        tiến độ, tốc độ/ETA, HTTP status, lỗi và cờ chất lượng. Có CSV từng ID và log cài dependencies.
         Tải file trong Output hoặc qua link bên dưới. Khi đổi session, cần giữ output hoặc
         thêm run đã giải nén làm Kaggle Input và đặt `RESUME_RUN_PATH` trước khi chạy lại.
         Resume không tự thử lại ID lỗi đã có checkpoint.
@@ -330,10 +407,13 @@ def build():
             'exported_files': [name for name in ['corpus.parquet', 'corpus.jsonl'] if (RUN_DIR / name).exists()],
         }
         (RUN_DIR / 'notebook_manifest.json').write_text(json.dumps(notebook_manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+        refresh_diagnostics()
         archive = shutil.make_archive(str(WORKDIR / RUN_DIR.name), 'zip', root_dir=RUN_DIR.parent, base_dir=RUN_DIR.name)
         print('ZIP:', archive)
         print('Corpus:', RUN_DIR / 'corpus.parquet')
         display(FileLink(str(Path(archive).relative_to(WORKDIR))))
+        print('ZIP chẩn đoán:', diagnostics_archive)
+        display(FileLink(str(diagnostics_archive.relative_to(WORKDIR))))
         if (RUN_DIR / 'corpus.parquet').exists():
             display(FileLink(str((RUN_DIR / 'corpus.parquet').relative_to(WORKDIR))))
             display(FileLink(str((RUN_DIR / 'corpus.jsonl').relative_to(WORKDIR))))
@@ -351,6 +431,35 @@ def build():
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(notebook, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(output)
+    # Standalone cell for an existing Kaggle run; no crawler restart or pip install.
+    addon = textwrap.dedent('''
+        # Dán toàn bộ file này vào một ô Python mới sau khi crawl xong.
+        # Chỉnh RUN_DIR nếu dùng dải ID khác.
+        from pathlib import Path
+        import base64
+        import zlib
+        from IPython.display import display, FileLink
+
+        RUN_DIR = Path('/kaggle/working/runs/ids_1583_2582')
+        if not (RUN_DIR / 'manifest.json').is_file():
+            raise FileNotFoundError(f'Không có manifest.json trong {RUN_DIR}; chỉnh lại RUN_DIR.')
+    ''').strip() + '\n\n'
+    addon += 'DIAGNOSTICS_B85 = ' + repr(embedded['diagnostics_snapshot.py']) + '\n'
+    addon += textwrap.dedent('''
+
+        diagnostic_namespace = {'__name__': 'kaggle_diagnostics_addon'}
+        exec(compile(zlib.decompress(base64.b85decode(DIAGNOSTICS_B85)).decode('utf-8'),
+                     '<diagnostics_addon>', 'exec'), diagnostic_namespace)
+        diagnostic_zip = RUN_DIR.parent.parent / f'{RUN_DIR.name}_diagnostics.zip'
+        diagnostic_summary = diagnostic_namespace['build_archive'](RUN_DIR, diagnostic_zip)
+        display({key: diagnostic_summary[key] for key in ['selected', 'completed', 'pending', 'quality_status_counts', 'timing']})
+        print('ZIP chẩn đoán:', diagnostic_zip)
+        print('Giải nén và mở overview.html để xem. Có thể tải ZIP từ Output.')
+        display(FileLink(str(diagnostic_zip.relative_to(RUN_DIR.parent.parent))))
+    ''')
+    addon_path = ROOT / 'notebooks/kaggle_diagnostics_cell.py'
+    addon_path.write_text(addon, encoding='utf-8')
+    print(addon_path)
 
 
 if __name__ == '__main__':
