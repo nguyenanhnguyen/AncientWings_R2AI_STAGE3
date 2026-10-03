@@ -7,6 +7,7 @@ Repo phục vụ pipeline RAG của dự án ViBioMIR. Phần đã triển khai 
 ```text
 src/vibiomir/crawl/   Logic crawl, extraction, audit và export
 scripts/             Lệnh chạy, gọi code trong src/
+notebooks/           Notebook crawl độc lập trên Kaggle
 tests/               Kiểm tra phần crawl đã triển khai
 requirements/        Dependencies crawl và bản khóa phiên bản
 docs/crawl/          Thiết kế, hướng dẫn chạy và kết quả crawl
@@ -17,6 +18,12 @@ tmp/                 File tạm local (ngoài Git)
 ```
 
 Các thư mục dành cho RAG/train sẽ được bổ sung khi có implementation. Logic hiện có được chuyển nguyên nội dung vào `src/vibiomir/crawl/`; các script chỉ là điểm chạy. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`.
+
+## Notebook Kaggle
+
+Upload [crawl_corpus_kaggle.ipynb](notebooks/crawl_corpus_kaggle.ipynb) lên Kaggle, bật Internet và chỉnh `ID_FROM` / `ID_TO` trong ô cấu hình. Cả hai đầu đều được tính vào khoảng chọn. Notebook tự chứa code, tải Parquet nguồn, crawl/resume và xuất corpus JSONL/Parquet cùng ZIP chứa raw/checkpoint. Không cần clone repo hoặc GPU.
+
+Đặt `MAX_NEW = 10` để thử trước, rồi đổi thành `None` và chạy lại ô crawl. Khi đổi session, giữ output và thêm run đã giải nén vào Kaggle Input để dùng `RESUME_RUN_PATH`. Notebook có các snapshot code độc lập; sau khi sửa code crawl trong repo, chạy `python scripts/build_kaggle_notebook.py` để cập nhật notebook.
 
 ## Môi trường
 
