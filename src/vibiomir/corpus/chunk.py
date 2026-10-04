@@ -19,6 +19,7 @@ import re
 import sys
 
 from ..common import storage
+from ..common.console import emit
 from ..common.schema import (CHUNK_SCHEMA, chunk_id, count_tokens, detect_language,
                              normalise_source)
 
@@ -182,7 +183,7 @@ def build(args):
         'span_exactness': 'char_start/char_end verified against normalised document text',
     }
     storage.write_manifest(out / 'chunk_manifest.json', summary, files=[path])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
 

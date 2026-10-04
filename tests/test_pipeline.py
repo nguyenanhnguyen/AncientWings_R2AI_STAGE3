@@ -6,6 +6,8 @@ shape, metric arithmetic — and says nothing about retrieval quality, which is 
 pipeline should fail here rather than on the leaderboard.
 """
 import argparse
+import contextlib
+import io
 import json
 from pathlib import Path
 import random
@@ -19,7 +21,7 @@ sys.path.insert(0, str(ROOT / 'src'))
 
 import pyarrow as pa  # noqa: E402
 
-from vibiomir.common import schema, storage  # noqa: E402
+from vibiomir.common import console, schema, storage  # noqa: E402
 from vibiomir.corpus import chunk as chunking  # noqa: E402
 from vibiomir.evaluation import errors, labels as label_tools, metrics  # noqa: E402
 from vibiomir.evaluation import run as evaluation_cli  # noqa: E402
@@ -378,6 +380,26 @@ class LossAttributionTests(unittest.TestCase):
                    'false_positive_documents': 0, 'submitted_documents': 0}
         report = errors.report_markdown(summary, {'queries_scored': 0}, ['pseudo'])
         self.assertIn('vòng tròn', report)
+
+
+class ConsoleTests(unittest.TestCase):
+    def test_vietnamese_output_survives_a_cp1252_console(self):
+        """A Windows console defaults to cp1252; a report must not die on its first diacritic."""
+        narrow = io.TextIOWrapper(io.BytesIO(), encoding='cp1252', errors='strict')
+        with contextlib.redirect_stdout(narrow):
+            console.emit('Nộp file: work/submission/submission.zip')
+            console.emit('CẢNH BÁO: nhãn pseudo')
+        narrow.seek(0)
+        written = narrow.buffer.getvalue().decode('cp1252')
+        self.assertIn('file: work/submission/submission.zip', written)
+        self.assertIn('BÁO', written.replace('\\u1ea2', 'Ả'))
+
+    def test_utf8_console_keeps_the_text_intact(self):
+        wide = io.TextIOWrapper(io.BytesIO(), encoding='utf-8')
+        with contextlib.redirect_stdout(wide):
+            console.emit('Nộp file')
+        wide.seek(0)
+        self.assertEqual(wide.buffer.getvalue().decode('utf-8').strip(), 'Nộp file')
 
 
 class LabelSheetTests(unittest.TestCase):

@@ -19,6 +19,7 @@ import time
 import numpy as np
 
 from ..common import storage
+from ..common.console import emit
 from ..corpus.chunk import retrieval_text
 from ..index import embedding as dense
 from ..index.bm25 import BM25, tokenize
@@ -81,8 +82,8 @@ def run(args):
                                           faiss_index if (args.faiss and faiss_index.exists())
                                           else None)
         rows, scores = search(vectors, args.top_k)
-        print(f'dense: {len(variant_rows)} query vectors trong '
-              f'{time.monotonic() - started:.1f}s', flush=True)
+        emit(f'dense: {len(variant_rows)} query vectors trong '
+             f'{time.monotonic() - started:.1f}s')
         for position, (query_id, name) in enumerate(variant_names):
             # Grouped by query id so the per-query loop below is a lookup, not a scan of
             # every variant of every query.
@@ -123,7 +124,7 @@ def run(args):
         })
         if position % 100 == 0 or position == len(queries):
             elapsed = time.monotonic() - started
-            print(f'rerank {position}/{len(queries)}  {elapsed / position:.2f}s/query', flush=True)
+            emit(f'rerank {position}/{len(queries)}  {elapsed / position:.2f}s/query')
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -143,7 +144,7 @@ def run(args):
         'chunks_file': str(args.chunks), 'chunks_sha256': storage.sha256_file(args.chunks),
     }
     storage.write_manifest(out / 'retrieval_manifest.json', summary, files=[path])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
 

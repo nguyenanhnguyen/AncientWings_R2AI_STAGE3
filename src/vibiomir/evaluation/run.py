@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 
 from ..common import storage
+from ..common.console import emit
 from ..submission.validate import load_chunk_table
 from . import errors, labels as label_tools, metrics
 
@@ -28,21 +29,21 @@ def sheet(args):
     path = label_tools.write_label_sheet(_records(args.candidates), chunk_table, args.out,
                                          per_query=args.per_query, queries=queries,
                                          limit=args.limit)
-    print(json.dumps({'sheet': str(path), 'html': str(Path(args.out) / 'label_sheet.html'),
-                      'note': 'Điền trường relevant rồi chạy: evaluate.py collect'},
-                     ensure_ascii=False, indent=2))
+    emit(json.dumps({'sheet': str(path), 'html': str(Path(args.out) / 'label_sheet.html'),
+                     'note': 'Điền trường relevant rồi chạy: evaluate.py collect'},
+                    ensure_ascii=False, indent=2))
 
 
 def collect(args):
     summary = label_tools.labels_from_sheet(args.sheet, Path(args.out) / 'labels.jsonl')
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def pseudo(args):
     chunk_table = load_chunk_table(args.chunks)
     summary = label_tools.pseudo_labels(_records(args.candidates), chunk_table,
                                         Path(args.out) / 'labels.jsonl', top_n=args.top_n)
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def score(args):
@@ -65,8 +66,8 @@ def score(args):
     report = errors.report_markdown(loss_summary, metric_summary, sources)
     (out / 'EVAL_REPORT.md').write_text(report, encoding='utf-8')
     if 'pseudo' in sources:
-        print('CẢNH BÁO: nhãn pseudo sinh từ chính pipeline; điểm là vòng tròn.', flush=True)
-    print(report)
+        emit('CẢNH BÁO: nhãn pseudo sinh từ chính pipeline; điểm là vòng tròn.')
+    emit(report)
     return metric_summary
 
 

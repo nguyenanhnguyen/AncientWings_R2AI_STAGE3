@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from ..common import storage
+from ..common.console import emit
 from ..corpus.chunk import retrieval_text
 from . import embedding as dense
 from .bm25 import BM25, tokenize
@@ -32,7 +33,7 @@ def _progress(label):
         elapsed = time.monotonic() - start
         rate = done / elapsed if elapsed > 0 else 0
         remaining = (total - done) / rate if rate > 0 else float('nan')
-        print(f'{label}: {done}/{total}  {rate:.0f}/s  còn ~{remaining / 60:.1f} phút', flush=True)
+        emit(f'{label}: {done}/{total}  {rate:.0f}/s  còn ~{remaining / 60:.1f} phút')
 
     return report
 
@@ -49,7 +50,7 @@ def build_bm25(args):
                'k1': index.k1, 'b': index.b, 'avg_tokens': round(float(index.avgdl), 1),
                'chunks_file': str(args.chunks), 'chunks_sha256': storage.sha256_file(args.chunks)}
     storage.write_manifest(out / 'bm25_manifest.json', summary, files=[path])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
 
@@ -70,12 +71,12 @@ def build_dense(args):
     if args.faiss:
         faiss_path = dense.try_faiss(path, out / 'faiss.index', n_list=args.faiss_lists)
         if faiss_path is None:
-            print('faiss không có trong môi trường; bỏ qua, retrieval dùng numpy.', flush=True)
+            emit('faiss không có trong môi trường; bỏ qua, retrieval dùng numpy.')
     summary = {'stage': 'dense', **dense.encoder_report(args.encoder, encoder, len(chunks)),
                'embeddings': str(path), 'faiss_index': str(faiss_path) if faiss_path else None,
                'chunks_file': str(args.chunks), 'chunks_sha256': storage.sha256_file(args.chunks)}
     storage.write_manifest(out / 'dense_manifest.json', summary, files=[path])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
 

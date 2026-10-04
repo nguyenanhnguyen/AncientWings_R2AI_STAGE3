@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 from ..common import storage
+from ..common.console import emit
 from ..retrieval.query import load_queries
 from . import choose, export, validate
 
@@ -25,8 +26,7 @@ def build(args):
     if missing:
         # Required by the rules: a missing query means the whole submission is not scored. The
         # entry is still written, with empty lists, so the file stays valid.
-        print(f'{len(missing)} truy vấn không có ứng viên; ghi danh sách rỗng cho chúng.',
-              flush=True)
+        emit(f'{len(missing)} truy vấn không có ứng viên; ghi danh sách rỗng cho chúng.')
 
     chunk_table = validate.load_chunk_table(args.chunks)
     documents = validate.load_document_texts(args.corpus)
@@ -42,8 +42,8 @@ def build(args):
                'chunks_sha256': storage.sha256_file(args.chunks)}
     storage.write_manifest(Path(args.out) / 'submission_manifest.json', summary,
                            files=[json_path, zip_path])
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f'\nNộp file: {zip_path}')
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(f'\nNộp file: {zip_path}')
     return summary
 
 
