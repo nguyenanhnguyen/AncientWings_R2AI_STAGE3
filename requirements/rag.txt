@@ -1,0 +1,20 @@
+# Blocks A4-E: chunking, indexing, retrieval, submission, evaluation.
+# Standalone crawl notebooks install and record their own dependencies.
+
+numpy>=1.26
+pyarrow>=19.0
+
+# Dense encoding and reranking. Needed for every encoder except `hash`, and every reranker except
+# `identity`; chunking, BM25 and submission building run without them.
+# Install the torch build that matches the local CUDA version from https://pytorch.org, since the
+# wheel on PyPI is CPU-only on some platforms.
+torch>=2.4
+transformers>=4.45
+tokenizers>=0.20
+safetensors>=0.4
+sentencepiece>=0.2
+protobuf>=4.25
+
+# Optional accelerator for the vector index. Retrieval falls back to a blocked numpy matmul over
+# the memmapped matrix when faiss is absent, so this is a speed choice, not a requirement.
+# faiss-cpu>=1.8

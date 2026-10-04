@@ -1,5 +1,0 @@
-pyarrow==25.0.1
-requests==2.34.2
-trafilatura==2.3.0
-pymupdf==1.28.2
-tld==0.13.2

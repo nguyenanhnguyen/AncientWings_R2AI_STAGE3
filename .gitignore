@@ -5,6 +5,7 @@
 
 # Codex / project memory
 *_MEMORY.md
+!/docs/references/LEGALQA_CORPUS_MEMORY.md
 
 # Python environments and generated caches
 .venv/
@@ -16,8 +17,10 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# Generated crawl outputs and local scratch files
+# Generated crawl outputs, pipeline working data and local scratch files
 /runs/
+/notebooks/runs/
+/work/
 /tmp/
 
 # Local environment secrets (keep example configuration trackable)
