@@ -5,6 +5,7 @@
 
 # Codex / project memory
 *_MEMORY.md
+!/docs/references/LEGALQA_CORPUS_MEMORY.md
 
 # Python environments and generated caches
 .venv/
