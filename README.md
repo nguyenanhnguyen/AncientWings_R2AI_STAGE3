@@ -5,7 +5,7 @@ Repo phục vụ pipeline RAG của dự án ViBioMIR. Phần đã triển khai 
 ## Bố cục hiện tại
 
 ```text
-src/vibiomir/crawl/   Logic crawl, extraction, audit và export
+src/vibiomir/corpus/   Logic crawl, extraction, audit và export
 scripts/             Lệnh chạy, gọi code trong src/
 notebooks/           Notebook crawl độc lập trên Kaggle
 tests/               Kiểm tra phần crawl đã triển khai
@@ -17,7 +17,7 @@ runs/                Raw, checkpoint, corpus và báo cáo sinh ra (ngoài Git)
 tmp/                 File tạm local (ngoài Git)
 ```
 
-Các thư mục dành cho RAG/train sẽ được bổ sung khi có implementation. Logic hiện có được chuyển nguyên nội dung vào `src/vibiomir/crawl/`; các script chỉ là điểm chạy. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`.
+Các thư mục dành cho RAG/train sẽ được bổ sung khi có implementation. Logic hiện có được chuyển nguyên nội dung vào `src/vibiomir/corpus/`; các script chỉ là điểm chạy. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`.
 
 ## Notebook Kaggle
 
@@ -46,11 +46,11 @@ python -m venv .venv
 Ví dụ chọn 1.000 ID từ 583 đến 1582. Dùng tên output chưa có manifest; `--id-stop` là cận trên không bao gồm:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/crawl_example --size 1000 --id-start 583 --id-stop 1583
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/crawl_example --workers 4 --delay 1 --attempts 3 --max-new 10
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/crawl_example --workers 4 --delay 1 --attempts 3
-.\.venv\Scripts\python.exe scripts/audit_corpus.py --out runs/crawl_example
-.\.venv\Scripts\python.exe scripts/export_corpus.py --out runs/crawl_example
+.\.venv\Scripts\python.exe scripts/crawl.py prepare --source data/links_corpus.parquet --out runs/crawl_example --size 1000 --id-start 583 --id-stop 1583
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/crawl_example --workers 4 --delay 1 --attempts 3 --max-new 10
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/crawl_example --workers 4 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe scripts/finalize.py audit --out runs/crawl_example
+.\.venv\Scripts\python.exe scripts/finalize.py export --out runs/crawl_example
 ```
 
 Chạy lại lệnh `crawl` để xử lý ID chưa có checkpoint; ID đã có checkpoint, kể cả lỗi, sẽ được bỏ qua. Giữ nguyên mã nguồn, dependencies, delay và attempts để resume cùng run. `crawl` tự sinh báo cáo; có thể chạy `report --out <run>` để tính lại báo cáo offline. `audit_corpus.py` yêu cầu run đã xử lý đủ ID.

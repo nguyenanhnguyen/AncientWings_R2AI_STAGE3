@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-spec = importlib.util.spec_from_file_location('crawler', Path(__file__).parents[1] / 'src/vibiomir/crawl/crawler.py')
+spec = importlib.util.spec_from_file_location('crawler', Path(__file__).parents[1] / 'src/vibiomir/corpus/crawler.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 
@@ -138,7 +138,7 @@ class CrawlTests(unittest.TestCase):
                 pass
 
     def test_jsonl_unicode_line_separators_do_not_split_records(self):
-        spec = importlib.util.spec_from_file_location('exporter', Path(__file__).parents[1] / 'src/vibiomir/crawl/export.py')
+        spec = importlib.util.spec_from_file_location('exporter', Path(__file__).parents[1] / 'src/vibiomir/corpus/finalize.py')
         exporter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(exporter)
         with tempfile.TemporaryDirectory() as tmp:

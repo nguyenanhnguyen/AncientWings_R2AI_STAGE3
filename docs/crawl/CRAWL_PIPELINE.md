@@ -6,7 +6,7 @@ Ngày đối chiếu: **03/10/2026, giờ Việt Nam**. Phạm vi: lấy danh s�
 
 **Kết quả thực tế:** [`CRAWL_RESULT_1000.md`](CRAWL_RESULT_1000.md), gồm 976 tài liệu vượt kiểm tra tự động, 13 cần xem lại và 11 rejected; corpus đã xuất JSONL/Parquet.
 
-Logic crawl nằm tại [`src/vibiomir/crawl/crawler.py`](../../src/vibiomir/crawl/crawler.py); điểm chạy giữ tại [`scripts/crawl_corpus.py`](../../scripts/crawl_corpus.py). Kết quả chạy lưu riêng trong `runs/`; các mục về browser, OCR, parser đặc thù và hệ thống crawl quy mô lớn là hướng mở rộng, được ghi rõ bên dưới.
+Logic crawl nằm tại [`src/vibiomir/corpus/crawler.py`](../../src/vibiomir/corpus/crawler.py); điểm chạy giữ tại [`scripts/crawl.py`](../../scripts/crawl.py). Kết quả chạy lưu riêng trong `runs/`; các mục về browser, OCR, parser đặc thù và hệ thống crawl quy mô lớn là hướng mở rộng, được ghi rõ bên dưới.
 
 ## 1. Kết luận từ các tài liệu đã đọc
 
@@ -252,16 +252,16 @@ python -m venv .venv
 
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/pilot_balanced_example --size 1000 --seed 42
+.\.venv\Scripts\python.exe scripts/crawl.py prepare --source data/links_corpus.parquet --out runs/pilot_balanced_example --size 1000 --seed 42
 
 # Thử 30 URL trong đúng mẫu đã chọn trước khi chạy phần còn lại.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3 --max-new 30
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3 --max-new 30
 
 # Hoàn tất các URL chưa có checkpoint; dùng cùng cấu hình và mã nguồn.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/pilot_balanced_example --workers 12 --delay 1 --attempts 3
 
 # Tính lại báo cáo và kiểm tra hash mà không truy cập mạng.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/pilot_balanced_example
+.\.venv\Scripts\python.exe scripts/crawl.py report --out runs/pilot_balanced_example
 ```
 
 `prepare` không ghi đè run đã tồn tại. Nếu đã có `runs/pilot_balanced_example/manifest.json`, dùng thẳng `crawl`/`report`; muốn chọn mẫu mới, đổi `--out`. Trong môi trường hạn chế network, lệnh crawl cần được phép kết nối đến các URL công khai; chạy báo cáo không cần network.
@@ -285,11 +285,11 @@ Các lệnh dưới mô tả quy trình lịch sử. Khi resume run cũ, dùng s
 
 ```powershell
 # Tạo phiên bản mới từ raw; --out phải chưa tồn tại.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py reprocess --source-run runs/pilot1000 --out runs/pilot1000_v2
+.\.venv\Scripts\python.exe scripts/crawl.py reprocess --source-run runs/pilot1000 --out runs/pilot1000_v2
 
 # Xem run cân bằng website cũ; không phải dải ID hiện hành:
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/pilot1000_v2 --workers 12 --delay 1 --attempts 3
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/pilot1000_v2
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/pilot1000_v2 --workers 12 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe scripts/crawl.py report --out runs/pilot1000_v2
 Get-Content -Encoding UTF8 runs/pilot1000_v2/QUALITY_REPORT.md
 ```
 

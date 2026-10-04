@@ -8,7 +8,7 @@ import threading
 import unittest
 from unittest.mock import MagicMock, patch
 
-spec = importlib.util.spec_from_file_location('robots_crawler', Path(__file__).parents[1] / 'src/vibiomir/crawl/crawler.py')
+spec = importlib.util.spec_from_file_location('robots_crawler', Path(__file__).parents[1] / 'src/vibiomir/corpus/crawler.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 ALLOW = (200, {'Content-Type': 'text/plain'}, b'User-agent: *\nAllow: /\n')

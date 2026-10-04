@@ -56,11 +56,10 @@ class KaggleNotebookTests(unittest.TestCase):
                 exec(self.code[2], namespace)
                 self.assertTrue(namespace['diagnostics_archive'].is_file())
                 for snapshot, module in [('crawler_snapshot.py', 'crawler.py'),
-                                         ('audit_snapshot.py', 'audit.py'),
-                                         ('export_snapshot.py', 'export.py'),
+                                         ('finalize_snapshot.py', 'finalize.py'),
                                          ('diagnostics_snapshot.py', 'diagnostics.py')]:
                     self.assertEqual((namespace['RUN_DIR'] / snapshot).read_bytes(),
-                                     (ROOT / 'src/vibiomir/crawl' / module).read_bytes())
+                                     (ROOT / 'src/vibiomir/corpus' / module).read_bytes())
                 namespace['SOURCE_SHA256'] = hashlib.sha256(fixture.read_bytes()).hexdigest()
                 namespace['SOURCE_PARQUET'] = str(fixture)
                 valid_hash = namespace['SOURCE_SHA256']

@@ -13,8 +13,8 @@ def load(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-c = load('priority_test_core', ROOT / 'src/vibiomir/crawl/crawler.py')
-p = load('priority_test_probe', ROOT / 'src/vibiomir/crawl/priority_probe.py')
+c = load('priority_test_core', ROOT / 'src/vibiomir/corpus/crawler.py')
+p = load('priority_test_probe', ROOT / 'src/vibiomir/corpus/priority_probe.py')
 UA = 'Mozilla/5.0 Chrome/130.0.0.0 Safari/537.36'
 
 

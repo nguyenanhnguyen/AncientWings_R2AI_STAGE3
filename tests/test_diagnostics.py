@@ -11,7 +11,7 @@ import zipfile
 
 
 spec = importlib.util.spec_from_file_location(
-    'diagnostics', Path(__file__).parents[1] / 'src/vibiomir/crawl/diagnostics.py',
+    'diagnostics', Path(__file__).parents[1] / 'src/vibiomir/corpus/diagnostics.py',
 )
 diagnostics = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(diagnostics)

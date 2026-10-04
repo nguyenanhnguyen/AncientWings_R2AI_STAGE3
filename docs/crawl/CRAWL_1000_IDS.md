@@ -26,13 +26,13 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 
 # Chỉ chạy prepare một lần. Không ghi đè run đã tồn tại.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py prepare --source data/links_corpus.parquet --out runs/crawl_1000_example --size 1000 --id-start 583 --id-stop 1583
+.\.venv\Scripts\python.exe scripts/crawl.py prepare --source data/links_corpus.parquet --out runs/crawl_1000_example --size 1000 --id-start 583 --id-stop 1583
 
 # Chạy mới hoặc tiếp tục URL chưa có checkpoint.
-.\.venv\Scripts\python.exe -u scripts/crawl_corpus.py crawl --out runs/crawl_1000_example --workers 4 --delay 1 --attempts 3
+.\.venv\Scripts\python.exe -u scripts/crawl.py crawl --out runs/crawl_1000_example --workers 4 --delay 1 --attempts 3
 
 # Tính lại báo cáo, kiểm tra raw/text hash; không cần mạng.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py report --out runs/crawl_1000_example
+.\.venv\Scripts\python.exe scripts/crawl.py report --out runs/crawl_1000_example
 ```
 
 Trong workspace hiện tại, **run `runs/ids_583_1582` đã hoàn tất**. Lần prepare thực tế có thêm `--reuse-run runs/pilot1000_v2`, tái sử dụng 8 trang đã tải: 583, 667, 821, 873, 1015, 1122, 1146, 1247. Raw được kiểm tra SHA-256 và trích lại bằng parser lúc đó, không copy nguyên text của parser cũ.
@@ -45,9 +45,9 @@ Run tải nguồn bắt đầu bằng crawler v3; mã nguồn khớp SHA-256 đ�
 .\.venv\Scripts\python.exe -u runs/ids_583_1582/crawler_snapshot.py crawl --out runs/ids_583_1582 --workers 4 --delay 1 --attempts 3
 
 # Chỉ thực hiện khi lượt tải đủ 1.000 checkpoint; output clean_next phải chưa tồn tại.
-.\.venv\Scripts\python.exe scripts/crawl_corpus.py reprocess --source-run runs/ids_583_1582 --out runs/ids_583_1582_clean_next
-.\.venv\Scripts\python.exe scripts/audit_corpus.py --out runs/ids_583_1582_clean_next
-.\.venv\Scripts\python.exe scripts/export_corpus.py --out runs/ids_583_1582_clean_next
+.\.venv\Scripts\python.exe scripts/crawl.py reprocess --source-run runs/ids_583_1582 --out runs/ids_583_1582_clean_next
+.\.venv\Scripts\python.exe scripts/finalize.py audit --out runs/ids_583_1582_clean_next
+.\.venv\Scripts\python.exe scripts/finalize.py export --out runs/ids_583_1582_clean_next
 ```
 
 Reprocess v4 không truy cập mạng; giữ nguyên mẫu ID/URL/raw, bỏ mã Word trong HTML comments, thêm cờ các bài chủ yếu là ảnh. Nếu thư mục clean đã có kết quả, chỉ chạy `report`/`audit_corpus.py`, hoặc chọn tên phiên bản khác khi cần reprocess lần nữa.

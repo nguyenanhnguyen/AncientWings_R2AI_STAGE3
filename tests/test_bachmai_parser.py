@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from lxml import html
 
-spec = importlib.util.spec_from_file_location('bachmai_crawler', Path(__file__).parents[1] / 'src/vibiomir/crawl/crawler.py')
+spec = importlib.util.spec_from_file_location('bachmai_crawler', Path(__file__).parents[1] / 'src/vibiomir/corpus/crawler.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 

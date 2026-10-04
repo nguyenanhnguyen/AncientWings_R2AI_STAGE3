@@ -149,10 +149,9 @@ def build():
     embedded = {}
     hashes = {}
     for name, module in [('crawler_snapshot.py', 'crawler.py'),
-                         ('audit_snapshot.py', 'audit.py'),
-                         ('export_snapshot.py', 'export.py'),
+                         ('finalize_snapshot.py', 'finalize.py'),
                          ('diagnostics_snapshot.py', 'diagnostics.py')]:
-        raw = (ROOT / 'src/vibiomir/crawl' / module).read_bytes()
+        raw = (ROOT / 'src/vibiomir/corpus' / module).read_bytes()
         embedded[name] = base64.b85encode(zlib.compress(raw, level=9)).decode('ascii')
         hashes[name] = hashlib.sha256(raw).hexdigest()
     add('code', 'import base64\nimport hashlib\nimport zlib\n\n'
@@ -168,8 +167,7 @@ def build():
                         raise ValueError(f'Snapshot bị hỏng: {name}')
                     target.write_bytes(body)
             CRAWLER = RUN_DIR / 'crawler_snapshot.py'
-            AUDITOR = RUN_DIR / 'audit_snapshot.py'
-            EXPORTER = RUN_DIR / 'export_snapshot.py'
+            FINALIZER = RUN_DIR / 'finalize_snapshot.py'
             # Diagnostics chỉ đọc output, có thể cập nhật riêng mà không đổi crawler/hash resume.
             diagnostic_body = zlib.decompress(base64.b85decode(EMBEDDED_FILES['diagnostics_snapshot.py']))
             if hashlib.sha256(diagnostic_body).hexdigest() != EMBEDDED_SHA256['diagnostics_snapshot.py']:
@@ -396,11 +394,11 @@ def build():
         summary = json.loads((RUN_DIR / 'quality_report.json').read_text(encoding='utf-8'))
         display({k: summary[k] for k in ['selected', 'completed', 'pending', 'accepted', 'review', 'rejected', 'status_counts']})
         if summary['pending'] == 0:
-            run_script(AUDITOR, '--out', RUN_DIR)
+            run_script(FINALIZER, 'audit', '--out', RUN_DIR)
         else:
             print('Run chưa hoàn tất; bỏ qua audit toàn mẫu. Chạy lại ô crawl để tiếp tục.')
         if summary['accepted'] > 0:
-            run_script(EXPORTER, '--out', RUN_DIR)
+            run_script(FINALIZER, 'export', '--out', RUN_DIR)
             corpus = pq.read_table(RUN_DIR / 'corpus.parquet')
             print(corpus.schema)
             display(corpus.select(['id', 'url', 'title']).slice(0, 5).to_pylist())

@@ -84,7 +84,7 @@ Các sửa chung cho robots/diagnostics là bước nền phục vụ domain ưu
 
 ## Bước nền — bằng chứng đủ để sửa domain số 1
 
-Thay đổi mục tiêu trong `src/vibiomir/crawl/crawler.py` và cập nhật snapshot qua
+Thay đổi mục tiêu trong `src/vibiomir/corpus/crawler.py` và cập nhật snapshot qua
 `scripts/build_domain_probe_notebook.py`. Chưa thực hiện các thay đổi trong plan này.
 
 1. Lưu cho từng attempt robots: origin, URL, method, timestamp, elapsed, status, content-type,

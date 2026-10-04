@@ -82,11 +82,11 @@ def build(probe=None, priority_five=False):
     samples, profile, manifest = probe['samples'], probe['source_profile'], probe['manifest']
     if len({r['id'] for r in samples}) != len(samples) or len({r['url'] for r in samples}) != len(samples):
         raise ValueError('Duplicate sample ID or URL.')
-    raw = (ROOT / 'src/vibiomir/crawl/crawler.py').read_bytes()
+    raw = (ROOT / 'src/vibiomir/corpus/crawler.py').read_bytes()
     # This notebook uses its own browser-style HTTP UA; other crawl entry points are unchanged.
     raw = raw.replace(b"UA = 'ViBioMIRResearchCrawler/0.1'", ('UA = ' + repr(BROWSER_UA)).encode())
     raw = raw.replace(b"ROBOT_AGENT = 'ViBioMIRResearchCrawler'", b"ROBOT_AGENT = 'Mozilla'")
-    priority_raw = (ROOT / 'src/vibiomir/crawl/priority_probe.py').read_bytes()
+    priority_raw = (ROOT / 'src/vibiomir/corpus/priority_probe.py').read_bytes()
     cells = []
 
     def add(kind, source, hidden=False):
