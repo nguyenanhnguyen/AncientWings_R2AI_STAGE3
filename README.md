@@ -1,23 +1,46 @@
 # R2AI2026 Stage 3 — ViBioMIR
 
-Repo phục vụ pipeline RAG của dự án ViBioMIR. Phần đã triển khai hiện tại là crawl, trích xuất, kiểm tra chất lượng và xuất corpus. Chưa có code chunking, indexing, retrieval hoặc training.
+Repo phục vụ pipeline RAG của dự án ViBioMIR, chia theo các block trong [nguyen/pipeline.txt](nguyen/pipeline.txt). Block A (crawl, trích xuất, QC, export) đã chạy thật trên dữ liệu cuộc thi. Block A4 đến E (chunking, index, retrieval, bài nộp, đánh giá) đã có code chạy được đầu–cuối, nhưng chưa chạy với model thật trên corpus lớn. Chưa có fine-tune.
 
-## Bố cục hiện tại
+## Bố cục
 
 ```text
-src/vibiomir/corpus/   Logic crawl, extraction, audit và export
-scripts/             Lệnh chạy, gọi code trong src/
-notebooks/           Notebook crawl độc lập trên Kaggle
-tests/               Kiểm tra phần crawl đã triển khai
-requirements/        Dependencies crawl và bản khóa phiên bản
-docs/crawl/          Thiết kế, hướng dẫn chạy và kết quả crawl
-docs/references/     PDF và tài liệu tham khảo local
-data/                Parquet nguồn và metadata nguồn
-runs/                Raw, checkpoint, corpus và báo cáo sinh ra (ngoài Git)
-tmp/                 File tạm local (ngoài Git)
+src/vibiomir/common/      Schema, chuẩn hóa văn bản, đọc/ghi và hash
+src/vibiomir/corpus/      Block A: crawler.py, finalize.py, priority_probe.py, chunk.py (A4)
+src/vibiomir/index/       Block B: bm25.py, embedding.py; CLI ở build.py
+src/vibiomir/retrieval/   Block C: query.py, hybrid.py, rerank.py; CLI ở run.py
+src/vibiomir/submission/  Block D: choose.py, validate.py, export.py; CLI ở build.py
+src/vibiomir/evaluation/  Block E: labels.py, metrics.py, errors.py; CLI ở run.py
+scripts/                  Một lệnh cho mỗi block, chỉ gọi code trong src/
+notebooks/                Notebook crawl độc lập trên Kaggle
+tests/                    Kiểm tra từng block, không cần mạng hay GPU
+requirements/             crawl.txt cho Block A, rag.txt cho A4–E
+docs/crawl/               Thiết kế, hướng dẫn chạy và kết quả crawl
+data/                     Parquet nguồn và metadata nguồn
+runs/                     Raw, checkpoint, corpus do Block A sinh ra (ngoài Git)
+work/                     Chunk, index, ứng viên, bài nộp, báo cáo (ngoài Git)
 ```
 
-Các thư mục dành cho RAG/train sẽ được bổ sung khi có implementation. Logic hiện có được chuyển nguyên nội dung vào `src/vibiomir/corpus/`; các script chỉ là điểm chạy. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`.
+Mỗi block là một thư mục trong `src/`, kèm đúng một script trong `scripts/`. Script chỉ đọc tham số rồi gọi hàm trong `src/`, không chứa thuật toán, nên cùng một logic dùng được từ script, notebook và test. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`.
+
+## Chạy pipeline A4 → E
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements/rag.txt
+
+.\.venv\Scripts\python.exe scripts/chunk.py --corpus runs/<run>/corpus.parquet --out work/chunks
+.\.venv\Scripts\python.exe scripts/index.py all --chunks work/chunks/chunks.parquet --out work/index --encoder bge-m3
+.\.venv\Scripts\python.exe scripts/retrieve.py --chunks work/chunks/chunks.parquet --index work/index --queries data/query.parquet --out work/retrieval
+.\.venv\Scripts\python.exe scripts/submit.py --candidates work/retrieval/candidates.jsonl --chunks work/chunks/chunks.parquet --corpus runs/<run>/corpus.parquet --links data/links_corpus.parquet --out work/submission --profile recall
+```
+
+Nhiều shard crawl thì truyền nhiều file vào `--corpus`. Kết quả nộp là `work/submission/submission.zip`.
+
+Muốn chạy thử toàn bộ flow mà không tải model, dùng `--encoder hash` và `--reranker identity`. Hai tùy chọn này chỉ kiểm tra đường ống, không phản ánh chất lượng truy hồi.
+
+`scripts/evaluate.py` lo phần đánh giá: `sheet` xuất phiếu để người gán nhãn, `collect` biến phiếu đã điền thành `labels.jsonl`, `score` tính Precision/Recall/F2 hai cấp và quy từng tài liệu bị mất về block gây ra. BTC không phát hành nhãn, nên `pseudo` chỉ dùng cho smoke test và báo cáo sẽ ghi rõ điểm đó là vòng tròn.
+
+Model mặc định: `bge-m3` (568M) cho embedding và `bge-reranker-v2-m3` (568M) cho reranking. Các lựa chọn khác liệt kê trong docstring của [embedding.py](src/vibiomir/index/embedding.py) và [rerank.py](src/vibiomir/retrieval/rerank.py), gồm `qwen3-embedding-4b` và `qwen3-reranker-4b`. Mọi model trong hai danh sách đều là model mở, phát hành trước 01/08/2026 và không quá 15B tham số, theo quy định cuộc thi; trước khi nộp vẫn cần tự đối chiếu lại ngày phát hành và số tham số thực tế.
 
 ## Notebook Kaggle
 
@@ -36,10 +59,13 @@ Chạy từ thư mục gốc repo bằng PowerShell. Chỉ tạo môi trường 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements/crawl.lock.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/rag.txt
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-`requirements/crawl.txt` liệt kê dependencies trực tiếp; `requirements/crawl.lock.txt` khóa môi trường đã dùng. Môi trường đã kiểm tra là Windows với Python 3.14; không cam kết lock dùng nguyên vẹn trên mọi phiên bản Python.
+`requirements/crawl.txt` liệt kê dependencies trực tiếp của Block A; `requirements/crawl.lock.txt` khóa môi trường đã dùng. `requirements/rag.txt` là phần A4–E; `torch` nên cài theo bản CUDA của máy từ trang pytorch.org thay vì wheel mặc định. Môi trường đã kiểm tra là Windows với Python 3.13/3.14; không cam kết lock dùng nguyên vẹn trên mọi phiên bản Python.
+
+Toàn bộ test chạy offline. `tests/test_pipeline.py` chạy A4 → E trên corpus mẫu bằng `--encoder hash` nên không cần GPU hay tải model; nó kiểm tra đường ống, không kiểm tra chất lượng truy hồi.
 
 ## Chạy một lượt mới
 

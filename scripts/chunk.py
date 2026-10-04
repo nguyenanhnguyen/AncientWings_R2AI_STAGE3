@@ -1,1 +1,12 @@
-"""Block A4: split the corpus into chunks."""
+"""Block A4: split the corpus into chunks that keep their exact source span."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from vibiomir.corpus.chunk import main
+
+
+if __name__ == '__main__':
+    sys.stdout.reconfigure(encoding='utf-8')
+    main()

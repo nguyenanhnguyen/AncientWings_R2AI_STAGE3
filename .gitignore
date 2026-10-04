@@ -16,8 +16,9 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# Generated crawl outputs and local scratch files
+# Generated crawl outputs, pipeline working data and local scratch files
 /runs/
+/work/
 /tmp/
 
 # Local environment secrets (keep example configuration trackable)

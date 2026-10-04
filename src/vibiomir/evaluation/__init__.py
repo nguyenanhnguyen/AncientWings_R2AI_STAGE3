@@ -1,1 +1,1 @@
-"""Block E: measure the pipeline and find what to improve."""
+"""Block E: dev labels, the contest metrics, and loss attribution. CLI in run.py."""
