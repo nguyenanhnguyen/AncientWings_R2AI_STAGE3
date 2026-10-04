@@ -1,0 +1,11 @@
+data/
+crawl_out/
+merged/
+__pycache__/
+*.pyc
+*.parquet.tmp
+.venv/
+venv/
+.DS_Store
+*_report.csv
+json_out/
