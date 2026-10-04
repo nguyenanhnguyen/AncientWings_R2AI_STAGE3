@@ -114,7 +114,7 @@ class CrawlTests(unittest.TestCase):
         <table><tr><th>Tuổi</th><th>Liều</th></tr><tr><td>12</td><td>5 mg</td></tr></table></div>
         <div class="post-detail__same-category-content">Tin liên quan không thuộc bài.</div></body></html>'''
         doc = c.extract(body.encode('utf-8'), 'text/html; charset=utf-8', 'https://bachmai.gov.vn/bai-viet/example')
-        self.assertEqual(doc['extractor'], 'bachmai_dom_v1')
+        self.assertEqual(doc['extractor'], 'bachmai_dom_v2')
         self.assertTrue(doc['text'].startswith('Phần mở đầu cần giữ nguyên.'))
         self.assertIn('0,5 mg/kg; Na⁺ ≥ 135 mmol/L.', doc['text'])
         self.assertIn('12 | 5 mg |', doc['text'])

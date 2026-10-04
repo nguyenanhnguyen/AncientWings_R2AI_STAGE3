@@ -33,7 +33,7 @@ import requests
 import trafilatura
 from tld import get_fld
 
-VERSION = 'v4'
+VERSION = 'v5'
 UA = 'ViBioMIRResearchCrawler/0.1'
 ROBOT_AGENT = 'ViBioMIRResearchCrawler'
 
@@ -187,10 +187,26 @@ class CrawlError(Exception):
 
 
 class Fetcher:
-    def __init__(self, out, delay=1.0, attempts=3):
+    def __init__(self, out, delay=1.0, attempts=3, *, robots_attempts=None,
+                 robots_connect_timeout=15.0, robots_read_timeout=30.0,
+                 robots_retry_budget=90.0, robots_failure_ttl=30.0):
         self.out, self.delay, self.attempts = Path(out), delay, attempts
+        self.robots_attempts = attempts if robots_attempts is None else robots_attempts
+        if type(self.robots_attempts) is not int or self.robots_attempts < 1:
+            raise ValueError('robots_attempts must be a positive integer.')
+        self.robots_config = {'robots_attempts': self.robots_attempts,
+                              'robots_connect_timeout': robots_connect_timeout,
+                              'robots_read_timeout': robots_read_timeout,
+                              'robots_retry_budget': robots_retry_budget,
+                              'robots_failure_ttl': robots_failure_ttl}
+        for key, value in self.robots_config.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f'{key} must be finite and positive.')
+        self.robots_timeout = (robots_connect_timeout, robots_read_timeout)
+        self.robots_retry_budget, self.robots_failure_ttl = robots_retry_budget, robots_failure_ttl
         self.guard = threading.Lock()
         self.locks, self.next_at, self.robots_locks, self.robots = {}, {}, {}, {}
+        self.robots_expiry = {}
         self.local = threading.local()
 
     def lock_for(self, registry, key):
@@ -215,22 +231,38 @@ class Fetcher:
             if not ipaddress.ip_address(item[4][0]).is_global:
                 raise CrawlError('unsafe_address', parsed.hostname)
 
-    def request_once(self, url, limit, delay=None):
+    def request_once(self, url, limit, delay=None, *, timeout=None, deadline=None):
         self.validate(url)
         site = get_fld(url, fail_silently=True) or host(url)
-        with self.lock_for(self.locks, site):
-            time.sleep(max(0, self.next_at.get(site, 0) - time.monotonic()))
+        lock = self.lock_for(self.locks, site)
+        if deadline is None:
+            lock.acquire()
+        elif not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+            raise CrawlError('response_deadline', 'Request budget exhausted waiting for domain lock')
+        try:
+            wait = max(0, self.next_at.get(site, 0) - time.monotonic())
+            if deadline is not None and wait >= deadline - time.monotonic():
+                raise CrawlError('response_deadline', 'Request budget exhausted by domain cooldown')
+            time.sleep(wait)
             try:
                 start = time.monotonic()
-                with self.session().get(url, timeout=(8, 20), stream=True, allow_redirects=False) as response:
+                request_timeout = timeout or (8, 20)
+                if deadline is not None:
+                    remaining = deadline - start
+                    if remaining <= 0:
+                        raise CrawlError('response_deadline', 'Request budget exhausted')
+                    request_timeout = tuple(min(value, remaining / 2) for value in request_timeout)
+                with self.session().get(url, timeout=request_timeout, stream=True, allow_redirects=False) as response:
                     chunks, total = [], 0
                     for chunk in response.iter_content(65536):
                         total += len(chunk)
                         if total > limit:
                             raise CrawlError('oversized', f'More than {limit} decompressed bytes')
-                        if time.monotonic() - start > 45:
+                        if time.monotonic() - start > 45 or (deadline is not None and time.monotonic() >= deadline):
                             raise CrawlError('response_deadline')
                         chunks.append(chunk)
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise CrawlError('response_deadline', 'Request budget exhausted reading response')
                     status, headers, body = response.status_code, requests.structures.CaseInsensitiveDict(response.headers), b''.join(chunks)
                     cooldown = max(self.delay, delay or 0)
                     if status in (429, 503):
@@ -246,44 +278,125 @@ class Fetcher:
                     return status, headers, body
             finally:
                 self.next_at[site] = max(self.next_at.get(site, 0), time.monotonic() + max(self.delay, delay or 0))
+        finally:
+            lock.release()
+
+    def load_robots(self, origin):
+        robot_url = origin + '/robots.txt'
+        started = time.monotonic()
+        deadline = started + self.robots_retry_budget
+        fetch_id = digest(f'{origin}:{time.time_ns()}'.encode())[:16]
+        evidence = {'origin': origin, 'url': robot_url, 'fetched_at': utc(), 'fetch_id': fetch_id,
+                    'requests': [], 'attempt_count': 0, 'retryable': False}
+        policy, error = None, 'robots_unknown'
+        retryable = False
+        for attempt in range(1, self.robots_attempts + 1):
+            if time.monotonic() >= deadline:
+                evidence.update(error='Robots retry budget exhausted', error_kind='retry_budget_exhausted')
+                retryable = True
+                break
+            evidence['attempt_count'] = attempt
+            retryable = False
+            evidence.pop('error_kind', None)
+            # A retry starts at the original robots URL, preserving every redirect check.
+            current = robot_url
+            try:
+                for hop in range(6):
+                    event = {'url': current, 'attempt': attempt, 'redirect_hop': hop, 'at': utc()}
+                    evidence['requests'].append(event)
+                    begin = time.monotonic()
+                    try:
+                        status, headers, body = self.request_once(current, 1024 * 1024,
+                                                                 timeout=self.robots_timeout, deadline=deadline)
+                        headers = requests.structures.CaseInsensitiveDict(headers)
+                        event.update(http_status=status, content_type=headers.get('Content-Type', ''),
+                                     response_headers={k: v for k, v in headers.items() if k.lower() in
+                                                       ('content-type', 'location', 'retry-after', 'server')},
+                                     body_sha256=digest(body))
+                        raw = Path('robots/raw') / digest(origin.encode()) / f'{fetch_id}_a{attempt}_r{hop}.gz'
+                        atomic_bytes(self.out / raw, gzip.compress(body, mtime=0))
+                        event['raw_path'] = str(raw.as_posix())
+                    except Exception as exc:
+                        event.update(error=str(exc)[:500], exception_class=type(exc).__name__)
+                        raise
+                    finally:
+                        event['elapsed_seconds'] = round(time.monotonic() - begin, 3)
+                    evidence.update(status=status, final_url=current, content_type=event['content_type'],
+                                    body_sha256=event['body_sha256'], raw_path=event['raw_path'])
+                    if status in (301, 302, 303, 307, 308) and headers.get('Location'):
+                        current = urljoin(current, headers['Location'])
+                        continue
+                    break
+                else:
+                    raise CrawlError('robots_unknown', 'Robots redirect limit exceeded')
+                if 200 <= status < 300:
+                    text = body.decode('utf-8', 'replace')
+                    if '<html' in text[:1000].lower() or '<!doctype' in text[:1000].lower():
+                        evidence['error_kind'] = 'invalid_html'
+                        raise CrawlError('robots_unknown', 'HTML instead of robots.txt')
+                    policy = RobotFileParser(robot_url)
+                    policy.parse(text.splitlines())
+                    evidence['text'] = text
+                elif status in (404, 410):
+                    policy = RobotFileParser(robot_url)
+                    policy.parse([])
+                elif status in (401, 403):
+                    evidence['error_kind'] = f'http_{status}'
+                    raise CrawlError('robots_denied', f'robots HTTP {status}')
+                else:
+                    retryable = status in (408, 429) or 500 <= status < 600
+                    evidence['error_kind'] = f'http_{status}'
+                    raise CrawlError('robots_unknown', f'robots HTTP {status}')
+                error, retryable = None, False
+                evidence.pop('error', None)
+                evidence.pop('error_kind', None)
+                break
+            except Exception as exc:
+                error = exc.status if isinstance(exc, CrawlError) else 'robots_unknown'
+                if isinstance(exc, (requests.RequestException, OSError)):
+                    retryable = (not isinstance(exc, requests.exceptions.SSLError)
+                                 and (isinstance(exc, requests.RequestException)
+                                      or 'http_status' not in evidence['requests'][-1]))
+                    evidence['error_kind'] = type(exc).__name__
+                elif isinstance(exc, CrawlError) and exc.status == 'response_deadline':
+                    error, retryable = 'robots_unknown', True
+                    evidence['error_kind'] = 'retry_budget_exhausted'
+                evidence['error'] = str(exc)[:500]
+            if not retryable or attempt == self.robots_attempts:
+                break
+            site = get_fld(current, fail_silently=True) or host(current)
+            backoff = 2 ** (attempt - 1) + random.uniform(0, .25)
+            wait = max(backoff, self.next_at.get(site, 0) - time.monotonic())
+            if wait >= deadline - time.monotonic():
+                evidence['retry_deferred'] = 'Cooldown/backoff exceeds remaining robots retry budget'
+                break
+            evidence['requests'][-1]['retry_wait_seconds'] = round(wait, 3)
+            time.sleep(wait)
+        evidence.update(retryable=retryable, elapsed_seconds=round(time.monotonic() - started, 3),
+                        cache_hit=False)
+        return policy, evidence, error
 
     def robot_policy(self, url):
         p = urlsplit(url)
         origin = f'{p.scheme}://{p.netloc}'
+        waiting = time.monotonic()
         with self.lock_for(self.robots_locks, origin):
-            if origin not in self.robots:
-                robot_url = origin + '/robots.txt'
-                evidence = {'url': robot_url, 'fetched_at': utc()}
-                try:
-                    current = robot_url
-                    for _ in range(6):
-                        status, headers, body = self.request_once(current, 1024 * 1024)
-                        if status in (301, 302, 303, 307, 308) and headers.get('Location'):
-                            current = urljoin(current, headers['Location'])
-                            continue
-                        break
-                    evidence.update(status=status, final_url=current, body_sha256=digest(body))
-                    if 200 <= status < 300:
-                        text = body.decode('utf-8', 'replace')
-                        if '<html' in text[:1000].lower() or '<!doctype' in text[:1000].lower():
-                            raise CrawlError('robots_unknown', 'HTML instead of robots.txt')
-                        policy = RobotFileParser(robot_url)
-                        policy.parse(text.splitlines())
-                        evidence['text'] = text
-                    elif status in (404, 410):
-                        policy = RobotFileParser(robot_url)
-                        policy.parse([])
-                    elif status in (401, 403):
-                        raise CrawlError('robots_denied', f'robots HTTP {status}')
-                    else:
-                        raise CrawlError('robots_unknown', f'robots HTTP {status}')
-                    self.robots[origin] = (policy, evidence, None)
-                except Exception as exc:
-                    error = exc.status if isinstance(exc, CrawlError) else 'robots_unknown'
-                    evidence['error'] = str(exc)[:500]
-                    self.robots[origin] = (None, evidence, error)
+            lock_wait = time.monotonic() - waiting
+            cached = origin in self.robots and time.monotonic() < self.robots_expiry.get(origin, math.inf)
+            if not cached:
+                self.robots[origin] = self.load_robots(origin)
+                policy, evidence, error = self.robots[origin]
+                if error and evidence['retryable']:
+                    site = get_fld(origin, fail_silently=True) or p.hostname
+                    ttl = max(self.robots_failure_ttl, self.next_at.get(site, 0) - time.monotonic())
+                    self.robots_expiry[origin] = time.monotonic() + ttl
+                    evidence['failure_cache_ttl_seconds'] = round(ttl, 3)
+                else:
+                    self.robots_expiry.pop(origin, None)
                 write_json(self.out / 'robots' / (digest(origin.encode()) + '.json'), evidence)
             policy, evidence, error = self.robots[origin]
+            evidence = dict(evidence, cache_hit=cached, lock_wait_seconds=round(lock_wait, 3))
+            self.local.robot_evidence = evidence
         if error:
             raise CrawlError(error, evidence.get('error', error))
         if not policy.can_fetch(ROBOT_AGENT, url):
@@ -298,7 +411,14 @@ class Fetcher:
         current = url
         chain = []
         for _ in range(8):
-            delay, robots = self.robot_policy(current)
+            try:
+                delay, robots = self.robot_policy(current)
+            except CrawlError:
+                evidence = getattr(self.local, 'robot_evidence', {})
+                parsed = urlsplit(current)
+                if evidence.get('origin') == f'{parsed.scheme}://{parsed.netloc}':
+                    trace['robots'] = evidence
+                raise
             trace['robots'] = robots
             for attempt in range(1, self.attempts + 1):
                 event = {'url': current, 'attempt': attempt, 'at': utc()}
@@ -360,6 +480,43 @@ def dom_text(element):
     return normalize(''.join(result))
 
 
+def bachmai_publication_date(tree):
+    """Read the current article's print header, never dates from related stories."""
+    articles = tree.xpath('//*[@id="content-post"]')
+    if len(articles) != 1:
+        return None
+    headers = articles[0].xpath('.//*[@id="title-print"]')
+    if len(headers) != 1:
+        return None
+    text = ' '.join(headers[0].itertext())
+    dates = re.findall(r'Ngày đăng\s*:\s*(\d{1,2}/\d{1,2}/\d{4})(?!\d)', text)
+    if len(dates) != 1:
+        return None
+    try:
+        return datetime.strptime(dates[0], '%d/%m/%Y').date().isoformat()
+    except ValueError:
+        return None
+
+
+def bachmai_article_body(element):
+    """Remove confirmed related-story widgets while preserving surrounding text."""
+    from copy import deepcopy
+    article = deepcopy(element)
+    for node in list(article.iterdescendants()):
+        if not isinstance(node.tag, str):
+            continue
+        classes = set((node.get('class') or '').split())
+        related = 'post-detail__same-category-content' in classes
+        if node.tag == 'article' and 'story' in classes:
+            labels = node.xpath('./header/h4[contains(concat(" ", normalize-space(@class), " "), " label ")]')
+            links = node.xpath('./header/a[contains(concat(" ", normalize-space(@class), " "), " title ")][@href]')
+            related = bool(links) and any(' '.join(label.itertext()).strip().upper() == 'TIN LIÊN QUAN'
+                                          for label in labels)
+        if related:
+            node.drop_tree()  # lxml keeps the tail (article text following the widget).
+    return article
+
+
 def extract(body, content_type, url):
     if body.startswith(b'%PDF-') or 'application/pdf' in content_type.lower():
         import pymupdf
@@ -392,16 +549,18 @@ def extract(body, content_type, url):
     if host(url) == 'bachmai.gov.vn':
         from lxml import html
         tree = html.fromstring(html_input)
+        output['published_at'] = bachmai_publication_date(tree)
         bodies = [el for el in tree.iter('div') if 'content-editor-post' in (el.get('class') or '').split()]
         intros = [el for el in tree.iter('div') if 'content-excerpt' in (el.get('class') or '').split()]
         if len(bodies) == 1:
-            main = dom_text(bodies[0])
+            article = bachmai_article_body(bodies[0])
+            main = dom_text(article)
             intro = '\n\n'.join(dom_text(el) for el in intros)
             text = main if not intro or main.startswith(intro) else intro + '\n\n' + main
-            output.update(text=normalize(text), extractor='bachmai_dom_v1',
+            output.update(text=normalize(text), extractor='bachmai_dom_v2',
                           source_body_chars=len(main), source_intro_chars=len(intro),
                           extraction_selectors=['div.content-excerpt', 'div.content-editor-post'],
-                          source_images=[{'url': el.get('src'), 'alt': el.get('alt')} for el in bodies[0].iter('img')])
+                          source_images=[{'url': el.get('src'), 'alt': el.get('alt')} for el in article.iter('img')])
         else:
             output['domain_parser_fallback'] = True
     return output
@@ -451,7 +610,7 @@ def quality(doc):
         flags.append('pdf_needs_ocr_review')
     if doc.get('domain_parser_fallback'):
         flags.append('domain_parser_fallback')
-    if doc.get('extractor') == 'bachmai_dom_v1' and doc.get('source_body_chars', 0) < 150:
+    if doc.get('extractor') in ('bachmai_dom_v1', 'bachmai_dom_v2') and doc.get('source_body_chars', 0) < 150:
         flags.append('short_article_body')
         if doc.get('source_images'):
             flags.append('image_text_requires_ocr_review')
@@ -499,8 +658,14 @@ def crawl(args):
     manifest = load_json(out / 'manifest.json')
     if file_hash(out / 'sample.jsonl') != manifest['sample_sha256']:
         raise ValueError('Sample hash changed.')
+    robots_options = {key: getattr(args, key, default) for key, default in {
+        'robots_attempts': None, 'robots_connect_timeout': 15.0, 'robots_read_timeout': 30.0,
+        'robots_retry_budget': 90.0, 'robots_failure_ttl': 30.0}.items()}
+    fetcher = Fetcher(out, args.delay, args.attempts, **robots_options)
     identity = {'version': VERSION, 'script_sha256': file_hash(__file__), 'delay': args.delay,
                 'attempts': args.attempts, 'user_agent': UA,
+                'robot_agent': ROBOT_AGENT, **fetcher.robots_config,
+                'python_version': sys.version.split()[0], 'platform': sys.platform,
                 'packages': {p: importlib.metadata.version(p) for p in ('requests', 'pyarrow', 'trafilatura', 'pymupdf')}}
     path = out / 'crawl_config.json'
     if path.exists() and load_json(path) != identity:
@@ -521,7 +686,6 @@ def crawl(args):
     random.Random(42).shuffle(pending)
     if args.max_new:
         pending = pending[:args.max_new]
-    fetcher = Fetcher(out, args.delay, args.attempts)
     summary = Counter()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = [pool.submit(crawl_one, row, fetcher, out) for row in pending]
@@ -721,6 +885,11 @@ def main():
     p.add_argument('--workers', type=int, default=12)
     p.add_argument('--delay', type=float, default=1.0)
     p.add_argument('--attempts', type=int, default=3)
+    p.add_argument('--robots-attempts', type=int, default=None, help='Default: inherit --attempts')
+    p.add_argument('--robots-connect-timeout', type=float, default=15.0)
+    p.add_argument('--robots-read-timeout', type=float, default=30.0)
+    p.add_argument('--robots-retry-budget', type=float, default=90.0)
+    p.add_argument('--robots-failure-ttl', type=float, default=30.0)
     p.add_argument('--max-new', type=int)
     p.set_defaults(func=locked_crawl)
     p = sub.add_parser('report')
