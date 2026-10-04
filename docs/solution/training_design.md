@@ -28,9 +28,9 @@ chunks.parquet ──────────────┬──────�
    ▼                         │                         │
 bm25.npz + embeddings.npy    │                         │
    │ scripts/retrieve.py  ◄──┘ (query.parquet)         │
-   ▼                                                    │
-candidates.jsonl                                        │
-   │ scripts/submit.py  ◄───────────────────────────────┘ (re-slice từ corpus)
+   ▼                                                   │
+candidates.jsonl                                       │
+   │ scripts/submit.py  ◄──────────────────────────────┘ (re-slice từ corpus)
    ▼
 submission.zip ──► scripts/evaluate.py (cần labels.jsonl) ──► EVAL_REPORT.md
 ```
@@ -304,3 +304,4 @@ python scripts/evaluate.py score --corpus <corpus...>
 ```
 
 Chạy thử không cần model: thêm `--encoder hash` cho `index.py` và `--reranker identity` cho `retrieve.py`. `--corpus` ở `submit.py` phải là đúng các file đã đưa vào `chunk.py`.
+
