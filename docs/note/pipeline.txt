@@ -1,0 +1,86 @@
+flowchart TD
+    SRC["Nguồn BTC: ID và URL"]
+    Q["query.parquet"]
+
+    subgraph A["A — DỮ LIỆU VÀ ĐỘ PHỦ"]
+        direction TB
+        A0["A0 · Kiểm kê nguồn và ngân sách crawl"]
+        A1["A1 · Crawl theo ưu tiên, lưu nguồn"]
+        A2["A2 · Trích xuất nội dung có cấu trúc"]
+        A3["A3 · Ngôn ngữ, chất lượng và nhóm trùng"]
+        A4["A4 · Chia đoạn, giữ ID và vị trí nguồn"]
+        A0 --> A1 --> A2 --> A3 --> A4
+    end
+
+    subgraph B["B — MODEL VÀ CHỈ MỤC"]
+        direction TB
+        B0["B0 · Chọn model, đo chi phí, chốt cấu hình"]
+        B1["B1 · BM25 với xử lý từng ngôn ngữ"]
+        B2["B2 · Embedding theo shard và vector index"]
+        B0 --> B1
+        B0 --> B2
+    end
+
+    subgraph C["C — TRUY XUẤT XUYÊN NGÔN NGỮ"]
+        direction TB
+        C1["C1 · Query gốc và bản dịch nếu bật"]
+        C2["C2 · Lexical và dense, hợp nhất RRF"]
+        C3["C3 · Rerank đa ngôn ngữ"]
+        C1 --> C2 --> C3
+    end
+
+    subgraph D["D — BẰNG CHỨNG VÀ BÀI NỘP"]
+        direction TB
+        D1["D1 · Chọn docs và đoạn bằng chứng"]
+        D2["D2 · Lấy đoạn nguồn và validate"]
+        D3["D3 · Ghi JSON, đóng ZIP, kiểm tra lại"]
+        D1 --> D2 --> D3
+    end
+
+    subgraph E["E — ĐO LƯỜNG VÀ CẢI THIỆN"]
+        direction TB
+        E1["E1 · Dev độc lập và nhãn có nguồn gốc"]
+        E2["E2 · Đo chất lượng, độ phủ và chi phí"]
+        E3["E3 · Chọn thay đổi; fine-tune nếu có ích"]
+        E1 --> E2 --> E3
+    end
+
+    SRC --> A0
+    A4 --> B0
+    B1 --> C2
+    B2 --> C2
+    Q --> C1
+    C3 --> D1
+    D3 --> OUT["submission.zip"]
+
+    A3 -.-> E1
+    D1 -.-> E2
+    E3 -.->|"Điều chỉnh nguồn và xử lý dữ liệu"| A0
+    E3 -.->|"Điều chỉnh model và cấu hình"| B0
+
+
+
+    | Mã | Chức năng | Input → Output | Chi phí/quy mô cần theo dõi |
+|---|---|---|---|
+| **A** | **Tạo corpus có độ phủ phù hợp ngân sách** | ID–URL → documents, chunks, nguồn gốc | Thời gian mạng, CPU, dung lượng raw/text |
+| A0 | Thống kê domain; probe mẫu; phân nhóm ngôn ngữ/loại trang; lập lịch ưu tiên | Danh sách URL, thời hạn → crawl manifest và ngân sách theo nhóm | URL/domain, tốc độ thực tế, tỷ lệ lấy được nội dung |
+| A1 | Crawl có checkpoint; retry có giới hạn; giữ raw | Manifest → bản nguồn, log thành công/thất bại | Request, giây tải, byte tải; tỷ lệ retry |
+| A2 | Lấy thân bài, tiêu đề, đề mục, bảng và phần hỏi–đáp | Raw → text và cấu trúc nguồn | Documents/giây; lỗi theo parser/domain |
+| A3 | Nhận diện ngôn ngữ; gắn cờ chất lượng; nhóm trùng mà giữ ID | Text → documents có `lang`, quality flags, duplicate group | Tỷ lệ nội dung dùng được; trùng; suspect |
+| A4 | Tạo đoạn tìm kiếm; lưu vị trí để lấy lại đoạn nguồn | Documents → chunks và ánh xạ | Chunks/document; phân bố token; overlap phát sinh |
+| **B** | **Tạo indexes có phiên bản trong ngân sách máy** | Chunks, tài nguyên → models, indexes, manifest | CPU, GPU, RAM, đĩa và độ phủ index |
+| B0 | Kiểm tra model hợp lệ; đo pilot; chọn cấu hình model/index và giới hạn mỗi giai đoạn | Pilot, tài nguyên, quy định → kế hoạch tính toán | Token/giây hoặc chunks/giây; VRAM; giờ còn lại |
+| B1 | Lập BM25 với tokenizer/analyzer theo ngôn ngữ | Chunks → lexical index | Thời gian build, RAM/đĩa, số chunks đã index |
+| B2 | Encode theo shard, checkpoint; xây vector index | Chunks được lên lịch, embedding model → vectors/index | GPU giờ, số token/chunks, dung lượng vector/index |
+| **C** | **Lấy ứng viên xuyên ngôn ngữ với chi phí giới hạn** | Queries, indexes → ứng viên đã rerank | Thời gian/query; số cặp query–chunk |
+| C1 | Giữ query gốc; tùy chọn dịch sang Anh/Trung và cache | Query Việt → các biểu diễn truy vấn | Thời gian dịch, số biến thể/query |
+| C2 | Tìm lexical và dense; hợp nhất; theo dõi đóng góp từng kênh | Query, indexes → candidate pool | Top-k/kênh; latency; độ phủ ứng viên |
+| C3 | Rerank đa ngôn ngữ, cache điểm theo phiên bản | Query, candidates → điểm và thứ hạng | Số cặp phải chấm, chiều dài đầu vào, GPU giờ |
+| **D** | **Chuyển ứng viên thành bài nộp đúng quy định** | Ranked candidates, corpus → ZIP | Thời gian chọn/validate; kích thước kết quả |
+| D1 | Chọn docs/chunks, xử lý đoạn chồng lấn; tùy chọn mở rộng đoạn nguồn và chấm lại | Candidates → tập bằng chứng cuối | Số docs/chunks/query; chi phí chấm bổ sung |
+| D2 | Lấy đúng đoạn nguồn; kiểm tra ID, schema, đủ query và provenance | Bằng chứng, corpus → JSON records hợp lệ | Lỗi ID, đoạn không khớp nguồn, query thiếu |
+| D3 | Ghi JSON, ZIP và mở lại kiểm tra; lưu manifest | Records → `submission.zip` | Kích thước file, thời gian đóng gói |
+| **E** | **Chọn cải tiến dựa trên bằng chứng** | Nhãn, dự đoán, logs → thay đổi có kiểm chứng | Công gán nhãn, GPU thí nghiệm, thời gian còn lại |
+| E1 | Xây dev được rà soát; lưu nguồn/độ tin cậy nhãn; tạo train riêng nếu cần | Corpus, người gán nhãn, nguồn hợp lệ → nhãn có provenance | Số query được kiểm tra; độ đầy đủ nhãn; công sức |
+| E2 | Đo metrics retrieval, độ phủ vận hành và chi phí; phân loại lỗi | Dev, dự đoán, logs → báo cáo điểm yếu | Document/chunk F2, coverage, thời gian và bộ nhớ |
+| E3 | Ưu tiên sửa crawl/parser, tune hoặc fine-tune; so lại với baseline | Báo cáo, train nếu có → cấu hình/checkpoint mới | Mức cải thiện so với chi phí và thời hạn |
