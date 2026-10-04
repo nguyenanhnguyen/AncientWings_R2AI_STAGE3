@@ -50,7 +50,9 @@ Upload [crawl_corpus_kaggle.ipynb](notebooks/crawl_corpus_kaggle.ipynb) lên Kag
 
 Đặt `MAX_NEW = 10` để thử trước, rồi đổi thành `None` và chạy lại ô crawl. Khi đổi session, giữ output và thêm run đã giải nén vào Kaggle Input để dùng `RESUME_RUN_PATH`.
 
-Notebook corpus dùng chung engine với `crawl_domain_samples`: User-Agent trình duyệt, timeout 20/45 giây, ngân sách 180 giây/URL và Selenium cho URL Requests lỗi. `RESPECT_ROBOTS` chỉnh ở ô cấu hình. Để nâng cấp run cũ hoặc thử lại lỗi, dùng `RECOVERY_RUN_PATH` và `RUN_TAG` mới. Kết quả Selenium qua QC được xuất vào corpus, lỗi Requests vẫn được giữ riêng.
+Notebook corpus dùng chung engine với `crawl_domain_samples`: User-Agent trình duyệt, timeout 20/45 giây, ngân sách 180 giây/URL và Selenium cho URL Requests lỗi, trang JS hoặc text rỗng/QC lỗi. `RESPECT_ROBOTS` chỉnh ở ô cấu hình. Để nâng cấp run cũ hoặc thử lại lỗi, dùng `RECOVERY_RUN_PATH` và `RUN_TAG` mới. Kết quả cuối chọn engine có QC tốt hơn, giữ Requests khi tương đương; nội dung Selenium qua QC được xuất vào corpus, lỗi Requests vẫn được giữ riêng.
+
+Khi bật Selenium, notebook kiểm tra Chrome trước lượt Requests. Trên Kaggle/Linux dùng apt, notebook tự cài thư viện Chrome còn thiếu (gồm ATK); nếu Chrome không khởi động được thì dừng sớm và lưu lỗi/log. Parser riêng của 120ask lấy câu hỏi/câu trả lời; cnkang lấy thân bài và bỏ menu/bài liên quan.
 
 Phần chẩn đoán nằm ngay trong notebook, tại mục **8. ZIP chẩn đoán**; không cần file hay ô Python rời. Output tự có `<run>_diagnostics.zip`, cập nhật sau mỗi log tiến độ và khi bước xử lý kết thúc. Có thể chạy lại mục 8 để tạo ZIP từ checkpoint hiện tại mà không tải lại URL.
 
@@ -60,9 +62,9 @@ Giải nén ZIP, mở `overview.html` để xem tiến độ, tốc độ/ETA, l
 
 [crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) chứa sẵn 97 URL mẫu của 97 hostname, snapshot crawler và code probe. Chạy các ô từ trên xuống trên Kaggle, Colab hoặc Jupyter có Internet. Notebook tự cài dependencies và lưu phiên bản cùng output.
 
-Đặt `MAX_NEW = 10` để chạy thử; dùng `RESUME_RUN_DIR` để tiếp tục output đã có. Dùng `RECOVERY_RUN_DIR` với một run mới để thử lại nhóm lỗi và tái sử dụng raw hợp lệ. `BROWSER_TEST_MODE` điều khiển bước đối chiếu Selenium cho URL Requests lỗi.
+Đặt `MAX_NEW = 10` để chạy thử; dùng `RESUME_RUN_DIR` để tiếp tục output cùng phiên bản code. Dùng `RECOVERY_RUN_DIR` với một run mới để thử lại nhóm lỗi và tái sử dụng raw hợp lệ bằng parser mới. `BROWSER_TEST_MODE` điều khiển bước đối chiếu Selenium cho URL Requests lỗi hoặc trích xuất lỗi/rỗng. Sau khi đổi snapshot, giữ `RESUME_RUN_DIR = None` và tạo run mới.
 
-Output gồm bảng `ket_qua.csv/html`, kết quả Requests/Selenium, lỗi theo loại, raw, ảnh chụp và snapshot code. Tải ZIP trong Output của Kaggle hoặc qua các liên kết notebook hiển thị.
+Output gồm bảng `ket_qua.csv/html`, kết quả Requests/Selenium, lỗi theo loại, raw, ảnh chụp và snapshot code. `browser_runtime.json` / `browser_preflight.json` cùng log Chrome ghi tình trạng môi trường; `summary.json` tách số URL phục hồi truy cập và cải thiện nội dung nhờ Selenium. Tải ZIP trong Output của Kaggle hoặc qua các liên kết notebook hiển thị.
 
 ## Môi trường RAG
 
