@@ -1,5 +1,7 @@
 """Exercise notebook cells offline without installing packages or fetching websites."""
 from contextlib import redirect_stdout
+import ast
+import base64
 import hashlib
 import importlib.util
 import io
@@ -11,6 +13,7 @@ import types
 import unittest
 from unittest.mock import patch
 import zipfile
+import zlib
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -23,7 +26,7 @@ NOTEBOOK = ROOT / 'notebooks/crawl_corpus_kaggle.ipynb'
 class KaggleNotebookTests(unittest.TestCase):
     def setUp(self):
         self.notebook = json.loads(NOTEBOOK.read_text(encoding='utf-8'))
-        self.code = [c['source'] for c in self.notebook['cells'] if c['cell_type'] == 'code']
+        self.code = [''.join(c['source']) for c in self.notebook['cells'] if c['cell_type'] == 'code']
 
     def test_structure_and_invalid_id_range(self):
         self.assertEqual(self.notebook['nbformat'], 4)
@@ -32,6 +35,25 @@ class KaggleNotebookTests(unittest.TestCase):
             compile(source, f'notebook-cell-{i}', 'exec')
         with self.assertRaisesRegex(ValueError, 'ID_FROM'):
             exec(self.code[0].replace('ID_TO = 1582', 'ID_TO = 582'), {})
+
+    def test_corpus_and_domain_notebooks_embed_the_same_current_fetch_engine(self):
+        def constants(cells):
+            values = {}
+            for cell in cells:
+                if cell['cell_type'] != 'code':
+                    continue
+                for node in ast.parse(''.join(cell['source'])).body:
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id in ('EMBEDDED_FILES', 'PRIORITY_PAYLOAD'):
+                                values[target.id] = ast.literal_eval(node.value)
+            return values
+        domain = json.loads((ROOT / 'notebooks/crawl_domain_samples.ipynb').read_text(encoding='utf-8'))
+        corpus_payload = constants(self.notebook['cells'])['EMBEDDED_FILES']['priority_probe_snapshot.py']
+        domain_payload = constants(domain['cells'])['PRIORITY_PAYLOAD']
+        current = (ROOT / 'src/vibiomir/crawl/priority_probe.py').read_bytes()
+        self.assertEqual(zlib.decompress(base64.b85decode(corpus_payload)), current)
+        self.assertEqual(zlib.decompress(base64.b85decode(domain_payload)), current)
 
     def test_inclusive_selection_export_and_resume(self):
         display_module = types.ModuleType('IPython.display')
@@ -49,6 +71,7 @@ class KaggleNotebookTests(unittest.TestCase):
             namespace = {}
             with patch.dict(sys.modules, {'IPython.display': display_module}), redirect_stdout(io.StringIO()):
                 exec(configuration, namespace)
+                namespace['BROWSER_TEST_MODE'] = 'off'
                 with patch('subprocess.run') as install:
                     install.return_value = types.SimpleNamespace(stdout='Offline installer fixture\\n', returncode=0)
                     exec(self.code[1], namespace)
@@ -56,6 +79,8 @@ class KaggleNotebookTests(unittest.TestCase):
                 exec(self.code[2], namespace)
                 self.assertTrue(namespace['diagnostics_archive'].is_file())
                 for snapshot, module in [('crawler_snapshot.py', 'crawler.py'),
+                                         ('priority_probe_snapshot.py', 'priority_probe.py'),
+                                         ('corpus_runner_snapshot.py', 'corpus_runner.py'),
                                          ('audit_snapshot.py', 'audit.py'),
                                          ('export_snapshot.py', 'export.py'),
                                          ('diagnostics_snapshot.py', 'diagnostics.py')]:
@@ -79,6 +104,10 @@ class KaggleNotebookTests(unittest.TestCase):
                 spec = importlib.util.spec_from_file_location('notebook_crawler', namespace['CRAWLER'])
                 crawler = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(crawler)
+                spec = importlib.util.spec_from_file_location('notebook_runner', namespace['CORPUS_RUNNER'])
+                runner = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(runner)
+                probe = runner.load_module('notebook_probe', namespace['RUN_DIR'] / 'priority_probe_snapshot.py')
 
                 class OfflineFetcher:
                     def fetch(self, url, trace):
@@ -90,7 +119,11 @@ class KaggleNotebookTests(unittest.TestCase):
 
                 run = namespace['RUN_DIR']
                 sample = [json.loads(line) for line in (run / 'sample.jsonl').read_text(encoding='utf-8').splitlines()]
-                record = crawler.crawl_one(sample[0], OfflineFetcher(), run)
+                def request(url, *args, **kwargs):
+                    return 200, {'Content-Type': 'text/html; charset=utf-8'}, OfflineFetcher().fetch(url, {})
+                with patch.object(crawler.Fetcher, 'request_once', side_effect=request):
+                    runner.run(crawler, probe, run, {'browser_mode': 'off'}, max_new=1)
+                record = crawler.load_json(run / 'records' / f"{sample[0]['id']}.json")
                 self.assertEqual(record['quality_status'], 'accepted')
                 exec(self.code[6], namespace)
                 self.assertEqual(namespace['summary']['pending'], 1)
@@ -112,7 +145,9 @@ class KaggleNotebookTests(unittest.TestCase):
                     self.assertTrue(any(name.startswith('samples/raw/') for name in archive.namelist()))
                     self.assertFalse(any(name.startswith('raw/') or name.endswith('corpus.parquet') for name in archive.namelist()))
 
-                record = crawler.crawl_one(sample[1], OfflineFetcher(), run)
+                with patch.object(crawler.Fetcher, 'request_once', side_effect=request):
+                    runner.run(crawler, probe, run, {'browser_mode': 'off'}, max_new=1)
+                record = crawler.load_json(run / 'records' / f"{sample[1]['id']}.json")
                 self.assertEqual(record['quality_status'], 'accepted')
                 exec(self.code[5], namespace)  # Both checkpoints exist: zero network requests.
                 exec(self.code[6], namespace)
@@ -134,6 +169,7 @@ class KaggleNotebookTests(unittest.TestCase):
                 restore_config = restore_config.replace('RESUME_RUN_PATH = None', f'RESUME_RUN_PATH = {str(run)!r}')
                 restored = {}
                 exec(restore_config, restored)
+                restored['BROWSER_TEST_MODE'] = 'off'
                 with patch('subprocess.run') as install:
                     install.return_value = types.SimpleNamespace(stdout='', returncode=0)
                     exec(self.code[1], restored)

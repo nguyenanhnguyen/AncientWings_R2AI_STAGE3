@@ -38,7 +38,9 @@ def build():
 
         ID bắt đầu và kết thúc đều được tính vào khoảng chọn. Đây là **ID gốc**,
         không phải số thứ tự dòng. Giữ nguyên ID/URL nguồn, không dịch hoặc sinh lại text.
-        Trích HTML/PDF có text; chưa có OCR hoặc browser render JavaScript.
+        Trích HTML/PDF có text; Selenium thử lại URL lỗi và render JavaScript. Chưa có OCR.
+        Dùng chung `priority_probe.py` với notebook 97 hostname: header trình duyệt,
+        timeout/retry có ngân sách, giữ lỗi theo từng lần thử và kiểm tra challenge.
         Tài liệu nguồn: [ViBioMIR](https://huggingface.co/datasets/AIGuruTinix/ViBioMIR).
     ''')
     add('markdown', '''
@@ -46,12 +48,16 @@ def build():
 
         Mặc định chọn ID **583–1582**. Để thử trước, đặt `MAX_NEW = 10`;
         sau đó đổi thành `None` và chạy lại ô crawl để làm tiếp.
-        Giữ nguyên `DELAY`, `ATTEMPTS` và phiên bản code khi resume cùng run.
+        Giữ nguyên cấu hình tải trang/browser và phiên bản code khi resume cùng run.
         Với khoảng lớn, chia thành nhiều run nhỏ: crawler hiện tại nạp danh sách công việc vào RAM.
 
         `SOURCE_PARQUET` để trống sẽ tải nguồn đã chốt từ Hugging Face.
         Nếu đã thêm Parquet vào Kaggle Input, điền đường dẫn `/kaggle/input/.../links_corpus.parquet`.
         `RESUME_RUN_PATH` tùy chọn trỏ tới **thư mục run đã giải nén** từ notebook này trong Kaggle Input.
+        Để nâng cấp run cũ hoặc thử lại lỗi, đặt `RECOVERY_RUN_PATH` và chọn `RUN_TAG` mới.
+        Recovery dùng lại raw 2xx đã kiểm tra hash, chạy lại extractor/QC, rồi crawl URL còn lỗi.
+        `RESPECT_ROBOTS = False` tải trực tiếp giống `domain_samples`; đặt `True` để
+        kiểm tra robots trước các request trang. Trạng thái robots không được chuyển sang Selenium.
     ''')
     add('code', '''
         # ===== CHỈNH CẤU HÌNH TẠI ĐÂY =====
@@ -61,10 +67,27 @@ def build():
         DELAY = 1.0
         ATTEMPTS = 3
         MAX_NEW = None            # None: toàn bộ còn lại; 10: thêm tối đa 10 URL
+        USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+        PAGE_CONNECT_TIMEOUT = 20.0
+        PAGE_READ_TIMEOUT = 45.0
+        PAGE_REQUEST_BUDGET = 180.0
+        RESPECT_ROBOTS = False    # False: giống domain_samples; True: kiểm tra robots
+        ROBOTS_ATTEMPTS = 3
+        ROBOTS_CONNECT_TIMEOUT = 15.0
+        ROBOTS_READ_TIMEOUT = 30.0
+        ROBOTS_RETRY_BUDGET = 90.0
+        ROBOTS_FAILURE_TTL = 30.0
+        BROWSER_TEST_MODE = 'failed_only'  # 'off', 'failed_only', 'all'
+        BROWSER_USER_AGENT = None  # Dùng User-Agent thực của Chrome
+        BROWSER_LOAD_TIMEOUT = 45.0
+        BROWSER_WAIT_SECONDS = 15.0
+        BROWSER_ATTEMPTS = 2
+        CHROME_BINARY = None      # Selenium Manager tự tìm/cài Chrome; hoặc đường dẫn có sẵn
 
         SOURCE_PARQUET = None     # None: tự tải; hoặc '/kaggle/input/.../links_corpus.parquet'
         RESUME_RUN_PATH = None    # None: mới/tiếp tục session; hoặc thư mục run trong Kaggle Input
-        RUN_TAG = None            # None: tự đặt ids_<ID_FROM>_<ID_TO>; đổi khi muốn run mới
+        RECOVERY_RUN_PATH = None  # Run cũ để reuse raw thành công, thử lại URL lỗi trong run mới
+        RUN_TAG = None            # None: ids_<ID_FROM>_<ID_TO>_synced; đổi khi muốn run mới
 
         from pathlib import Path
         import json
@@ -86,7 +109,9 @@ def build():
             raise ValueError('DELAY phải hữu hạn và không âm.')
         if MAX_NEW is not None and (type(MAX_NEW) is not int or MAX_NEW < 1):
             raise ValueError('MAX_NEW phải là None hoặc số nguyên dương.')
-        tag = RUN_TAG or f'ids_{ID_FROM}_{ID_TO}'
+        if RECOVERY_RUN_PATH and RESUME_RUN_PATH:
+            raise ValueError('Chỉ chọn RECOVERY_RUN_PATH hoặc RESUME_RUN_PATH.')
+        tag = RUN_TAG or f'ids_{ID_FROM}_{ID_TO}_synced' + ('_recovery' if RECOVERY_RUN_PATH else '')
         if not isinstance(tag, str) or tag in ('.', '..') or any(separator in tag for separator in ('/', chr(92))):
             raise ValueError('RUN_TAG chỉ là tên thư mục, không phải đường dẫn.')
         RUN_DIR = WORKDIR / 'runs' / tag
@@ -101,6 +126,8 @@ def build():
             else:
                 print('Đã có output trong session; dùng run hiện tại, không copy đè.')
         if (RUN_DIR / 'manifest.json').exists():
+            if (RUN_DIR / 'crawl_config.json').exists() and not (RUN_DIR / 'corpus_config.json').exists():
+                raise ValueError('Run cũ cần nâng cấp: chọn RUN_TAG mới và dùng RECOVERY_RUN_PATH.')
             saved = json.loads((RUN_DIR / 'manifest.json').read_text(encoding='utf-8'))
             if saved.get('id_start_inclusive') != ID_FROM or saved.get('id_stop_exclusive') != ID_TO + 1:
                 raise ValueError('Khoảng ID không khớp run đã có. Chọn RUN_TAG mới.')
@@ -119,6 +146,8 @@ def build():
         import importlib.metadata
 
         package_names = ['pyarrow', 'requests', 'trafilatura', 'pymupdf', 'tld']
+        if BROWSER_TEST_MODE != 'off':
+            package_names.append('selenium')
         requirements_path = RUN_DIR / 'notebook_requirements.txt'
         if requirements_path.exists():
             install_args = ['-r', str(requirements_path)]
@@ -149,6 +178,8 @@ def build():
     embedded = {}
     hashes = {}
     for name, module in [('crawler_snapshot.py', 'crawler.py'),
+                         ('priority_probe_snapshot.py', 'priority_probe.py'),
+                         ('corpus_runner_snapshot.py', 'corpus_runner.py'),
                          ('audit_snapshot.py', 'audit.py'),
                          ('export_snapshot.py', 'export.py'),
                          ('diagnostics_snapshot.py', 'diagnostics.py')]:
@@ -168,6 +199,7 @@ def build():
                         raise ValueError(f'Snapshot bị hỏng: {name}')
                     target.write_bytes(body)
             CRAWLER = RUN_DIR / 'crawler_snapshot.py'
+            CORPUS_RUNNER = RUN_DIR / 'corpus_runner_snapshot.py'
             AUDITOR = RUN_DIR / 'audit_snapshot.py'
             EXPORTER = RUN_DIR / 'export_snapshot.py'
             # Diagnostics chỉ đọc output, có thể cập nhật riêng mà không đổi crawler/hash resume.
@@ -297,7 +329,7 @@ def build():
             # Output hiển thị trực tiếp để theo dõi tiến độ; không dùng shell.
             invocation_id = uuid.uuid4().hex
             started = time.monotonic()
-            operation = str(arguments[0]) if script == CRAWLER else Path(script).stem
+            operation = str(arguments[0]) if script in (CRAWLER, CORPUS_RUNNER) else Path(script).stem
             log_event('invocations.jsonl', {
                 'event': 'start', 'invocation_id': invocation_id, 'operation': operation,
                 'at': datetime.now(timezone.utc).isoformat(), 'arguments': list(map(str, arguments)),
@@ -369,20 +401,41 @@ def build():
     add('markdown', '''
         ## 6. Crawl — chạy lại ô này để tiếp tục
 
-        Tiến độ in mỗi 25 URL hoàn tất hoặc khi hết lượt. Crawler tuân thủ robots,
+        Tiến độ in mỗi 25 URL hoàn tất hoặc khi hết lượt. Chế độ robots theo `RESPECT_ROBOTS`,
         giới hạn một request cùng registered domain, có retry và checkpoint theo ID.
         `WORKERS = 4` không có nghĩa bốn request đồng thời đến cùng website.
         ID đã có checkpoint, kể cả thất bại, sẽ được bỏ qua khi resume.
+        `MAX_NEW` giới hạn URL Requests mới; Selenium tiếp tục các URL lỗi đã có checkpoint
+        nhưng chưa thử browser. Lỗi cài Chrome được ghi riêng, vẫn giữ kết quả Requests.
+        `records/` là kết quả cuối dùng để audit/export; `requests_records/` và
+        `browser_records/` giữ bằng chứng của từng engine. Chỉ nội dung qua QC mới được xuất corpus.
         ZIP `<run>_diagnostics.zip` được cập nhật sau mỗi log tiến độ và khi lệnh kết thúc,
         kể cả ngắt ô crawl. File có một số mẫu record/raw để debug, không nén lại toàn bộ raw.
     ''')
     add('code', '''
-        arguments = ['crawl', '--out', RUN_DIR, '--workers', WORKERS,
-                     '--delay', DELAY, '--attempts', ATTEMPTS]
+        corpus_settings = {
+            'user_agent': USER_AGENT, 'delay': DELAY, 'attempts': ATTEMPTS,
+            'timeout': [PAGE_CONNECT_TIMEOUT, PAGE_READ_TIMEOUT], 'budget': PAGE_REQUEST_BUDGET,
+            'respect_robots': RESPECT_ROBOTS,
+            'robots_options': {'robots_attempts': ROBOTS_ATTEMPTS,
+                               'robots_connect_timeout': ROBOTS_CONNECT_TIMEOUT,
+                               'robots_read_timeout': ROBOTS_READ_TIMEOUT,
+                               'robots_retry_budget': ROBOTS_RETRY_BUDGET,
+                               'robots_failure_ttl': ROBOTS_FAILURE_TTL},
+            'browser_mode': BROWSER_TEST_MODE, 'browser_user_agent': BROWSER_USER_AGENT,
+            'chrome_binary': str(CHROME_BINARY) if CHROME_BINARY else None,
+            'browser_load_timeout': BROWSER_LOAD_TIMEOUT, 'browser_wait_seconds': BROWSER_WAIT_SECONDS,
+            'browser_attempts': BROWSER_ATTEMPTS,
+        }
+        settings_path = RUN_DIR / 'corpus_settings.json'
+        settings_path.write_text(json.dumps(corpus_settings, ensure_ascii=False, indent=2), encoding='utf-8')
+        arguments = ['crawl', '--out', RUN_DIR, '--workers', WORKERS, '--config', settings_path]
+        if RECOVERY_RUN_PATH:
+            arguments += ['--recovery-source', RECOVERY_RUN_PATH]
         if MAX_NEW is not None:
             arguments += ['--max-new', MAX_NEW]
         print('ZIP chẩn đoán tự cập nhật:', diagnostics_archive)
-        run_script(CRAWLER, *arguments)
+        run_script(CORPUS_RUNNER, *arguments)
     ''', step='crawl')
     add('markdown', '''
         ## 7. Báo cáo, kiểm tra và xuất corpus
@@ -395,6 +448,10 @@ def build():
         run_script(CRAWLER, 'report', '--out', RUN_DIR)
         summary = json.loads((RUN_DIR / 'quality_report.json').read_text(encoding='utf-8'))
         display({k: summary[k] for k in ['selected', 'completed', 'pending', 'accepted', 'review', 'rejected', 'status_counts']})
+        if (RUN_DIR / 'access_summary.json').exists():
+            display(json.loads((RUN_DIR / 'access_summary.json').read_text(encoding='utf-8')))
+            print('Lỗi theo tổng URL dataset giảm dần:', RUN_DIR / 'WEB_ERRORS.md')
+            print('Đối chiếu Requests/Selenium:', RUN_DIR / 'requests_vs_selenium.csv')
         if summary['pending'] == 0:
             run_script(AUDITOR, '--out', RUN_DIR)
         else:
@@ -439,7 +496,8 @@ def build():
         tiến độ, tốc độ/ETA, HTTP status, lỗi và cờ chất lượng. Có CSV từng ID và log cài dependencies.
         Tải file trong Output hoặc qua link bên dưới. Khi đổi session, cần giữ output hoặc
         thêm run đã giải nén làm Kaggle Input và đặt `RESUME_RUN_PATH` trước khi chạy lại.
-        Resume không tự thử lại ID lỗi đã có checkpoint.
+        Resume không tự thử lại ID lỗi đã có checkpoint. Dùng `RECOVERY_RUN_PATH`
+        cùng `RUN_TAG` mới để thử lại lỗi bằng code/cấu hình mới và tái sử dụng raw thành công.
     ''')
     add('code', '''
         from IPython.display import FileLink

@@ -9,6 +9,8 @@ import zlib
 from collections import Counter
 import argparse
 import zipfile
+import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
@@ -76,9 +78,35 @@ def select_followup(baseline_zip):
     return probe
 
 
-def build(probe=None, priority_five=False):
+def select_all_hosts():
+    """Regenerate the original one-per-host reservoir sample from the source."""
+    sys.path.insert(0, str(ROOT / 'src'))
+    from vibiomir.crawl import crawler
+    with tempfile.TemporaryDirectory(prefix='domain97_') as temp:
+        out = Path(temp) / 'sample'
+        crawler.prepare(argparse.Namespace(source=str(ROOT / 'data/links_corpus.parquet'),
+                         out=str(out), size=97, seed=42, id_start=None, id_stop=None, reuse_run=None))
+        samples = [json.loads(line) for line in (out / 'sample.jsonl').read_text(encoding='utf-8').splitlines()]
+        profile = crawler.load_json(out / 'source_profile.json')
+        manifest = crawler.load_json(out / 'manifest.json')
+    if len(samples) != 97 or set(s['domain'] for s in samples) != set(profile['host_counts']):
+        raise ValueError('Expected one source sample for each of the 97 hostnames.')
+    for sample in samples:
+        sample.update(sample_role='original', sample_index=0)
+    samples.sort(key=lambda s: (-profile['host_counts'][s['domain']], s['domain']))
+    manifest.update(baseline_archive='', baseline_archive_sha256='')
+    baseline = {s['domain']: {'error_type': 'not_tested', 'requested_additional': 0,
+                'selected_additional': 0, 'shortfall': 0} for s in samples}
+    result = dict(samples=samples, source_profile=profile, manifest=manifest, baseline=baseline)
+    (ROOT / 'data/domain_probe_all_hosts_samples.json').write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    return result
+
+
+def build(probe=None, direct_probe=True, scope='all_hosts'):
     if probe is None:
-        probe = json.loads((ROOT / 'data/domain_probe_followup_samples.json').read_text(encoding='utf-8'))
+        sample_file = ROOT / 'data/domain_probe_all_hosts_samples.json'
+        probe = json.loads(sample_file.read_text(encoding='utf-8')) if sample_file.exists() else select_all_hosts()
     samples, profile, manifest = probe['samples'], probe['source_profile'], probe['manifest']
     if len({r['id'] for r in samples}) != len(samples) or len({r['url'] for r in samples}) != len(samples):
         raise ValueError('Duplicate sample ID or URL.')
@@ -102,7 +130,7 @@ def build(probe=None, priority_five=False):
         # Test domain samples — {len(samples)} URL / {len(probe['baseline'])} hostname
 
         Chạy các ô từ trên xuống (**Run All**). Kaggle cần bật **Internet**; chỉ dùng CPU.
-        Notebook giữ 1 URL cũ và thêm tối đa 4 URL khác nhau cho mỗi hostname,
+        Notebook chọn {'một URL gốc cho mỗi hostname' if scope == 'all_hosts' else 'một URL cũ và tối đa 4 URL khác nhau cho mỗi hostname'},
         lấy từ `links_corpus.parquet` (4.394.718 dòng; seed 42).
         Có {sum(r['sample_role'] == 'original' for r in samples)} mẫu cũ và {sum(r['sample_role'] == 'additional' for r in samples)} mẫu bổ sung.
         Không cần clone repo, tải Parquet hay upload code Python.
@@ -124,10 +152,11 @@ def build(probe=None, priority_five=False):
         không mở được bằng trình duyệt. Nhóm ưu tiên có thêm đối chiếu Selenium.
         Vài mẫu mỗi hostname chưa đại diện cho toàn bộ URL trên website.
     ''')
-    if priority_five:
-        add('markdown', '''
-            Nhóm ưu tiên: **cnkang, 120ask, familydoctor.com.cn, ask.39.net, zysjonline**,
-            tổng 2.910.092 dòng URL (66,22% dataset), 5 URL mỗi hostname.
+    if direct_probe:
+        cohort = ('Toàn bộ **97 hostname**, mỗi hostname một URL; giữ bộ mẫu reservoir seed 42 ban đầu.'
+                  if scope == 'all_hosts' else 'Nhóm mẫu bổ sung, vẫn giữ nguyên ID/URL nguồn.')
+        add('markdown', cohort + '''
+
             Chế độ này tải trực tiếp URL mẫu công khai bằng Requests với header trình duyệt;
             robots không chặn bước kiểm tra truy cập. Kết quả Requests và Selenium được giữ riêng.
             `BROWSER_TEST_MODE` mặc định thử Selenium cho URL Requests lỗi;
@@ -153,13 +182,17 @@ def build(probe=None, priority_five=False):
         ROBOTS_FAILURE_TTL = 30.0
         NETWORK_CHECK_DOMAINS = ('www.120ask.com', 'bingli.iiyi.com', 'article.iiyi.com')
         BROWSER_TEST_MODE = 'failed_only'  # off / first_each_domain_and_failures / all
+        BROWSER_USER_AGENT = None  # None: dùng User-Agent thực của Chrome đang chạy
+        BROWSER_LOAD_TIMEOUT = 45.0
+        BROWSER_ATTEMPTS = 2
         CHROME_BINARY = None       # None: Selenium Manager tìm hoặc tải Chrome phù hợp
-        PAGE_CONNECT_TIMEOUT = 15.0
-        PAGE_READ_TIMEOUT = 25.0
-        PAGE_REQUEST_BUDGET = 75.0
-        PAGE_ATTEMPTS = 2
+        PAGE_CONNECT_TIMEOUT = 20.0
+        PAGE_READ_TIMEOUT = 45.0
+        PAGE_REQUEST_BUDGET = 180.0
+        PAGE_ATTEMPTS = 3
         MAX_NEW = None           # None: toàn bộ; 10: thêm tối đa 10 URL
         RESUME_RUN_DIR = None    # Hoặc đường dẫn thư mục run đã có
+        RECOVERY_RUN_DIR = None  # Run cũ: tạo run mới, reuse raw 2xx và thử lại các URL lỗi
 
         from pathlib import Path
         from datetime import datetime, timezone
@@ -177,6 +210,8 @@ def build(probe=None, priority_five=False):
             raise ValueError('DELAY phải hữu hạn và không âm.')
         if MAX_NEW is not None and (type(MAX_NEW) is not int or MAX_NEW < 1):
             raise ValueError('MAX_NEW phải là None hoặc số nguyên dương.')
+        if RECOVERY_RUN_DIR and RESUME_RUN_DIR:
+            raise ValueError('Recovery tạo run mới; không đặt đồng thời RESUME_RUN_DIR.')
         OUTPUT_BASE = (Path('/kaggle/working') if Path('/kaggle/working').is_dir()
                        else Path('/content') if Path('/content').is_dir()
                        else Path.cwd() / 'runs')
@@ -187,9 +222,9 @@ def build(probe=None, priority_five=False):
             raise ValueError('RESUME_RUN_DIR phải chứa manifest.json của notebook này.')
         RUN_DIR.mkdir(parents=True, exist_ok=True)
         print('Output:', RUN_DIR)
-    ''') + f'\nPRIORITY_FIVE = {priority_five!r}\n'
-        + ('NETWORK_CHECK_DOMAINS = ' + repr(tuple(probe['baseline'])) + '\n' if priority_five else '')
-        + ('BROWSER_TEST_MODE = "off"\n' if not priority_five else ''))
+    ''') + f'\nDIRECT_PUBLIC_PROBE = {direct_probe!r}\n'
+        + ('NETWORK_CHECK_DOMAINS = ' + repr(tuple(probe['baseline'])) + '\n' if direct_probe else '')
+        + ('BROWSER_TEST_MODE = "off"\n' if not direct_probe else ''))
     add('markdown', f'''
         ## 2. Cài dependencies
 
@@ -201,7 +236,7 @@ def build(probe=None, priority_five=False):
         import importlib.metadata
 
         packages = ['pyarrow', 'requests', 'trafilatura', 'pymupdf', 'tld', 'ipython']
-        if PRIORITY_FIVE and BROWSER_TEST_MODE != 'off':
+        if DIRECT_PUBLIC_PROBE and BROWSER_TEST_MODE != 'off':
             packages.append('selenium')
         requirement_file = RUN_DIR / 'notebook_requirements.txt'
         install_args = ['-r', str(requirement_file)] if requirement_file.exists() else packages
@@ -235,7 +270,8 @@ def build(probe=None, priority_five=False):
         + f"SOURCE_SHA256 = {manifest['source_sha256']!r}\n"
         + f"CRAWLER_SHA256 = {hashlib.sha256(raw).hexdigest()!r}\n"
         + f"CRAWLER_PAYLOAD = {base64.b85encode(zlib.compress(raw, 9)).decode('ascii')!r}\n\n"
-        + f"PROBE_KIND = {'priority_five_public_pages' if priority_five else 'expanded_failed_domains_browser_ua'!r}\n"
+        + f"PROBE_KIND = {scope + '_public_pages' if direct_probe else 'expanded_failed_domains_browser_ua'!r}\n"
+        + f"SAMPLING_METHOD = {manifest['sampling'] if scope == 'all_hosts' else 'distinct_url_hash_sample_with_original'!r}\n"
         + f"PRIORITY_SHA256 = {hashlib.sha256(priority_raw).hexdigest()!r}\n"
         + f"PRIORITY_PAYLOAD = {base64.b85encode(zlib.compress(priority_raw, 9)).decode('ascii')!r}\n\n"
         + textwrap.dedent('''
@@ -279,7 +315,7 @@ def build(probe=None, priority_five=False):
                     'probe_kind': PROBE_KIND, 'dataset': 'AIGuruTinix/ViBioMIR',
                     'source': 'embedded samples from data/links_corpus.parquet',
                     'source_sha256': SOURCE_SHA256, 'source_rows': SOURCE_PROFILE['rows'],
-                    'sampling': 'distinct_url_hash_sample', 'seed': 42, 'selected': len(SAMPLES),
+                    'sampling': SAMPLING_METHOD, 'seed': 42, 'selected': len(SAMPLES),
                     'selected_domains': EXPECTED_DOMAIN_COUNT,
                     'baseline_archive': BASELINE_ARCHIVE, 'baseline_archive_sha256': BASELINE_ARCHIVE_SHA256,
                     'sample_sha256': sha256(sample_bytes),
@@ -393,8 +429,14 @@ def build(probe=None, priority_five=False):
                 browser = json.loads(browser_file.read_text(encoding='utf-8')) if browser_file.exists() else {}
                 if browser and (browser.get('id'), browser.get('url')) != (sample['id'], sample['url']):
                     raise ValueError('Browser checkpoint không khớp ID/URL.')
-                access = ('CHUA_CHAY' if status == 'pending' else
+                requests_access = ('CHUA_CHAY' if status == 'pending' else
                           'VAO_DUOC' if page_http is not None and 200 <= page_http < 300 else 'KHONG_VAO_DUOC')
+                if DIRECT_PUBLIC_PROBE:
+                    access, effective_engine, effective = priority_probe.access_outcome(record, browser)
+                    if record.get('challenge_detected'):
+                        requests_access = 'KHONG_VAO_DUOC'
+                else:
+                    access, effective_engine, effective = requests_access, 'requests', record
                 flags = record.get('quality_flags', [])
                 if status == 'pending':
                     reason, error_type, stage = 'Chưa chạy URL này.', '', 'pending'
@@ -405,11 +447,20 @@ def build(probe=None, priority_five=False):
                               else 'Tải được, nhưng nội dung cần xem lại hoặc bị QC loại: ' + ', '.join(flags))
                 else:
                     stage = ('robots' if status.startswith('robots_') else 'extraction' if access == 'VAO_DUOC' else 'fetch')
-                    error_type = classify_error(status, detail, page_http)
+                    error_type = record.get('error_kind') or classify_error(status, detail, page_http)
                     reason = STATUS_REASONS.get(status, status)
+                requests_reason = reason
+                if effective_engine == 'selenium':
+                    stage = 'done_browser'
+                    reason = 'Requests lỗi; Selenium tải được trang. QC: ' + effective.get('quality_status', 'unknown')
                 rows.append({
                     'domain': sample['domain'], 'dataset_url_count': SOURCE_PROFILE['host_counts'][sample['domain']],
                     'sample_id': sample['id'], 'sample_url': sample['url'], 'access_result': access,
+                    'requests_access_result': requests_access, 'effective_engine': effective_engine,
+                    'effective_http_status': effective.get('http_status'),
+                    'effective_quality_status': effective.get('quality_status', ''),
+                    'effective_char_count': effective.get('char_count'),
+                    'effective_quality_flags': '; '.join(effective.get('quality_flags', [])),
                     'http_status': page_http, 'robots_http_status': robots.get('status'),
                     'robots_attempt_count': robots.get('attempt_count'),
                     'robots_cache_hit': robots.get('cache_hit'),
@@ -418,10 +469,14 @@ def build(probe=None, priority_five=False):
                     'robots_elapsed_seconds': robots.get('elapsed_seconds'),
                     'robots_lock_wait_seconds': robots.get('lock_wait_seconds'),
                     'crawl_status': status, 'failure_stage': stage, 'error_type': error_type,
-                    'reason': reason, 'error_detail': detail, 'quality_status': record.get('quality_status', ''),
+                    'reason': reason, 'requests_reason': requests_reason,
+                    'error_detail': detail, 'quality_status': record.get('quality_status', ''),
                     'quality_flags': '; '.join(flags), 'char_count': record.get('char_count'),
                     'title': record.get('title', ''), 'final_url': record.get('final_url', ''),
                     'elapsed_seconds': record.get('elapsed_seconds'),
+                    'reused_from': record.get('reused_from', ''),
+                    'request_attempt_count': len(record.get('requests', [])),
+                    'retryable': record.get('retryable'), 'retry_deferred': record.get('retry_deferred', ''),
                     'page_attempted': bool(record.get('requests')),
                     'browser_status': browser.get('status', ''),
                     'browser_http_status': browser.get('http_status'),
@@ -429,6 +484,7 @@ def build(probe=None, priority_five=False):
                     'browser_char_count': browser.get('char_count'),
                     'browser_final_url': browser.get('final_url', ''),
                     'browser_error': browser.get('error', ''),
+                    'browser_attempt_count': browser.get('attempt_count'),
                     'sample_role': sample['sample_role'], 'sample_index': sample['sample_index'],
                 })
             return rows
@@ -438,9 +494,10 @@ def build(probe=None, priority_five=False):
             for domain in sorted(BASELINE_DOMAINS, key=lambda h: (-SOURCE_PROFILE['host_counts'][h], h)):
                 selected = [r for r in rows if r['domain'] == domain]
                 failed = [r for r in selected if r['access_result'] == 'KHONG_VAO_DUOC']
-                content = [r for r in selected if r['access_result'] == 'VAO_DUOC' and r['quality_status'] != 'accepted']
+                content = [r for r in selected if r['access_result'] == 'VAO_DUOC' and r['effective_quality_status'] != 'accepted']
                 pending = sum(r['access_result'] == 'CHUA_CHAY' for r in selected)
-                errors = Counter(r['error_type'] for r in failed + content)
+                errors = Counter(r['error_type'] for r in failed)
+                errors.update('qc_' + (r['effective_quality_status'] or 'unknown') for r in content)
                 result.append({
                     'domain': domain, 'dataset_url_count': SOURCE_PROFILE['host_counts'][domain],
                     'baseline_error_type': BASELINE_DOMAINS[domain]['error_type'],
@@ -473,6 +530,7 @@ def build(probe=None, priority_five=False):
                        'khong_vao_duoc': counts['KHONG_VAO_DUOC'], 'chua_chay': counts['CHUA_CHAY'],
                        'crawl_status_counts': dict(Counter(r['crawl_status'] for r in rows)),
                        'quality_status_counts': dict(Counter(r['quality_status'] for r in rows if r['quality_status'])),
+                       'effective_quality_status_counts': dict(Counter(r['effective_quality_status'] for r in rows if r['effective_quality_status'])),
                        'created_at': datetime.now(timezone.utc).isoformat()}
             domains = domain_rows(rows)
             priority = [dict(priority_rank=i, **r) for i, r in enumerate((r for r in domains if r['total_problem_urls']), 1)]
@@ -480,7 +538,9 @@ def build(probe=None, priority_five=False):
                            priority_order='dataset_url_count descending', user_agent=USER_AGENT,
                            page_not_attempted=sum(not r['page_attempted'] and r['access_result'] != 'CHUA_CHAY' for r in rows),
                            additional_urls=sum(r['sample_role'] == 'additional' for r in rows))
-            summary.update(request_mode='direct_public_page_probe' if PRIORITY_FIVE else 'robots_enforced',
+            summary.update(request_mode='direct_public_page_probe' if DIRECT_PUBLIC_PROBE else 'robots_enforced',
+                           requests_http_2xx=sum(r['requests_access_result'] == 'VAO_DUOC' for r in rows),
+                           browser_recovered=sum(r['access_result'] == 'VAO_DUOC' and r['effective_engine'] == 'selenium' for r in rows),
                            browser_tested=sum(bool(r['browser_status']) for r in rows),
                            browser_http_2xx=sum(r['browser_http_status'] is not None and 200 <= r['browser_http_status'] < 300 for r in rows))
             write_csv('tong_hop_domain.csv', domains, list(domains[0]))
@@ -490,7 +550,7 @@ def build(probe=None, priority_five=False):
             write_csv('requests_vs_selenium.csv', rows, fields)
             for value, filename in [('VAO_DUOC', 'vao_duoc.csv'), ('KHONG_VAO_DUOC', 'khong_vao_duoc.csv'), ('CHUA_CHAY', 'chua_chay.csv')]:
                 write_csv(filename, [r for r in rows if r['access_result'] == value], fields)
-            write_csv('can_xem_noi_dung.csv', [r for r in rows if r['access_result'] == 'VAO_DUOC' and r['quality_status'] != 'accepted'], fields)
+            write_csv('can_xem_noi_dung.csv', [r for r in rows if r['access_result'] == 'VAO_DUOC' and r['effective_quality_status'] != 'accepted'], fields)
             failures = Counter(r['error_type'] for r in rows if r['access_result'] == 'KHONG_VAO_DUOC')
             errors = [{'error_type': kind, 'domain_count': len({r['domain'] for r in rows if r['access_result'] == 'KHONG_VAO_DUOC' and r['error_type'] == kind}),
                        'url_count': n,
@@ -502,11 +562,13 @@ def build(probe=None, priority_five=False):
             md = ['# Các website còn lỗi sau lượt test bổ sung', '',
                   f"Thời điểm UTC: {summary['created_at']}. Run: `{RUN_DIR.name}`.", '',
                   f"Đã chạy {len(rows)-counts['CHUA_CHAY']}/{len(rows)} URL thuộc {len(domains)} hostname. "
-                  f"HTTP 2xx: {counts['VAO_DUOC']}; không có HTTP 2xx: {counts['KHONG_VAO_DUOC']}; chưa chạy: {counts['CHUA_CHAY']}.", '',
+                  f"Tải được sau Requests/Selenium: {counts['VAO_DUOC']}; chưa tải được: {counts['KHONG_VAO_DUOC']}; chưa chạy: {counts['CHUA_CHAY']}.", '',
+                  f"Requests tải được: {summary['requests_http_2xx']}; Selenium phục hồi thêm: {summary['browser_recovered']}. "
+                  'Các cột lỗi Requests vẫn giữ nguyên dù Selenium phục hồi thành công.', '',
                   f"{summary['page_not_attempted']} URL đã xử lý nhưng chưa request bài viết vì dừng trước bước tải bài. "
                   'Các trường hợp này được phân biệt với bài viết thực sự trả HTTP lỗi.', '',
                   f'HTTP User-Agent: `{USER_AGENT}`.', '',
-                  'Giữ 1 mẫu cũ và lấy tối đa 4 URL mới mỗi hostname từ dataset, không trùng URL. '
+                  f"Bộ mẫu có {len(rows)} URL thuộc {len(domains)} hostname, gồm {summary['additional_urls']} URL bổ sung. "
                   'Gồm lỗi truy cập và lỗi nội dung/QC. Số URL dataset là số dòng của hostname, chưa loại URL trùng.', '',
                   'Ưu tiên theo số URL dataset giảm dần; không suy ra toàn bộ URL của domain đều bị lỗi. '
                   'Dừng ở robots là chưa request bài viết, không đồng nghĩa website không mở được trong trình duyệt.', '',
@@ -524,7 +586,7 @@ def build(probe=None, priority_five=False):
                        f"{item['dataset_url_count']:,} URL nguồn; {item['page_not_attempted']} mẫu đã xử lý nhưng chưa request bài viết. "
                        f"Lỗi baseline: `{item['baseline_error_type']}`.", '']
                 for row in rows:
-                    if row['domain'] != item['domain'] or row['access_result'] == 'CHUA_CHAY' or (row['access_result'] == 'VAO_DUOC' and row['quality_status'] == 'accepted'):
+                    if row['domain'] != item['domain'] or row['access_result'] == 'CHUA_CHAY' or (row['access_result'] == 'VAO_DUOC' and row['effective_quality_status'] == 'accepted'):
                         continue
                     detail = (row['error_detail'] or row['quality_flags']).replace('\n', ' ').replace('`', "'")
                     md += [f"- ID {row['sample_id']} ({row['sample_role']}): [URL](<{row['sample_url']}>) — `{row['error_type']}`. "
@@ -537,12 +599,14 @@ def build(probe=None, priority_five=False):
                               'quality_status', 'quality_flags', 'char_count']
             labels = ['Domain', 'Số URL nguồn', 'ID mẫu', 'URL mẫu', 'Mẫu cũ/mới', 'Vào được?', 'HTTP trang',
                       'HTTP robots', 'Lần thử robots', 'Cache hit robots', 'Loại lỗi', 'Lý do', 'Lỗi gốc', 'QC', 'Cờ QC', 'Số ký tự']
-            if PRIORITY_FIVE:
+            if DIRECT_PUBLIC_PROBE:
                 visible_fields = ['domain', 'dataset_url_count', 'sample_id', 'sample_url', 'http_status',
                                   'error_type', 'error_detail', 'quality_status', 'char_count',
-                                  'browser_status', 'browser_http_status', 'browser_quality_status', 'browser_char_count', 'browser_error']
+                                  'browser_status', 'browser_http_status', 'browser_quality_status', 'browser_char_count', 'browser_error',
+                                  'access_result', 'effective_engine']
                 labels = ['Domain', 'Số URL nguồn', 'ID', 'URL', 'HTTP Requests', 'Lỗi Requests', 'Chi tiết',
-                          'QC Requests', 'Ký tự Requests', 'Selenium', 'HTTP Selenium', 'QC Selenium', 'Ký tự Selenium', 'Lỗi Selenium']
+                          'QC Requests', 'Ký tự Requests', 'Selenium', 'HTTP Selenium', 'QC Selenium', 'Ký tự Selenium', 'Lỗi Selenium',
+                          'Kết quả cuối', 'Engine tải được']
             def esc(value):
                 return html.escape(str(value if value is not None else ''), quote=True)
             body = []
@@ -562,7 +626,7 @@ def build(probe=None, priority_five=False):
             table = '<div class="table-wrap"><table><thead><tr>' + ''.join('<th>' + esc(label) + '</th>' for label in labels)
             table += '</tr></thead><tbody>' + ''.join(body) + '</tbody></table></div>'
             heading = f'<h1>Kết quả thử crawl {len(rows)} URL / {len(domains)} hostname</h1><p>Vào được: {counts["VAO_DUOC"]} · Không vào được: {counts["KHONG_VAO_DUOC"]} · Chưa chạy: {counts["CHUA_CHAY"]}</p>'
-            heading += '<p>Vào được = HTTP trang cuối 2xx; QC là kết quả riêng. Dừng do robots là chính sách crawler. Kết quả chỉ áp dụng cho các URL mẫu.</p>'
+            heading += '<p>Vào được tính cả Requests và Selenium phục hồi; trang challenge được loại. Các cột Requests vẫn giữ lỗi gốc, QC là kết quả riêng. Kết quả chỉ áp dụng cho các URL mẫu.</p>'
             controls = '<input id="search" placeholder="Tìm domain, URL hoặc lỗi" aria-label="Tìm kiếm"><select id="access" aria-label="Kết quả"><option value="">Tất cả</option><option>VAO_DUOC</option><option>KHONG_VAO_DUOC</option><option>CHUA_CHAY</option></select><span id="count"></span>'
             priority_fields = ['priority_rank', 'domain', 'dataset_url_count', 'selected_urls', 'completed_urls', 'pending_urls', 'access_failures', 'content_issues', 'error_types']
             priority_labels = ['Ưu tiên', 'Domain', 'Số URL dataset', 'Mẫu', 'Đã chạy', 'Chưa chạy', 'Lỗi truy cập', 'Lỗi nội dung', 'Loại lỗi']
@@ -635,15 +699,19 @@ def build(probe=None, priority_five=False):
         print('Network check:', network_path)
 
         try:
-            if PRIORITY_FIVE:
+            if DIRECT_PUBLIC_PROBE:
+                if RECOVERY_RUN_DIR:
+                    recovery = priority_probe.seed_successful_requests(crawler, RUN_DIR, SAMPLES, RECOVERY_RUN_DIR)
+                    print('Recovery:', len(recovery['reused_ids']), 'URL reuse raw;', len(recovery['retry_ids']), 'URL thử lại.')
                 records = priority_probe.crawl_requests(
-                    crawler, RUN_DIR, SAMPLES, workers=min(WORKERS, 5), delay=DELAY,
+                    crawler, RUN_DIR, SAMPLES, workers=WORKERS, delay=DELAY,
                     attempts=PAGE_ATTEMPTS, user_agent=USER_AGENT,
                     timeout=(PAGE_CONNECT_TIMEOUT, PAGE_READ_TIMEOUT), budget=PAGE_REQUEST_BUDGET, max_new=MAX_NEW)
                 browser_samples = priority_probe.select_browser_samples(SAMPLES, records, BROWSER_TEST_MODE)
                 if browser_samples:
                     priority_probe.crawl_browser(crawler, RUN_DIR, browser_samples,
-                                                user_agent=USER_AGENT, chrome_binary=CHROME_BINARY, delay=DELAY)
+                                                user_agent=BROWSER_USER_AGENT, chrome_binary=CHROME_BINARY, delay=DELAY,
+                                                load_timeout=BROWSER_LOAD_TIMEOUT, attempts=BROWSER_ATTEMPTS)
                 crawler.report(argparse.Namespace(out=str(RUN_DIR)))
             else:
                 crawler.locked_crawl(argparse.Namespace(
@@ -693,7 +761,7 @@ def build(probe=None, priority_five=False):
             button.on_click(lambda _: files.download(str(zip_path)))
             display(button)
     ''')
-    if priority_five:
+    if direct_probe:
         for cell in cells:
             if cell['cell_type'] == 'markdown':
                 cell['source'] = cell['source'].replace(
@@ -711,11 +779,16 @@ Ngân sách được kiểm tra giữa các bước; DNS và thử nhiều IP c�
 Requests lỗi mới được thử Selenium theo `BROWSER_TEST_MODE`; có thể đặt `off` để chỉ chạy Requests.
 Selenium Manager tìm/tải Chrome và driver. Nếu khởi động thất bại, lý do nằm trong `browser_setup_error.json`.
 Requests và Selenium có kết quả riêng; DOM trống/challenge không được ghi thành tải được bài.
+Requests retry tối đa 3 lần; lỗi mạng được đóng pool kết nối cũ trước lần thử tiếp theo.
+Selenium dùng User-Agent thực và retry timeout tối đa 2 lần; 403/challenge không được retry liên tục.
+`access_result` tính cả trường hợp Selenium phục hồi, còn các cột lỗi Requests vẫn giữ nguyên.
+Để thử lại riêng nhóm lỗi, đặt `RECOVERY_RUN_DIR` là đường dẫn run cũ và giữ `RESUME_RUN_DIR = None`.
+Recovery tạo run mới, kiểm tra hash raw 2xx trước khi reuse, để các checkpoint lỗi được tải lại.
 Để chạy lại toàn bộ bằng cấu hình mới, giữ `RESUME_RUN_DIR = None` và Run All.
 '''
                 cell['source'] = cell['source'].replace(
                     '`network_check.json` ghi DNS và môi trường của ba hostname timeout để đối chiếu\nKaggle/local; `crawl_config.json` ghi timeout/retry và phiên bản package.',
-                    '`network_check.json` ghi DNS của 5 hostname để đối chiếu Kaggle/local;\n`priority_probe_config.json` ghi User-Agent/header, timeout và chế độ tải trang.')
+                    '`network_check.json` ghi DNS của mọi hostname trong bộ mẫu để đối chiếu Kaggle/local;\n`priority_probe_config.json` ghi User-Agent/header, timeout và chế độ tải trang.')
     notebook = {'cells': cells, 'metadata': {
         'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'},
         'language_info': {'name': 'python'},
@@ -730,10 +803,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-zip', type=Path)
     parser.add_argument('--failed-followup', action='store_true', help='Build the previous 227-URL failed-host cohort')
+    parser.add_argument('--priority-five', action='store_true', help='Build the previous 25-URL priority cohort')
+    parser.add_argument('--refresh-all-hosts', action='store_true', help='Regenerate the original 97-host sample from Parquet')
     args = parser.parse_args()
     if args.baseline_zip or args.failed_followup:
-        build(select_followup(args.baseline_zip) if args.baseline_zip else None)
+        probe = (select_followup(args.baseline_zip) if args.baseline_zip else
+                 json.loads((ROOT / 'data/domain_probe_followup_samples.json').read_text(encoding='utf-8')))
+        build(probe, scope='failed_followup')
+    elif args.priority_five:
+        build(json.loads((ROOT / 'data/domain_probe_priority_samples.json').read_text(encoding='utf-8')),
+              scope='priority_five')
     else:
-        priority_file = ROOT / 'data/domain_probe_priority_samples.json'
-        build(json.loads(priority_file.read_text(encoding='utf-8')) if priority_file.exists() else None,
-              priority_five=priority_file.exists())
+        build(select_all_hosts() if args.refresh_all_hosts else None)

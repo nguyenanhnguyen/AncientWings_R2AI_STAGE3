@@ -93,6 +93,8 @@ def build_archive(out, archive):
             'id', 'url', 'domain', 'final_url', 'title', 'status', 'http_status', 'quality_status',
             'quality_flags', 'char_count', 'extractor', 'error', 'elapsed_seconds', 'started_at',
             'finished_at', 'raw_path', 'raw_sha256', 'text_sha256',
+            'engine', 'access_status', 'requests_status', 'requests_http_status',
+            'requests_error_kind', 'requests_error', 'browser_status', 'browser_http_status', 'browser_error',
         )}
         compact['domain'] = record.get('domain') or expected[record['id']].get('domain')
         compact['request_count'] = len(record.get('requests', []))
@@ -132,6 +134,8 @@ def build_archive(out, archive):
     fields = ('id', 'url', 'domain', 'final_url', 'title', 'status', 'http_status', 'quality_status',
               'quality_flags', 'char_count', 'extractor', 'error', 'request_count', 'redirect_count',
               'elapsed_seconds', 'started_at', 'finished_at', 'raw_exists', 'raw_path', 'raw_sha256', 'text_sha256')
+    fields += ('engine', 'access_status', 'requests_status', 'requests_http_status',
+               'requests_error_kind', 'requests_error', 'browser_status', 'browser_http_status', 'browser_error')
     pretty = json.dumps(summary, ensure_ascii=False, indent=2)
     timing = summary['timing']
     overview = [
@@ -229,7 +233,8 @@ Hoàn tất: {len(records)}/{len(sample)}; còn chờ: {len(pending)}.
             bundle.writestr('redirects.csv', csv_bytes(redirects, ('id', 'from', 'to', 'status')))
             bundle.writestr('sample_manifest.json', json.dumps(sampled, ensure_ascii=False, indent=2).encode('utf-8'))
             bundle.writestr('environment.json', json.dumps(environment, ensure_ascii=False, indent=2).encode('utf-8'))
-            for name in ('crawler_snapshot.py', 'audit_snapshot.py', 'export_snapshot.py', 'diagnostics_snapshot.py'):
+            for name in ('crawler_snapshot.py', 'audit_snapshot.py', 'export_snapshot.py', 'diagnostics_snapshot.py',
+                         'priority_probe_snapshot.py', 'corpus_runner_snapshot.py'):
                 path = out / name
                 if path.is_file():
                     bundle.write(path, 'code/' + name)
@@ -242,6 +247,19 @@ Hoàn tất: {len(records)}/{len(sample)}; còn chờ: {len(pending)}.
                 path = out / name
                 if path.is_file():
                     bundle.write(path, 'metadata/' + name)
+            for name in ('corpus_config.json', 'corpus_settings.json', 'priority_probe_config.json',
+                         'recovery_manifest.json', 'browser_environment.json', 'browser_setup_error.json',
+                         'access_summary.json', 'uu_tien_fix_domain.json', 'WEB_ERRORS.md',
+                         'requests_vs_selenium.csv', 'khong_vao_duoc.csv'):
+                path = out / name
+                if path.is_file():
+                    bundle.write(path, 'metadata/' + name)
+            # Keep the original engine records for the same bounded set of debug samples.
+            for row in chosen:
+                for folder in ('requests_records', 'browser_records', 'recovery_records'):
+                    path = out / folder / f"{row['id']}.json"
+                    if path.is_file() and path.stat().st_size <= 1024 * 1024:
+                        bundle.write(path, f"samples/{folder}/{path.name}")
             for path in sorted((out / 'logs').glob('*')):
                 if path.is_file():
                     with path.open('rb') as stream:
