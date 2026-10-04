@@ -223,7 +223,7 @@ class PipelineTests(unittest.TestCase):
 
             chunking.build(argparse.Namespace(
                 corpus=[str(fixture['corpus'])], out=str(work / 'chunks'), target_tokens=60,
-                overlap_tokens=15, max_tokens=120, min_tokens=8))
+                overlap_tokens=15, max_tokens=120, min_tokens=8, text_field=None, status='ok'))
             chunks_file = work / 'chunks' / 'chunks.parquet'
             self.assertTrue(chunks_file.is_file())
 
@@ -253,7 +253,7 @@ class PipelineTests(unittest.TestCase):
                 links=str(fixture['links']), out=str(work / 'submission'),
                 name='submission.json', profile='balanced', adaptive=True, no_sync_docs=False,
                 doc_min=None, doc_max=None, doc_ratio=None, chunk_min=None, chunk_max=None,
-                chunk_ratio=None, chunk_per_doc=None, doc_id_as_string=False))
+                chunk_ratio=None, chunk_per_doc=None, doc_id_as_string=False, text_field=None))
 
             rows = storage.read_json(work / 'submission' / 'submission.json')
             self.assertEqual([row['id'] for row in rows], [1, 2, 3])
@@ -292,13 +292,13 @@ class PipelineTests(unittest.TestCase):
             work = root / 'work'
             chunking.build(argparse.Namespace(
                 corpus=[str(fixture['corpus'])], out=str(work / 'chunks'), target_tokens=60,
-                overlap_tokens=15, max_tokens=120, min_tokens=8))
+                overlap_tokens=15, max_tokens=120, min_tokens=8, text_field=None, status='ok'))
             chunks_file = work / 'chunks' / 'chunks.parquet'
             index_cli.build_bm25(argparse.Namespace(
                 chunks=str(chunks_file), out=str(work / 'index'), k1=1.5, b=0.75))
             chunking.build(argparse.Namespace(
                 corpus=[str(fixture['corpus'])], out=str(work / 'chunks2'), target_tokens=30,
-                overlap_tokens=5, max_tokens=60, min_tokens=8))
+                overlap_tokens=5, max_tokens=60, min_tokens=8, text_field=None, status='ok'))
             with self.assertRaisesRegex(ValueError, 'different chunks file'):
                 retrieval_cli._check_pair(work / 'chunks2' / 'chunks.parquet', work / 'index')
 
@@ -308,7 +308,7 @@ class PipelineTests(unittest.TestCase):
             fixture = write_fixture(root)
             chunking.build(argparse.Namespace(
                 corpus=[str(fixture['corpus'])], out=str(root / 'chunks'), target_tokens=60,
-                overlap_tokens=15, max_tokens=120, min_tokens=8))
+                overlap_tokens=15, max_tokens=120, min_tokens=8, text_field=None, status='ok'))
             table = validate.load_chunk_table(root / 'chunks' / 'chunks.parquet')
             documents = validate.load_document_texts([fixture['corpus']])
             first = next(iter(table))
@@ -325,7 +325,7 @@ class PipelineTests(unittest.TestCase):
             fixture = write_fixture(root)
             chunking.build(argparse.Namespace(
                 corpus=[str(fixture['corpus'])], out=str(root / 'chunks'), target_tokens=60,
-                overlap_tokens=15, max_tokens=120, min_tokens=8))
+                overlap_tokens=15, max_tokens=120, min_tokens=8, text_field=None, status='ok'))
             table = validate.load_chunk_table(root / 'chunks' / 'chunks.parquet')
             documents = validate.load_document_texts([fixture['corpus']])
             chunk_id = next(key for key, row in table.items() if row['doc_id'] == 1585)
@@ -380,6 +380,71 @@ class LossAttributionTests(unittest.TestCase):
                    'false_positive_documents': 0, 'submitted_documents': 0}
         report = errors.report_markdown(summary, {'queries_scored': 0}, ['pseudo'])
         self.assertIn('vòng tròn', report)
+
+
+class CorpusShapeTests(unittest.TestCase):
+    """Preprocessing may hand over rows of different shape; chunking and D2 must agree on all."""
+
+    def _run(self, rows, text_field=None):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-shape-') as temporary:
+            root = Path(temporary)
+            source = root / 'corpus.jsonl'
+            storage.write_jsonl(source, rows)
+            chunking.build(argparse.Namespace(
+                corpus=[str(source)], out=str(root / 'chunks'), target_tokens=40,
+                overlap_tokens=8, max_tokens=80, min_tokens=5, text_field=text_field, status='ok'))
+            table = validate.load_chunk_table(root / 'chunks' / 'chunks.parquet')
+            documents = validate.load_document_texts([source], text_field)
+            for row in table.values():
+                self.assertEqual(documents[row['doc_id']][row['char_start']:row['char_end']],
+                                 row['text'])
+            return table
+
+    def test_extra_missing_and_null_columns_are_tolerated(self):
+        table = self._run([{'id': 1, 'text': VI_BODY, 'extra': {'x': 1}},
+                           {'id': 2, 'text': None, 'title': None},
+                           {'id': 3, 'content': VI_BODY, 'title': None}])
+        self.assertEqual({row['doc_id'] for row in table.values()}, {1, 3})
+
+    def test_renamed_body_column_needs_no_code_change(self):
+        table = self._run([{'id': 1, 'html_text': VI_BODY}], text_field='html_text')
+        self.assertTrue(table)
+
+    def test_question_and_answers_are_joined_without_invented_labels(self):
+        row = {'id': 5, 'question': 'Đau họng kéo dài thì sao?',
+               'answers': ['Nên uống nước ấm.', {'text': 'Khám nếu sốt cao.'}]}
+        text = schema.document_text(row)
+        self.assertEqual(text.split(chr(10) * 2),
+                         ['Đau họng kéo dài thì sao?', 'Nên uống nước ấm.', 'Khám nếu sốt cao.'])
+        self.assertNotIn('Câu hỏi', text)
+        self.assertTrue(self._run([{**row, 'question': row['question'] * 6}]))
+
+    def test_team_crawler_json_array_with_failed_rows_is_read_as_is(self):
+        """crawler_minh exports a JSON array whose rows carry status; failures have no text."""
+        with tempfile.TemporaryDirectory(prefix='vibiomir-team-') as temporary:
+            root = Path(temporary)
+            source = root / 'batch_00.json'
+            rows = [{'id': 1, 'url': 'u', 'status': 'ok', 'lang': 'vi', 'n_chars': 10,
+                     'title': 'T', 'text': VI_BODY, 'domain': 'a.vn', 'canonical_id': 1,
+                     'dup_count': 1, 'worker': 'Minh', 'batch': 0},
+                    {'id': 2, 'url': 'u', 'status': 'http_4xx', 'text': '', 'title': ''},
+                    {'id': 3, 'url': 'u', 'status': 'blocked', 'text': None}]
+            source.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+            summary = chunking.build(argparse.Namespace(
+                corpus=[str(source)], out=str(root / 'chunks'), target_tokens=40,
+                overlap_tokens=8, max_tokens=80, min_tokens=5, text_field=None, status='ok'))
+            self.assertEqual(summary['documents_in'], 1)
+            self.assertEqual(summary['rows_skipped_by_status'], 2)
+            self.assertEqual(set(validate.load_document_texts([source])), {1, 2, 3})
+
+    def test_string_ids_are_unified_with_integer_ids(self):
+        table = self._run([{'id': '12', 'text': VI_BODY}, {'id': 12, 'text': ZH_BODY}])
+        self.assertEqual({row['doc_id'] for row in table.values()}, {12})
+        self.assertEqual(sum(1 for _ in table), len([k for k in table]))
+
+    def test_unrecognised_shape_fails_loudly_with_the_fix_in_the_message(self):
+        with self.assertRaisesRegex(ValueError, 'text column'):
+            self._run([{'id': 1, 'noi_dung': VI_BODY}])
 
 
 class ConsoleTests(unittest.TestCase):

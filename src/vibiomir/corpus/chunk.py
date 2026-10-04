@@ -21,7 +21,7 @@ import sys
 from ..common import storage
 from ..common.console import emit
 from ..common.schema import (CHUNK_SCHEMA, chunk_id, count_tokens, detect_language,
-                             normalise_source)
+                             document_columns, document_text)
 
 # Sentence ends: Latin punctuation followed by a space, or CJK full-width punctuation.
 _SENTENCE_END = re.compile(r'(?<=[.!?…])\s+|(?<=[。！？；])')
@@ -103,9 +103,9 @@ def plan_spans(text, target_tokens=320, overlap_tokens=64, max_tokens=1024, min_
     return merged
 
 
-def chunk_document(document, **options):
-    """Chunks for one document record. Raises if a span does not match the stored text."""
-    text = normalise_source(document.get('text') or '')
+def chunk_document(document, text_field=None, **options):
+    """Chunks for one corpus row. The text is whatever `document_text` derives from the row."""
+    text = document_text(document, text_field)
     if not text.strip():
         return []
     title = (document.get('title') or '').strip()
@@ -139,15 +139,20 @@ def build(args):
     sources = [Path(path) for path in args.corpus]
     documents = []
     seen = set()
+    skipped_status = 0
     for source in sources:
-        rows = (storage.read_parquet(source) if source.suffix == '.parquet'
-                else storage.read_jsonl(source))
+        rows = storage.read_rows(source, lambda names: document_columns(names, args.text_field))
         for row in rows:
-            if row['id'] in seen:
+            if args.status and row.get('status', args.status) != args.status:
+                # A crawler may export failed fetches next to good ones; they carry no text.
+                skipped_status += 1
+                continue
+            doc_id = int(row['id'])
+            if doc_id in seen:
                 # Several crawl shards may export the same id; keep the first and report it.
                 continue
-            seen.add(row['id'])
-            documents.append(row)
+            seen.add(doc_id)
+            documents.append({**row, 'id': doc_id})
     if not documents:
         raise ValueError('No documents found in the given corpus files.')
     options = {'target_tokens': args.target_tokens, 'overlap_tokens': args.overlap_tokens,
@@ -155,7 +160,7 @@ def build(args):
     chunks = []
     empty = []
     for document in sorted(documents, key=lambda row: row['id']):
-        rows = chunk_document(document, **options)
+        rows = chunk_document(document, text_field=args.text_field, **options)
         if not rows:
             empty.append(int(document['id']))
         chunks.extend(rows)
@@ -179,6 +184,9 @@ def build(args):
         'chunks_over_1024_tokens': sum(size > 1024 for size in sizes),
         'languages': dict(languages),
         'options': options,
+        'text_field': args.text_field,
+        'status_filter': args.status,
+        'rows_skipped_by_status': skipped_status,
         'sources': [str(path) for path in sources],
         'span_exactness': 'char_start/char_end verified against normalised document text',
     }
@@ -192,6 +200,12 @@ def main():
     parser.add_argument('--corpus', nargs='+', required=True,
                         help='One or more corpus.parquet / corpus.jsonl files from Block A.')
     parser.add_argument('--out', default='work/chunks')
+    parser.add_argument('--status', default='ok',
+                        help="Keep only rows whose `status` equals this when the column exists; "
+                             "'' disables the filter.")
+    parser.add_argument('--text-field', default=None,
+                        help='Column holding the body. Default: text, content or body, else a '
+                             'question plus answers.')
     parser.add_argument('--target-tokens', type=int, default=320)
     parser.add_argument('--overlap-tokens', type=int, default=64)
     parser.add_argument('--max-tokens', type=int, default=1024,

@@ -29,7 +29,12 @@ def build(args):
         emit(f'{len(missing)} truy vấn không có ứng viên; ghi danh sách rỗng cho chúng.')
 
     chunk_table = validate.load_chunk_table(args.chunks)
-    documents = validate.load_document_texts(args.corpus)
+    text_field = args.text_field
+    manifest = Path(args.chunks).with_name('chunk_manifest.json')
+    if text_field is None and manifest.exists():
+        # Chunk spans were cut from text derived with this field; re-slicing must derive it alike.
+        text_field = storage.read_json(manifest).get('text_field')
+    documents = validate.load_document_texts(args.corpus, text_field)
     allowed = validate.load_allowed_doc_ids(args.links) if args.links else None
     rows, report = validate.build_rows(chosen, chunk_table, documents, query_ids,
                                        doc_id_as_string=args.doc_id_as_string,
@@ -58,6 +63,8 @@ def main():
                         help='links_corpus.parquet; drops any doc id outside the official list.')
     parser.add_argument('--out', default='work/submission')
     parser.add_argument('--name', default='submission.json')
+    parser.add_argument('--text-field', default=None,
+                        help='Default: the one recorded in chunk_manifest.json.')
     parser.add_argument('--profile', default='balanced', choices=sorted(choose.PROFILES))
     parser.add_argument('--adaptive', action='store_true',
                         help='Cut the chunk list at the largest reranker score gap.')

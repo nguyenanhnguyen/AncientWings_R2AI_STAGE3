@@ -20,17 +20,15 @@ def load_chunk_table(path):
     return {row['chunk_id']: row for row in rows}
 
 
-def load_document_texts(paths):
-    """-> {doc_id: normalised text}. Several shards may be passed; first id wins."""
+def load_document_texts(paths, text_field=None):
+    """-> {doc_id: text}. Uses the same `document_text` as chunking; first id wins across shards."""
     documents = {}
     for path in paths:
-        path = str(path)
-        rows = (storage.read_parquet(path, columns=['id', 'text'])
-                if path.endswith('.parquet') else storage.read_jsonl(path))
+        rows = storage.read_rows(path, lambda names: schema.document_columns(names, text_field))
         for row in rows:
             doc_id = int(row['id'])
             if doc_id not in documents:
-                documents[doc_id] = schema.normalise_source(row.get('text') or '')
+                documents[doc_id] = schema.document_text(row, text_field)
     return documents
 
 

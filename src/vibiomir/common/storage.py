@@ -64,6 +64,23 @@ def read_parquet(path, columns=None, filters=None):
     return pq.read_table(path, columns=columns, filters=filters).to_pylist()
 
 
+def read_rows(path, wanted=None):
+    """Rows of a .parquet, .json (one array) or .jsonl file, whichever the crawler wrote.
+
+    `wanted(column_names)` may narrow a Parquet read to the columns the caller needs.
+    """
+    path = Path(path)
+    if path.suffix == '.parquet':
+        columns = wanted(pq.ParquetFile(path).schema_arrow.names) if wanted else None
+        return read_parquet(path, columns=columns)
+    if path.suffix == '.json':
+        data = json.loads(path.read_text(encoding='utf-8'))
+        if not isinstance(data, list):
+            raise ValueError(f'{path} must hold a JSON array of records.')
+        return data
+    return read_jsonl(path)
+
+
 def write_parquet(path, rows, schema=None, compression='zstd'):
     """Write rows and verify the file reads back identical before returning."""
     path = Path(path)

@@ -52,9 +52,7 @@ def score(args):
     metric_summary, per_query = metrics.score_all(rows, table)
     corpus_ids = set()
     for path in args.corpus:
-        path = str(path)
-        source = (storage.read_parquet(path, columns=['id']) if path.endswith('.parquet')
-                  else storage.read_jsonl(path))
+        source = storage.read_rows(path, lambda names: [n for n in names if n == 'id'])
         corpus_ids.update(int(row['id']) for row in source)
     loss_summary, cases = errors.classify(table, _records(args.candidates), rows, corpus_ids)
     out = Path(args.out)

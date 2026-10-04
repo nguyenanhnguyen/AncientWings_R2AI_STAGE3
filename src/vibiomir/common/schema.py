@@ -34,6 +34,69 @@ def chunk_id(doc_id, order):
     return f'{doc_id}:{order}'
 
 
+# --- Reading a corpus row whatever shape preprocessing gave it ---
+#
+# Block A may export different structures per source: an article has `text`, a Q&A page has a
+# question and one or more answers, another extractor may call the body `content`. Chunking and
+# submission validation both read the corpus and must derive the *same* text from a row, or the
+# re-slice check in Block D would fail for no real reason. This one function is that contract;
+# nothing else in the pipeline looks inside a corpus row.
+
+TEXT_FIELD_CANDIDATES = ('text', 'content', 'body')
+QUESTION_FIELDS = ('question', 'query', 'q')
+ANSWER_FIELDS = ('answers', 'answer', 'replies')
+
+
+def _as_text_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                item = item.get('text') or item.get('content') or item.get('answer') or ''
+            if item:
+                parts.append(str(item))
+        return parts
+    return [str(value)]
+
+
+def document_text(row, text_field=None):
+    """The normalised text of one corpus row.
+
+    Order: an explicit `text_field`; then the first non-empty of text/content/body; then, for a Q&A
+    row, the question and answers joined by blank lines. No labels such as "Câu hỏi:" are added,
+    because every word of the result should be a word of the source. Returns '' when nothing is
+    found, which chunking reports as a document without text instead of crashing.
+    """
+    if text_field:
+        return normalise_source('\n\n'.join(_as_text_list(row.get(text_field))))
+    for name in TEXT_FIELD_CANDIDATES:
+        value = row.get(name)
+        if isinstance(value, str) and value.strip():
+            return normalise_source(value)
+    parts = []
+    for names in (QUESTION_FIELDS, ANSWER_FIELDS):
+        for name in names:
+            found = _as_text_list(row.get(name))
+            if found:
+                parts.extend(found)
+                break
+    return normalise_source('\n\n'.join(parts))
+
+
+def document_columns(available, text_field=None):
+    """Columns worth reading from a Parquet file so a huge corpus is not loaded in full."""
+    wanted = {'id', 'title', 'domain'}
+    if text_field:
+        wanted.add(text_field)
+    else:
+        wanted.update(TEXT_FIELD_CANDIDATES + QUESTION_FIELDS + ANSWER_FIELDS)
+    return [name for name in available if name in wanted]
+
+
 # --- Text normalisation ---
 
 _WHITESPACE = re.compile(r'\s+')
