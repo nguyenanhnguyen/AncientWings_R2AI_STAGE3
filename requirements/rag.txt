@@ -6,10 +6,10 @@ pyarrow>=19.0
 
 # Dense encoding and reranking. Needed for every encoder except `hash`, and every reranker except
 # `identity`; chunking, BM25 and submission building run without them.
-# Install the torch build that matches the local CUDA version from https://pytorch.org, since the
-# wheel on PyPI is CPU-only on some platforms.
+# For the RTX 2050 Windows profile, install the matching CUDA torch wheel before this file.
+# A generic PyPI torch install may select a CPU build on Windows.
 torch>=2.4
-transformers>=4.45
+transformers>=4.51,<5
 tokenizers>=0.20
 safetensors>=0.4
 sentencepiece>=0.2

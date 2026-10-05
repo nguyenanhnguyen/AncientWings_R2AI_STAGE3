@@ -97,7 +97,10 @@ def run(args):
     r = Runner(out, args.dry_run)
     if not args.dry_run and args.device == 'cuda':
         # CUDA probe runs in its own process so no parent CUDA context consumes VRAM later.
-        subprocess.run([sys.executable, str(ROOT/'scripts'/'benchmark.py'), '--check-only'],
+        probe = [sys.executable, str(ROOT/'scripts'/'benchmark.py'), '--check-only']
+        if not args.skip_translation and args.translation_quantize == '4bit':
+            probe.append('--quantized')
+        subprocess.run(probe,
                        cwd=ROOT, check=True)
     r.step('prepare', ['prepare.py', '--source', *source, '--limit', args.limit,
                        '--out', corpus.parent], [], [corpus, corpus.with_name('prepare_manifest.json')])

@@ -27,17 +27,35 @@ Theo `pipeline.txt`, nhánh teacher 32B → student cần Kaggle T4×2 và dev d
 
 ## 2. Cài môi trường CUDA
 
-Các lệnh này để người chạy thực hiện; lượt sửa code chưa tự cài môi trường hay tải trọng số.
+Máy đang dùng Python 3.13 x64, driver NVIDIA nhận RTX 2050; `env` hiện có `torch 2.14.1+cpu`, nên chưa thể chạy CUDA. Lỗi `WinError 32` ở `pip-unpack-...torch...whl` là file tạm bị tiến trình khác giữ trong lúc pip tải/cài; riêng thông báo đó không chứng minh wheel sai. Hướng dẫn cũ cài `torch` CPU qua `requirements/rag.txt` rồi dùng `--force-reinstall` để tải lại wheel CUDA 2,9 GB: thứ tự này sai cho môi trường hiện tại và tốn thêm một lượt cài. Dùng file wheel cố định trên ổ D để có thể tiếp tục tải nếu mạng ngắt và tránh đường dẫn `pip-unpack` trong `%TEMP%`.
+
+Đóng các kernel đang import `torch` từ **chính `env` này** và bảo đảm không có lệnh pip thứ hai đang cài cùng môi trường. Không dừng crawler đang chạy nếu nó không dùng `torch`. Chạy PowerShell từ gốc dự án:
 
 ```powershell
 $env:PIP_NO_INDEX = "0"
+$env:TEMP = Join-Path (Get-Location) 'work\pip_tmp'
+$env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force -Path $env:TEMP | Out-Null
+$wheelDir = Join-Path (Get-Location) 'work\wheels'
+New-Item -ItemType Directory -Force -Path $wheelDir | Out-Null
+$wheel = Join-Path $wheelDir 'torch-2.10.0+cu128-cp313-cp313-win_amd64.whl'
+$url = 'https://download-r2.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp313-cp313-win_amd64.whl'
+curl.exe --location --fail --retry 8 --retry-all-errors --retry-delay 10 --continue-at - --output $wheel $url
+if ($LASTEXITCODE -ne 0) { throw 'Tải torch chưa xong; chạy lại lệnh curl để tiếp tục.' }
+.\env\Scripts\python.exe -m pip install --no-index --no-deps --no-cache-dir $wheel
+if ($LASTEXITCODE -ne 0) { throw 'Cài wheel CUDA thất bại; không chạy tiếp pipeline.' }
 .\env\Scripts\python.exe -m pip install --index-url https://pypi.org/simple -r requirements/rag.txt
-.\env\Scripts\python.exe -m pip install --upgrade --index-url https://pypi.org/simple "transformers>=4.51,<5" "accelerate>=1.6" "bitsandbytes==0.50.2"
-.\env\Scripts\python.exe -m pip install --force-reinstall torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+if ($LASTEXITCODE -ne 0) { throw 'Cài requirements/rag.txt thất bại.' }
+.\env\Scripts\python.exe -m pip install --index-url https://pypi.org/simple "accelerate>=1.6" "bitsandbytes==0.50.2"
+if ($LASTEXITCODE -ne 0) { throw 'Cài accelerate/bitsandbytes thất bại.' }
+.\env\Scripts\python.exe -m pip check
+if ($LASTEXITCODE -ne 0) { throw 'Môi trường có dependency xung đột.' }
 .\env\Scripts\python.exe scripts/benchmark.py --check-only --quantized
 ```
 
-Đã kiểm tra bằng pip `--dry-run --no-deps --only-binary=:all:` trong chính `env` Python 3.13/Windows x64: PyPI cung cấp `bitsandbytes-0.50.2-py3-none-win_amd64.whl`, kết quả `Would install bitsandbytes-0.50.2`. Đây là kiểm tra tìm wheel, chưa phải kiểm tra kernel NF4 trên GPU. Lệnh chỉ định PyPI cho các thư viện và chỉ dùng kho `cu128` cho PyTorch. `$env:PIP_NO_INDEX = "0"` cho phép pip tra cứu index trong phiên PowerShell này, không đổi cấu hình toàn máy.
+`curl --continue-at -` dùng lại file tải dở. Nếu wheel đã tải đủ nhưng pip báo file hỏng, xóa riêng file `work\wheels\torch-2.10.0+cu128-cp313-cp313-win_amd64.whl` rồi tải lại. Giữ file wheel này đến khi preflight thành công. `TEMP`/`TMP` của riêng phiên PowerShell được chuyển sang `work\pip_tmp` trên ổ D, tránh thư mục `pip-unpack` cũ ở ổ C. Không dùng `--force-reinstall`, không cài `requirements/rag.txt` trước wheel CUDA và không trỏ pip vào kho `cu128` cho toàn bộ phụ thuộc. `$env:PIP_NO_INDEX = "0"` mở lại truy vấn package trong phiên PowerShell vì máy hiện đặt `PIP_NO_INDEX=1`. Các lệnh đều dùng đúng `env\Scripts\python.exe`.
+
+Đã xác minh có wheel `torch 2.10.0+cu128` cho CPython 3.13/Windows x64 trên [chỉ mục PyTorch](https://download.pytorch.org/whl/cu128/torch/). Phiên bản `bitsandbytes 0.50.2` đã có trong `env` nhưng phải chạy phép tính NF4 thật trên GPU ở preflight; chỉ tìm hoặc import wheel chưa đủ chứng minh dùng được.
 
 Nếu gặp `No matching distribution found for bitsandbytes`, chạy lại lệnh có `--index-url https://pypi.org/simple` bên trên; không cần đổi Python hay hạ model chỉ vì thông báo này. Nếu vẫn lỗi, kiểm tra `python.exe -m pip index versions bitsandbytes --index-url https://pypi.org/simple` và log `-v` để phân biệt nguồn package, mạng và wheel không tương thích.
 
@@ -45,7 +63,7 @@ CUDA wheel mang theo runtime; không cần cài riêng CUDA Toolkit để chạy
 
 Qwen3 cần Transformers ≥4.51 theo [model card reranker](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B). Profile dùng fp16/SDPA, không yêu cầu FlashAttention 2, vLLM hoặc FAISS. NF4 dùng [bitsandbytes cho Windows/NVIDIA](https://huggingface.co/docs/bitsandbytes/en/installation). Tài liệu model: [BGE-M3](https://huggingface.co/BAAI/bge-m3), [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B), [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B). Các họ model này ra đời trước mốc 01/08/2026; manifest lưu revision thực tế để đối chiếu và viết working notes.
 
-Preflight phải hiện RTX 2050, khoảng 4 GiB VRAM và CUDA khác `null`. Không dùng được CUDA thì pipeline dừng trước khi xử lý corpus. Cắm nguồn, dùng chế độ hiệu năng cao, đóng ứng dụng chiếm VRAM; theo dõi bằng `nvidia-smi -l 2`. Tokenizer, đọc đĩa, BM25 và xuất JSON chạy CPU nên GPU không cần luôn đầy.
+Preflight phải hiện RTX 2050, khoảng 4 GiB VRAM, CUDA khác `null` và `nf4_gpu_test: ok`. Không dùng được CUDA/NF4 thì pipeline dừng trước khi xử lý corpus. Cắm nguồn, dùng chế độ hiệu năng cao, đóng ứng dụng chiếm VRAM; theo dõi bằng `nvidia-smi -l 2`. Tokenizer, đọc đĩa, BM25 và xuất JSON chạy CPU nên GPU không cần luôn đầy.
 
 ## 3. Chạy từ đầu đến bài nộp
 

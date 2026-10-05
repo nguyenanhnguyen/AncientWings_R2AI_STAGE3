@@ -34,6 +34,23 @@ def preflight(device='cuda', quantized=False):
         import bitsandbytes  # Fail before crawling/indexing if the optional runtime is absent.
         import accelerate
         result['quantization_runtime'] = [bitsandbytes.__version__, accelerate.__version__]
+        if device.startswith('cuda'):
+            layer = output = None
+            try:
+                layer = bitsandbytes.nn.Linear4bit(
+                    16, 8, bias=False, compute_dtype=torch.float16, quant_type='nf4'
+                ).to(device)
+                with torch.inference_mode():
+                    output = layer(torch.ones((1, 16), dtype=torch.float16, device=device))
+                    torch.cuda.synchronize(device)
+                    if not torch.isfinite(output).all():
+                        raise RuntimeError('NF4 produced non-finite values.')
+                result['nf4_gpu_test'] = 'ok'
+            except Exception as exc:
+                raise RuntimeError('bitsandbytes NF4 GPU test failed; quantized translation cannot run.') from exc
+            finally:
+                del layer, output
+                torch.cuda.empty_cache()
     emit(json.dumps(result, indent=2, ensure_ascii=False))
     return result
 
