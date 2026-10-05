@@ -17,6 +17,7 @@ which is what the rules allow. Sizes are the published parameter counts.
 offline, in tests and on a machine with no GPU. It proves the plumbing, never retrieval quality.
 """
 from pathlib import Path
+import zlib
 
 import numpy as np
 
@@ -56,7 +57,9 @@ class HashEncoder:
         result = np.zeros((len(texts), self.dim), dtype=np.float32)
         for row, text in enumerate(texts):
             for token in tokenize(text):
-                slot = hash((token, 'vibiomir')) % self.dim
+                # crc32, not hash(): Python salts hash() per process, so an index built by one
+                # command and queried by another would put the same token in different slots.
+                slot = zlib.crc32(token.encode('utf-8')) % self.dim
                 result[row, slot] += 1.0
         norms = np.linalg.norm(result, axis=1, keepdims=True)
         return result / np.maximum(norms, 1e-9)
@@ -80,9 +83,11 @@ class TransformerEncoder:
         if self.config['pooling'] == 'last':
             # Last-token pooling needs the real final token at a known position.
             self.tokenizer.padding_side = 'left'
+        # torch_dtype is accepted by every transformers release this project allows; the newer
+        # `dtype` name is silently ignored by older ones, which would load fp32 at twice the VRAM.
         self.model = AutoModel.from_pretrained(
             self.config['hf_id'],
-            dtype=torch.float16 if (fp16 and self.device == 'cuda') else torch.float32,
+            torch_dtype=torch.float16 if (fp16 and self.device == 'cuda') else torch.float32,
             **kwargs).to(self.device).eval()
         self.dim = int(getattr(self.model.config, 'hidden_size', self.config['dim']))
 
@@ -92,8 +97,9 @@ class TransformerEncoder:
         if how == 'cls':
             return states[:, 0]
         if how == 'last':
-            lengths = mask.sum(dim=1) - 1
-            return states[self.torch.arange(states.size(0), device=states.device), lengths]
+            # The tokenizer pads on the left for this pooling, so the last real token of every
+            # row sits at the final position. Indexing by mask.sum()-1 would land in the padding.
+            return states[:, -1]
         weights = mask.unsqueeze(-1).to(states.dtype)
         return (states * weights).sum(dim=1) / weights.sum(dim=1).clamp(min=1e-9)
 

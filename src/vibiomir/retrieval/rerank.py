@@ -11,6 +11,9 @@ rerankers published before 2026-08-01 and at or under 15B are listed.
                             yes/no token logits of a causal model, so it needs its own prompt.
     qwen3-reranker-4b       Qwen/Qwen3-Reranker-4B, 4B, 2025-06. Needs a 16GB GPU.
     identity                No model: keeps the fused order. For offline runs and tests.
+
+Every reranker returns a probability in [0, 1] (sigmoid of the classifier logit, or the softmax
+probability of "yes"), so scores mean the same thing across models and Block D can threshold them.
 """
 import numpy as np
 
@@ -57,7 +60,7 @@ class CrossEncoderReranker:
 
             self.tokenizer.padding_side = 'left'
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.config['hf_id'], dtype=dtype).to(self.device).eval()
+                self.config['hf_id'], torch_dtype=dtype).to(self.device).eval()
             self.yes_id = self.tokenizer.convert_tokens_to_ids('yes')
             self.no_id = self.tokenizer.convert_tokens_to_ids('no')
             self.prefix = ('<|im_start|>system\nJudge whether the Document meets the requirements '
@@ -68,7 +71,7 @@ class CrossEncoderReranker:
             from transformers import AutoModelForSequenceClassification
 
             self.model = AutoModelForSequenceClassification.from_pretrained(
-                self.config['hf_id'], dtype=dtype).to(self.device).eval()
+                self.config['hf_id'], torch_dtype=dtype).to(self.device).eval()
 
     def _inputs(self, query, batch):
         if self.config['kind'] == 'causal-yes-no':
@@ -86,8 +89,10 @@ class CrossEncoderReranker:
             # Last position of a left-padded batch holds the answer token distribution.
             last = output.logits[:, -1, :]
             pair = self.torch.stack([last[:, self.no_id], last[:, self.yes_id]], dim=1)
-            return self.torch.log_softmax(pair.float(), dim=1)[:, 1]
-        return output.logits.view(-1)
+            return self.torch.softmax(pair.float(), dim=1)[:, 1]
+        # A sigmoid turns the raw logit into a 0-1 relevance probability. Block D thresholds by
+        # the ratio to a query's best score, which is meaningless on raw logits that go negative.
+        return self.torch.sigmoid(output.logits.view(-1).float())
 
     def score(self, query, passages, batch_size=16):
         if not passages:

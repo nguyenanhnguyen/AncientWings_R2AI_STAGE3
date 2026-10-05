@@ -56,7 +56,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--candidates', default='work/retrieval/candidates.jsonl')
     parser.add_argument('--chunks', default='work/chunks/chunks.parquet')
-    parser.add_argument('--corpus', nargs='+', required=True,
+    parser.add_argument('--corpus', nargs='+', default=['work/corpus/corpus.parquet'],
                         help='The same corpus files chunking used; chunk_text is re-sliced here.')
     parser.add_argument('--queries', default='data/query.parquet')
     parser.add_argument('--links', default=None,

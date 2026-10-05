@@ -73,8 +73,12 @@ def run(args):
         if not embeddings.exists():
             raise FileNotFoundError(f'{embeddings} missing; run scripts/index.py dense first.')
         manifest = storage.read_json(index_dir / 'dense_manifest.json')
-        encoder = dense.load_encoder(args.encoder or manifest['encoder'], device=args.device,
-                                     fp16=not args.fp32)
+        if args.encoder and args.encoder != manifest['encoder']:
+            # Query and chunk vectors from different models live in different spaces; the
+            # similarity would be noise, not a weaker signal.
+            raise ValueError(f"The index was encoded with {manifest['encoder']!r}, not "
+                             f'{args.encoder!r}; rebuild it or drop --encoder.')
+        encoder = dense.load_encoder(manifest['encoder'], device=args.device, fp16=not args.fp32)
         started = time.monotonic()
         vectors = encoder.encode(variant_rows, kind='query', batch_size=args.batch_size)
         faiss_index = index_dir / 'faiss.index'
@@ -108,7 +112,7 @@ def run(args):
                         batch_size=args.rerank_batch, limit=args.rerank_k)
         kept = scored[:args.keep]
         documents = hybrid.aggregate_documents(
-            [(row, fused_score, channels) for row, fused_score, channels, _ce in kept],
+            [(row, fused_score if ce is None else ce) for row, fused_score, _channels, ce in kept],
             doc_ids, top_chunks_per_doc=args.doc_chunks)
         results.append({
             'query_id': query['id'],
@@ -177,6 +181,12 @@ def main():
     args = parser.parse_args()
     if args.no_bm25 and args.no_dense:
         parser.error('At least one of BM25 or dense retrieval must stay enabled.')
+    if args.keep > args.rerank_k:
+        # Candidates past rerank_k have no reranker score; mixing them with scored ones would
+        # compare a probability against an RRF score in Block D.
+        parser.error('--keep cannot exceed --rerank-k')
+    if args.rerank_k > args.fuse_k:
+        parser.error('--rerank-k cannot exceed --fuse-k')
     run(args)
 
 

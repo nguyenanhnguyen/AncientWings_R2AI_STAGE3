@@ -9,8 +9,10 @@ import argparse
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import random
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,9 +25,11 @@ import pyarrow as pa  # noqa: E402
 
 from vibiomir.common import console, schema, storage  # noqa: E402
 from vibiomir.corpus import chunk as chunking  # noqa: E402
+from vibiomir.corpus import prepare  # noqa: E402
 from vibiomir.evaluation import errors, labels as label_tools, metrics  # noqa: E402
 from vibiomir.evaluation import run as evaluation_cli  # noqa: E402
 from vibiomir.index import build as index_cli  # noqa: E402
+from vibiomir.retrieval import hybrid  # noqa: E402
 from vibiomir.retrieval import run as retrieval_cli  # noqa: E402
 from vibiomir.submission import build as submission_cli  # noqa: E402
 from vibiomir.submission import choose, validate  # noqa: E402
@@ -445,6 +449,162 @@ class CorpusShapeTests(unittest.TestCase):
     def test_unrecognised_shape_fails_loudly_with_the_fix_in_the_message(self):
         with self.assertRaisesRegex(ValueError, 'text column'):
             self._run([{'id': 1, 'noi_dung': VI_BODY}])
+
+
+class PrepareTests(unittest.TestCase):
+    """Raw crawl output -> work/corpus/corpus.parquet."""
+
+    def _run_dir(self, root, records):
+        (root / 'records').mkdir(parents=True)
+        for record in records:
+            (root / 'records' / f"{record['id']}.json").write_text(
+                json.dumps(record, ensure_ascii=False), encoding='utf-8')
+        return root
+
+    def _build(self, sources, out, **options):
+        settings = {'limit': None, 'max_duplicates': 20, 'min_chars': 0, 'drop_review': False,
+                    'text_field': None}
+        settings.update(options)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return prepare.build(argparse.Namespace(source=[str(s) for s in sources],
+                                                    out=str(out), **settings))
+
+    def test_run_directory_keeps_articles_and_drops_what_is_not_the_article(self):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-prepare-') as temporary:
+            root = Path(temporary)
+            article = {'status': 'extracted', 'quality_status': 'accepted', 'domain': 'a.vn',
+                       'language_hint': 'vi_hint', 'raw_path': 'raw/ab/x.gz'}
+            run = self._run_dir(root / 'run', [
+                {**article, 'id': 10, 'url': 'https://a.vn/bai-1', 'final_url': 'https://a.vn/bai-1',
+                 'title': 'Bài một', 'text': VI_BODY, 'quality_flags': []},
+                {**article, 'id': 11, 'url': 'https://a.vn/bai-2', 'final_url': 'https://a.vn/',
+                 'title': 'Trang chủ', 'text': 'Trang chủ báo', 'quality_flags': ['redirect_review']},
+                {'id': 12, 'url': 'https://a.vn/bai-3', 'status': 'http_error'},
+                {**article, 'id': 13, 'url': 'https://a.vn/bai-4', 'title': 'Rỗng', 'text': ''},
+                {**article, 'id': 14, 'url': 'https://a.vn/bai-5', 'title': 'Ngắn',
+                 'text': SHORT_BODY, 'quality_status': 'review', 'quality_flags': ['short_text']},
+            ])
+            summary = self._build([run], root / 'out')
+            rows = storage.read_parquet(root / 'out' / 'corpus.parquet')
+            self.assertEqual([row['id'] for row in rows], [10, 14])
+            self.assertEqual(summary['drop_reasons'], {'homepage_redirect': 1,
+                                                       'fetch_failed:http_error': 1,
+                                                       'empty_text': 1})
+            self.assertEqual(rows[0]['lang'], 'vi')
+            self.assertEqual(rows[1]['quality_flags'], ['short_text'])
+            self.assertTrue(rows[0]['raw_path'].endswith('run/raw/ab/x.gz'))
+            dropped = storage.read_jsonl(root / 'out' / 'dropped.jsonl')
+            self.assertEqual({item['id'] for item in dropped}, {11, 12, 13})
+
+    def test_limit_reads_the_lowest_ids_first(self):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-limit-') as temporary:
+            root = Path(temporary)
+            run = self._run_dir(root / 'run', [
+                {'id': value, 'url': f'https://a.vn/{value}', 'status': 'extracted',
+                 'title': 'T', 'text': VI_BODY + str(value)} for value in (30, 4, 200, 17)])
+            self._build([run], root / 'out', limit=2)
+            ids = [row['id'] for row in storage.read_parquet(root / 'out' / 'corpus.parquet')]
+            self.assertEqual(ids, [4, 17])
+
+    def test_mass_identical_text_is_a_template_but_a_pair_is_kept_with_both_ids(self):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-template-') as temporary:
+            root = Path(temporary)
+            rows = [{'id': value, 'url': f'https://a.vn/{value}', 'status': 'ok',
+                     'text': 'Trang lỗi chung của site.'} for value in range(1, 8)]
+            rows += [{'id': 50, 'url': 'https://a.vn/50', 'status': 'ok', 'text': VI_BODY},
+                     {'id': 51, 'url': 'https://b.vn/51', 'status': 'ok', 'text': VI_BODY}]
+            source = root / 'export.json'
+            source.write_text(json.dumps(rows, ensure_ascii=False), encoding='utf-8')
+            summary = self._build([source], root / 'out', max_duplicates=3)
+            kept = storage.read_parquet(root / 'out' / 'corpus.parquet')
+            self.assertEqual([row['id'] for row in kept], [50, 51])
+            self.assertEqual(kept[0]['duplicate_doc_ids'], [51])
+            self.assertEqual(summary['drop_reasons'], {'template_text': 7})
+
+    def test_prepared_corpus_feeds_chunking_and_reslices_exactly(self):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-feed-') as temporary:
+            root = Path(temporary)
+            source = root / 'export.jsonl'
+            storage.write_jsonl(source, [
+                {'id': 1, 'url': 'https://a.vn/1', 'status': 'ok', 'title': 'Một',
+                 'text': VI_BODY + '\r\n\r\n\r\n  Đoạn   thêm.  '},
+                {'id': 2, 'url': 'https://b.cn/2', 'status': 'ok', 'title': '二', 'text': ZH_BODY}])
+            self._build([source], root / 'corpus')
+            corpus = root / 'corpus' / 'corpus.parquet'
+            self.assertEqual({row['lang'] for row in storage.read_parquet(corpus)}, {'vi', 'zh'})
+            with contextlib.redirect_stdout(io.StringIO()):
+                chunking.build(argparse.Namespace(
+                    corpus=[str(corpus)], out=str(root / 'chunks'), target_tokens=40,
+                    overlap_tokens=8, max_tokens=80, min_tokens=5, text_field=None, status='ok'))
+            table = validate.load_chunk_table(root / 'chunks' / 'chunks.parquet')
+            documents = validate.load_document_texts([corpus])
+            for row in table.values():
+                self.assertEqual(documents[row['doc_id']][row['char_start']:row['char_end']],
+                                 row['text'])
+
+
+class RegressionTests(unittest.TestCase):
+    """Bugs found by running the pipeline on real data; each must stay fixed."""
+
+    def test_hash_encoder_is_stable_across_processes(self):
+        # Python salts hash() per process; the index and the queries are encoded by different
+        # commands, so a per-process hash would make the dense channel pure noise.
+        code = ('import sys; sys.path.insert(0, r"%s"); '
+                'from vibiomir.index.embedding import HashEncoder; '
+                'print(HashEncoder().encode(["sỏi thận 腎結石"])[0].round(6).tolist())'
+                % (ROOT / 'src'))
+        outputs = {subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                                  env={**os.environ, 'PYTHONHASHSEED': seed,
+                                       'PYTHONIOENCODING': 'utf-8'},
+                                  check=True).stdout for seed in ('1', '2', '3')}
+        self.assertEqual(len(outputs), 1)
+
+    def test_documents_are_ranked_by_the_reranker_when_it_ran(self):
+        # The caller passes the reranker probability; chunk 1 must win although chunk 0 led RRF.
+        ranked = hybrid.aggregate_documents([(0, 0.10), (1, 0.95)], [100, 200],
+                                            top_chunks_per_doc=1)
+        self.assertEqual([doc_id for doc_id, _score, _rows in ranked], [200, 100])
+
+    def test_probability_scores_make_the_ratio_threshold_meaningful(self):
+        scores = [0.9, 0.85, 0.2, 0.05, 0.01]
+        record = {'query_id': 1,
+                  'candidates': [{'chunk_id': f'{i}:0', 'doc_id': i, 'chunk_order': 0,
+                                  'rrf_score': 0.01, 'ce_score': score}
+                                 for i, score in enumerate(scores, start=1)],
+                  'documents': [{'doc_id': i, 'score': score}
+                                for i, score in enumerate(scores, start=1)]}
+        docs, chunks = choose.select_for_query(record, choose.policy('balanced', chunk_min=1,
+                                                                     doc_min=1))
+        self.assertEqual([chunk['doc_id'] for chunk in chunks], [1, 2])
+        self.assertEqual(docs, [1, 2])
+
+    def test_retrieval_refuses_an_encoder_other_than_the_index_one(self):
+        with tempfile.TemporaryDirectory(prefix='vibiomir-encoder-') as temporary:
+            root = Path(temporary)
+            fixture = write_fixture(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                chunking.build(argparse.Namespace(
+                    corpus=[str(fixture['corpus'])], out=str(root / 'chunks'), target_tokens=60,
+                    overlap_tokens=15, max_tokens=120, min_tokens=8, text_field=None, status='ok'))
+                index_cli.build_all(argparse.Namespace(
+                    chunks=str(root / 'chunks' / 'chunks.parquet'), out=str(root / 'index'),
+                    k1=1.5, b=0.75, encoder='hash', device='cpu', batch_size=4, shard=8,
+                    fp32=True, faiss=False, faiss_lists=0))
+            with self.assertRaisesRegex(ValueError, 'encoded with'):
+                retrieval_cli.run(argparse.Namespace(
+                    chunks=str(root / 'chunks' / 'chunks.parquet'), index=str(root / 'index'),
+                    queries=str(fixture['queries']), out=str(root / 'retrieval'), top_k=5,
+                    fuse_k=5, rerank_k=5, keep=5, doc_chunks=3, encoder='bge-m3',
+                    reranker='identity', weights=None, keyword_variant=False, translations=None,
+                    no_bm25=False, no_dense=False, faiss=False, device='cpu', batch_size=4,
+                    rerank_batch=4, fp32=True))
+
+    def test_retrieval_cli_rejects_keep_beyond_the_reranked_slice(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'retrieve.py'),
+                                 '--keep', '80', '--rerank-k', '50'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--keep cannot exceed --rerank-k', result.stderr)
 
 
 class ConsoleTests(unittest.TestCase):

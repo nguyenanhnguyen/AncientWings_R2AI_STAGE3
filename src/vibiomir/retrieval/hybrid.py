@@ -31,10 +31,15 @@ def rrf_fuse(rankings, weights=None, top_k=200, rrf_k=RRF_K):
     return [(row, fused[row], sources[row]) for row in order]
 
 
-def aggregate_documents(fused, doc_ids, top_chunks_per_doc=3):
-    """-> [(doc_id, score, [rows])] ranked. Score sums a document's best chunk scores."""
+def aggregate_documents(scored, doc_ids, top_chunks_per_doc=3):
+    """-> [(doc_id, score, [rows])] ranked. Score sums a document's best chunk scores.
+
+    `scored` is [(row, score)] using the strongest score available for each chunk: the
+    reranker's probability when it ran, the fused RRF score otherwise. Ranking documents by RRF
+    while chunks were reranked would discard the best signal at exactly the document level.
+    """
     grouped = {}
-    for row, score, _channels in fused:
+    for row, score in scored:
         doc_id = int(doc_ids[row])
         grouped.setdefault(doc_id, []).append((row, score))
     result = []
@@ -56,7 +61,10 @@ def make_dense_search(embeddings_path, faiss_index=None):
 
         def search(vectors, k):
             scores, rows = index.search(np.asarray(vectors, dtype=np.float32), k)
-            return rows, scores
+            # faiss pads short result lists with row -1; used as an index that would silently
+            # pick the last chunk, so those slots are dropped per query.
+            kept = [(row[row >= 0], score[row >= 0]) for row, score in zip(rows, scores)]
+            return [row for row, _ in kept], [score for _, score in kept]
 
         return search
 

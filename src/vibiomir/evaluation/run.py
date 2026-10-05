@@ -98,7 +98,7 @@ def main():
     step.add_argument('--submission', default='work/submission/submission.json')
     step.add_argument('--labels', default='work/eval/labels.jsonl')
     step.add_argument('--candidates', default='work/retrieval/candidates.jsonl')
-    step.add_argument('--corpus', nargs='+', required=True)
+    step.add_argument('--corpus', nargs='+', default=['work/corpus/corpus.parquet'])
     step.add_argument('--out', default='work/eval')
     step.set_defaults(func=score)
 

@@ -1,6 +1,6 @@
-# Thiết kế pipeline A4 → E (chunk, index, retrieval, bài nộp, đánh giá)
+# Thiết kế pipeline A2 → E (tiền xử lý, chunk, index, retrieval, bài nộp, đánh giá)
 
-Tài liệu mô tả phần pipeline đã soạn sau khi corpus được crawl xong: mỗi khâu nhận gì, trả gì, có những tham số nào, dùng kỹ thuật gì và đóng vai trò gì với cả hệ thống. Khung block lấy từ [nguyen/pipeline.txt](../../nguyen/pipeline.txt). Block A1–A3 (crawl, trích xuất, QC) nằm ở crawler của nhóm, ngoài phạm vi tài liệu này.
+Tài liệu mô tả phần pipeline đã soạn sau khi corpus được crawl xong: mỗi khâu nhận gì, trả gì, có những tham số nào, dùng kỹ thuật gì và đóng vai trò gì với cả hệ thống. Khung block lấy từ [nguyen/pipeline.txt](../../nguyen/pipeline.txt). Block A1 (crawl) nằm ở crawler của nhóm, ngoài phạm vi tài liệu này; pipeline bắt đầu từ đầu ra của crawler. Lệnh chạy từng bước: [run_guide.md](run_guide.md).
 
 Mọi con số dưới đây là giá trị mặc định trong code tại thời điểm viết, không phải kết quả đã tối ưu.
 
@@ -8,10 +8,10 @@ Mọi con số dưới đây là giá trị mặc định trong code tại thờ
 
 | Hạng mục | Tình trạng |
 | --- | --- |
-| Code A4 → E | Có, chạy được đầu–cuối qua 5 lệnh trong `scripts/` |
-| Kiểm thử | 29 test (`tests/test_pipeline.py`), chạy offline, không cần GPU hay tải model |
+| Code A2 → E | Có, chạy được đầu–cuối qua 6 lệnh trong `scripts/` |
+| Kiểm thử | 38 test (`tests/test_pipeline.py`), chạy offline, không cần GPU hay tải model |
 | Đã chạy với model thật (bge-m3, bge-reranker) | **Chưa.** Mọi lượt chạy đều dùng `--encoder hash` và `--reranker identity` |
-| Đã chạy trên corpus thật | **Chưa.** Chỉ chạy trên corpus mẫu 4 tài liệu của test |
+| Đã chạy trên corpus thật | **Có**, 30.000 bản ghi đầu của `nguyen/output/runs/batch01_nguyen` với 1.200 truy vấn thật, khoảng 4,8 phút đầu–cuối, nhưng chỉ với `hash`/`identity` |
 | Nhãn dev | **Chưa có.** BTC không phát hành gold; `pseudo` chỉ là vòng tròn |
 | Fine-tune | Không có, mọi model dùng nguyên bản pretrained |
 
@@ -20,7 +20,10 @@ Mọi con số dưới đây là giá trị mặc định trong code tại thờ
 ## 1. Dòng dữ liệu
 
 ```text
-corpus (parquet/json/jsonl từ crawler)
+dữ liệu crawl (thư mục run hoặc parquet/json/jsonl)
+   │  scripts/prepare.py
+   ▼
+work/corpus/corpus.parquet
    │  scripts/chunk.py
    ▼
 chunks.parquet ──────────────┬─────────────────────────┐
@@ -78,6 +81,27 @@ Bảng này khớp với bảng "đổi gì thì chạy lại gì" của pipelin
 - `bm25_manifest.json` và `dense_manifest.json` ghi SHA-256 của `chunks.parquet`. `retrieve.py` từ chối chạy nếu chunk đã đổi sau khi lập chỉ mục, vì dòng thứ i sẽ trỏ sai chunk.
 - Mọi file ghi ra đều qua `atomic_write_bytes` (ghi file tạm rồi đổi tên), nên chạy đứt giữa chừng không để lại file dở.
 - Mỗi khâu ghi một `*_manifest.json` gồm tham số đã dùng, số lượng và hash file đầu ra.
+
+## 2a. Block A2→A3 — tiền xử lý dữ liệu crawl
+
+**Lệnh:** `scripts/prepare.py` → [corpus/prepare.py](../../src/vibiomir/corpus/prepare.py)
+
+| | |
+| --- | --- |
+| Nhận | Một hoặc nhiều nguồn (`--source`): thư mục run có `records/<id>.json`, hoặc file `.parquet` / `.json` / `.jsonl` xuất từ crawler. Nguồn đứng trước thắng khi trùng `id` |
+| Trả | `work/corpus/corpus.parquet` với schema cố định (`id`, `url`, `final_url`, `domain`, `title`, `text`, `lang`, `status`, `quality_status`, `quality_flags`, `published_at`, `extractor`, `char_count`, `text_sha256`, `raw_path`, `raw_sha256`, `duplicate_doc_ids`, `source`), `dropped.jsonl`, `prepare_manifest.json` |
+
+| Tham số | Mặc định | Ý nghĩa |
+| --- | --- | --- |
+| `--limit` | không | Đọc tối đa N hàng nguồn, ID nhỏ trước |
+| `--max-duplicates` | 20 | Nhiều ID hơn mức này cùng một văn bản thì coi là trang mẫu và loại |
+| `--min-chars` | 0 | Loại tài liệu ngắn hơn; mặc định giữ mọi tài liệu có chữ |
+| `--drop-review` | tắt | Loại cả bài crawler đánh dấu `review` |
+| `--text-field` | tự nhận | Cột chứa thân bài |
+
+Lý do loại: `fetch_failed`, `empty_text`, `homepage_redirect` (URL bị chuyển về trang chủ nên văn bản là trang chủ chứ không phải bài), `template_text`, `quality_rejected`. Trong batch crawl đầu có 2.236 bản ghi chuyển về trang chủ, 2.230 cái chung văn bản "Trang chủ"; nếu để lại chúng sẽ khớp nhiều truy vấn và chiếm chỗ bài thật. Văn bản trùng ở nhóm nhỏ được giữ đủ mọi ID và ghi vào `duplicate_doc_ids`, vì ID nào cũng có thể là nhãn.
+
+**Ý nghĩa với hệ thống.** Đây là chỗ duy nhất hiểu các định dạng crawler khác nhau. Mọi khâu sau chỉ đọc `corpus.parquet`, nên đổi crawler chỉ cần sửa một module.
 
 ## 3. Block A4 — chunking
 
@@ -185,7 +209,7 @@ Các encoder đã đăng ký (đều là model mở; mốc phát hành và số 
 ### C2 — truy xuất lai và RRF ([hybrid.py](../../src/vibiomir/retrieval/hybrid.py))
 - Mỗi cặp (biến thể truy vấn, chỉ mục) là một kênh: `bm25:original`, `dense:original`, ...
 - Trộn bằng **Reciprocal Rank Fusion** với hằng số 60: điểm = Σ trọng số / (60 + hạng + 1). Trộn theo hạng nên không phải đưa điểm BM25 và cosine về cùng thang.
-- Điểm tài liệu = tổng điểm của vài chunk tốt nhất của nó, thay vì lấy chunk cao nhất, vì nhiều chunk cùng xếp cao đáng tin hơn một chunk may mắn.
+- Điểm tài liệu = tổng điểm của vài chunk tốt nhất của nó, thay vì lấy chunk cao nhất, vì nhiều chunk cùng xếp cao đáng tin hơn một chunk may mắn. Điểm của chunk là **xác suất của reranker** khi reranker đã chạy, chỉ lùi về điểm RRF khi không có.
 - Mã hóa mọi biến thể của mọi truy vấn trong một lượt và tìm một lần, tránh đọc lại ma trận 1.200 lần.
 
 ### C3 — rerank ([rerank.py](../../src/vibiomir/retrieval/rerank.py))
@@ -194,10 +218,10 @@ Các encoder đã đăng ký (đều là model mở; mốc phát hành và số 
 | --- | --- | --- | --- |
 | `bge-reranker-v2-m3` (mặc định) | BAAI/bge-reranker-v2-m3 | 568M | Đầu phân loại trên cặp (truy vấn, đoạn) |
 | `bge-reranker-base` | BAAI/bge-reranker-base | 278M | Như trên, yếu hơn với tiếng Trung |
-| `qwen3-reranker-0.6b` / `-4b` | Qwen/Qwen3-Reranker | 0.6B / 4B | So logit của token `yes`/`no` trong prompt riêng |
+| `qwen3-reranker-0.6b` / `-4b` | Qwen/Qwen3-Reranker | 0.6B / 4B | Xác suất của token `yes` so với `no` trong prompt riêng |
 | `identity` | không phải model | — | Giữ nguyên thứ tự trộn |
 
-Tự giảm batch khi hết bộ nhớ. Hàm `adaptive_cutoff` tìm chỗ điểm rerank tụt mạnh nhất để cắt danh sách, theo ý tưởng adaptive-k của Taguchi và cộng sự (2025).
+Mọi reranker trả **xác suất trong [0, 1]** (sigmoid của logit, hoặc softmax yes/no), nên điểm mang cùng nghĩa giữa các model và ngưỡng tỷ lệ ở Block D có ý nghĩa. Tự giảm batch khi hết bộ nhớ. Hàm `adaptive_cutoff` tìm chỗ điểm rerank tụt mạnh nhất để cắt danh sách, theo ý tưởng adaptive-k của Taguchi và cộng sự (2025).
 
 **Ý nghĩa với hệ thống.** Trộn quyết định vài trăm ứng viên nào đáng xem; cross-encoder đọc cả truy vấn lẫn đoạn nên phán đoán mức liên quan tốt hơn từng kênh riêng lẻ.
 
@@ -286,22 +310,37 @@ Phân biệt hai dạng chuẩn hóa: dạng lưu giữ nguyên văn bản gần
 - **Xuyên ngôn ngữ chỉ dựa vào dense.** Chưa có dịch truy vấn; hook đã có nhưng cần model dịch hợp lệ.
 - **Token của LCS là giả định** (mục 7). Nếu BTC dùng cách khác, ngưỡng 40% có thể lệch, nhất là với tiếng Trung.
 - **Luật model.** Danh sách model là gợi ý đã soạn từ kiến thức sẵn có và tìm kiếm; ngày phát hành và số tham số cần tự đối chiếu lại trước khi nộp, vì đây là điều BTC sẽ kiểm.
-- **Giả định về `status`.** Bộ lọc `--status ok` dựa trên định dạng xuất của crawler hiện tại trong `crawler_minh/`. Nếu crawler đổi tên cột, dùng `--status ''` hoặc sửa tại `chunk.build`.
+- **Giả định về `status`.** Bộ lọc `--status ok` ở `chunk.py` dựa trên định dạng mà `prepare.py` ghi ra; dữ liệu đi qua `prepare.py` luôn có `status = ok`.
+- **Corpus mẫu chỉ có tiếng Việt.** 30.000 bản ghi đã chạy đều tiếng Việt từ 4 domain, nên phần xuyên ngôn ngữ chưa được thử trên dữ liệu thật.
+
+### Lỗi đã tìm và sửa khi chạy trên dữ liệu thật (05/10/2026)
+
+| Lỗi | Hậu quả | Sửa |
+| --- | --- | --- |
+| Encoder `hash` dùng `hash()` của Python, đổi theo từng tiến trình | Index và truy vấn mã hóa ở hai lệnh khác nhau ra véc-tơ không khớp; kênh dense vô nghĩa khi chạy qua CLI | Dùng `crc32`; có test chạy ba tiến trình |
+| Điểm reranker là logit thô, có thể âm | Ngưỡng tỷ lệ ở Block D vô nghĩa với reranker thật | Đổi thành xác suất 0–1 |
+| Xếp hạng tài liệu chỉ theo RRF | Bỏ qua reranker ở cấp tài liệu | Dùng xác suất reranker khi có |
+| faiss trả `-1` khi thiếu kết quả | Dùng `-1` làm chỉ số, lấy nhầm chunk cuối | Lọc bỏ |
+| `--encoder` ở bước truy xuất khác bước lập chỉ mục không bị chặn | Truy vấn và tài liệu ở hai không gian véc-tơ | Báo lỗi |
+| Pooling token cuối với padding bên trái lấy theo `mask.sum - 1` | Lấy nhầm vị trí padding với `qwen3-embedding-*` | Lấy vị trí cuối |
+| Tham số `dtype=` không có ở bản `transformers` cũ | Lặng lẽ nạp fp32, gấp đôi VRAM | Dùng `torch_dtype=` |
+| `--keep` lớn hơn `--rerank-k` | Trộn điểm xác suất với điểm RRF khi chọn | Chặn ở CLI |
 
 ## 11. Lệnh chạy
 
 ```powershell
 python -m pip install -r requirements/rag.txt
 
-python scripts/chunk.py    --corpus <corpus...> --out work/chunks
-python scripts/index.py all --chunks work/chunks/chunks.parquet --out work/index --encoder bge-m3
-python scripts/retrieve.py --chunks work/chunks/chunks.parquet --index work/index --queries data/query.parquet --out work/retrieval
-python scripts/submit.py   --candidates work/retrieval/candidates.jsonl --chunks work/chunks/chunks.parquet --corpus <corpus...> --links data/links_corpus.parquet --out work/submission --profile recall
+python scripts/prepare.py --source nguyen/output/runs/batch01_nguyen --limit 30000
+python scripts/chunk.py
+python scripts/index.py all --encoder bge-m3
+python scripts/retrieve.py --keyword-variant
+python scripts/submit.py --links data/links_corpus.parquet --profile recall
 
 python scripts/evaluate.py sheet   # xuất phiếu gán nhãn
 python scripts/evaluate.py collect # phiếu đã điền -> labels.jsonl
-python scripts/evaluate.py score --corpus <corpus...>
+python scripts/evaluate.py score
 ```
 
-Chạy thử không cần model: thêm `--encoder hash` cho `index.py` và `--reranker identity` cho `retrieve.py`. `--corpus` ở `submit.py` phải là đúng các file đã đưa vào `chunk.py`.
+Mọi đường dẫn mặc định đều trỏ vào `work/`. Chạy thử không cần model: thêm `--encoder hash` cho `index.py` và `--reranker identity` cho `retrieve.py`. Chi tiết từng bước, thời gian đo được và cách xử lý sự cố: [run_guide.md](run_guide.md).
 

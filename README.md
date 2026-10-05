@@ -25,18 +25,21 @@ work/                     Chunk, index, ứng viên, bài nộp, báo cáo (ngo�
 
 Các script A4–E đọc tham số rồi gọi hàm trong `src/`. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`. Hai notebook crawl tự chứa snapshot Python; các file code được giải nén vào thư mục run khi chạy.
 
-## Chạy pipeline A4 → E
+## Chạy pipeline từ dữ liệu crawl đến bài nộp
+
+Hướng dẫn đầy đủ từng bước, thời gian đo được và cách xử lý sự cố: [docs/solution/run_guide.md](docs/solution/run_guide.md).
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements/rag.txt
+.\env\Scripts\python.exe -m pip install -r requirements/rag.txt
 
-.\.venv\Scripts\python.exe scripts/chunk.py --corpus runs/<run>/corpus.parquet --out work/chunks
-.\.venv\Scripts\python.exe scripts/index.py all --chunks work/chunks/chunks.parquet --out work/index --encoder bge-m3
-.\.venv\Scripts\python.exe scripts/retrieve.py --chunks work/chunks/chunks.parquet --index work/index --queries data/query.parquet --out work/retrieval
-.\.venv\Scripts\python.exe scripts/submit.py --candidates work/retrieval/candidates.jsonl --chunks work/chunks/chunks.parquet --corpus runs/<run>/corpus.parquet --links data/links_corpus.parquet --out work/submission --profile recall
+.\env\Scripts\python.exe scripts/prepare.py --source nguyen/output/runs/batch01_nguyen --limit 30000
+.\env\Scripts\python.exe scripts/chunk.py
+.\env\Scripts\python.exe scripts/index.py all --encoder bge-m3
+.\env\Scripts\python.exe scripts/retrieve.py --keyword-variant
+.\env\Scripts\python.exe scripts/submit.py --links data/links_corpus.parquet --profile recall
 ```
 
-Nhiều shard crawl thì truyền nhiều file vào `--corpus`. Kết quả nộp là `work/submission/submission.zip`.
+Mọi đường dẫn mặc định đều trỏ vào `work/`. `prepare.py` đọc thư mục run có `records/` hoặc file `.parquet`/`.json`/`.jsonl` xuất từ crawler; nhiều nguồn thì truyền nhiều đường dẫn vào `--source`. Kết quả nộp là `work/submission/submission.zip`.
 
 Muốn chạy thử toàn bộ flow mà không tải model, dùng `--encoder hash` và `--reranker identity`. Hai tùy chọn này chỉ kiểm tra đường ống, không phản ánh chất lượng truy hồi.
 
