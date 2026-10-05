@@ -16,6 +16,16 @@ def build(args):
         raise ValueError(f'No candidates in {args.candidates}')
     queries = load_queries(args.queries)
     query_ids = [row['id'] for row in queries]
+    retrieval_manifest = Path(args.candidates).with_name('retrieval_manifest.json')
+    if retrieval_manifest.exists():
+        recorded = storage.read_json(retrieval_manifest)
+        if recorded.get('chunks_sha256') != storage.sha256_file(args.chunks):
+            raise ValueError('Candidates belong to a different chunks file.')
+        if recorded.get('queries_sha256') and recorded['queries_sha256'] != storage.sha256_file(args.queries):
+            raise ValueError('Candidates belong to different queries.')
+    seen_ids = [int(row['query_id']) for row in records]
+    if len(seen_ids) != len(set(seen_ids)):
+        raise ValueError('Duplicate query ids in candidates.')
     settings = choose.policy(
         profile=args.profile, adaptive=args.adaptive, sync_docs=not args.no_sync_docs,
         doc_min=args.doc_min, doc_max=args.doc_max, doc_ratio=args.doc_ratio,
@@ -24,6 +34,8 @@ def build(args):
     chosen, selection = choose.select(records, settings)
     missing = [query_id for query_id in query_ids if query_id not in chosen]
     if missing:
+        if getattr(args, 'require_complete', False):
+            raise ValueError(f'{len(missing)} queries missing from candidates; complete retrieval first.')
         # Required by the rules: a missing query means the whole submission is not scored. The
         # entry is still written, with empty lists, so the file stays valid.
         emit(f'{len(missing)} truy vấn không có ứng viên; ghi danh sách rỗng cho chúng.')
@@ -63,6 +75,7 @@ def main():
                         help='links_corpus.parquet; drops any doc id outside the official list.')
     parser.add_argument('--out', default='work/submission')
     parser.add_argument('--name', default='submission.json')
+    parser.add_argument('--require-complete', action='store_true', help='Reject interrupted retrieval output.')
     parser.add_argument('--text-field', default=None,
                         help='Default: the one recorded in chunk_manifest.json.')
     parser.add_argument('--profile', default='balanced', choices=sorted(choose.PROFILES))

@@ -12,8 +12,8 @@ rerankers published before 2026-08-01 and at or under 15B are listed.
     qwen3-reranker-4b       Qwen/Qwen3-Reranker-4B, 4B, 2025-06. Needs a 16GB GPU.
     identity                No model: keeps the fused order. For offline runs and tests.
 
-Every reranker returns a probability in [0, 1] (sigmoid of the classifier logit, or the softmax
-probability of "yes"), so scores mean the same thing across models and Block D can threshold them.
+Scores are in [0, 1] but are NOT calibrated relevance probabilities and are not comparable
+across model families without validation. Submission thresholds remain tunable heuristics.
 """
 import numpy as np
 
@@ -43,84 +43,111 @@ class IdentityReranker:
 
 
 class CrossEncoderReranker:
-    def __init__(self, name, device=None, fp16=True):
+    def __init__(self, name, device=None, fp16=True, max_length=None, revision=None):
         if name not in RERANKERS:
             raise ValueError(f'Unknown reranker {name!r}; choose from {sorted(RERANKERS)}')
         import torch
         from transformers import AutoTokenizer
 
         self.name = name
-        self.config = RERANKERS[name]
+        self.config = dict(RERANKERS[name])
+        if max_length is not None:
+            if max_length < 128:
+                raise ValueError('Reranker max_length must be at least 128')
+            self.config['max_length'] = max_length
         self.torch = torch
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        dtype = torch.float16 if (fp16 and self.device == 'cuda') else torch.float32
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config['hf_id'])
+        dtype = torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32
+        self.tokenizer = AutoTokenizer.from_pretrained(self.config['hf_id'], revision=revision)
+        kwargs = dict(torch_dtype=dtype, revision=revision, attn_implementation='sdpa')
         if self.config['kind'] == 'causal-yes-no':
             from transformers import AutoModelForCausalLM
 
             self.tokenizer.padding_side = 'left'
             self.model = AutoModelForCausalLM.from_pretrained(
-                self.config['hf_id'], torch_dtype=dtype).to(self.device).eval()
+                self.config['hf_id'], **kwargs).to(self.device).eval()
             self.yes_id = self.tokenizer.convert_tokens_to_ids('yes')
             self.no_id = self.tokenizer.convert_tokens_to_ids('no')
             self.prefix = ('<|im_start|>system\nJudge whether the Document meets the requirements '
                            'based on the Query and the Instruct provided. Note that the answer '
                            'can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n')
             self.suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+            self.prefix_ids = self.tokenizer.encode(self.prefix, add_special_tokens=False)
+            self.suffix_ids = self.tokenizer.encode(self.suffix, add_special_tokens=False)
         else:
             from transformers import AutoModelForSequenceClassification
 
             self.model = AutoModelForSequenceClassification.from_pretrained(
-                self.config['hf_id'], torch_dtype=dtype).to(self.device).eval()
+                self.config['hf_id'], **kwargs).to(self.device).eval()
+        if hasattr(self.model.config, 'use_cache'):
+            self.model.config.use_cache = False
 
     def _inputs(self, query, batch):
         if self.config['kind'] == 'causal-yes-no':
-            prompts = [f'{self.prefix}<Instruct>: {INSTRUCTION}\n<Query>: {query}\n'
-                       f'<Document>: {passage}{self.suffix}' for passage in batch]
-            return self.tokenizer(prompts, padding=True, truncation=True, return_tensors='pt',
-                                  max_length=self.config['max_length'])
+            prompts = [f'<Instruct>: {INSTRUCTION}\n<Query>: {query}\n'
+                       f'<Document>: {passage}' for passage in batch]
+            inputs = self.tokenizer(prompts, padding=False, truncation=True,
+                                    add_special_tokens=False, return_attention_mask=False,
+                                    max_length=self.config['max_length'] - len(self.prefix_ids)
+                                    - len(self.suffix_ids))
+            inputs['input_ids'] = [self.prefix_ids + ids + self.suffix_ids
+                                   for ids in inputs['input_ids']]
+            return self.tokenizer.pad(inputs, padding=True, return_tensors='pt')
         return self.tokenizer([[query, passage] for passage in batch], padding=True,
                               truncation=True, return_tensors='pt',
                               max_length=self.config['max_length'])
 
     def _logits(self, inputs):
-        output = self.model(**inputs)
         if self.config['kind'] == 'causal-yes-no':
+            # Avoid allocating [batch, sequence, vocabulary] logits on the 4 GB card.
+            output = self.model(**inputs, use_cache=False, logits_to_keep=1)
             # Last position of a left-padded batch holds the answer token distribution.
             last = output.logits[:, -1, :]
             pair = self.torch.stack([last[:, self.no_id], last[:, self.yes_id]], dim=1)
             return self.torch.softmax(pair.float(), dim=1)[:, 1]
         # A sigmoid turns the raw logit into a 0-1 relevance probability. Block D thresholds by
         # the ratio to a query's best score, which is meaningless on raw logits that go negative.
-        return self.torch.sigmoid(output.logits.view(-1).float())
+        return self.torch.sigmoid(self.model(**inputs).logits.view(-1).float())
 
     def score(self, query, passages, batch_size=16):
         if not passages:
             return np.zeros(0, dtype=np.float32)
         result = np.zeros(len(passages), dtype=np.float32)
-        size = max(1, batch_size)
+        size = min(max(1, batch_size), getattr(self, 'safe_batch', batch_size))
+        order = sorted(range(len(passages)), key=lambda i: len(passages[i]))
         position = 0
         while position < len(passages):
-            batch = passages[position:position + size]
+            indices = order[position:position + size]
+            batch = [passages[i] for i in indices]
+            inputs = None
+            oom = False
             try:
-                with self.torch.no_grad():
+                with self.torch.inference_mode():
                     inputs = self._inputs(query, batch).to(self.device)
                     scores = self._logits(inputs).float().cpu().numpy()
-                result[position:position + len(batch)] = scores
+                if not np.isfinite(scores).all():
+                    raise ValueError('Non-finite reranker scores; retry --fp32.')
+                result[indices] = scores
             except RuntimeError as error:
                 if 'out of memory' not in str(error).lower() or size == 1:
                     raise
-                self.torch.cuda.empty_cache()
+                inputs = None
                 size = max(1, size // 2)
-                continue
-            position += len(batch)
+                self.safe_batch = size
+                oom = True
+            else:
+                position += len(batch)
+            inputs = None
+            if oom:
+                self.torch.cuda.empty_cache()
         return result
 
 
-def load_reranker(name, device=None, fp16=True):
+def load_reranker(name, device=None, fp16=True, max_length=None, revision=None):
     if name == 'identity':
         return IdentityReranker()
-    return CrossEncoderReranker(name, device=device, fp16=fp16)
+    return CrossEncoderReranker(name, device=device, fp16=fp16,
+                               max_length=max_length, revision=revision)
 
 
 def rerank(query, candidates, reranker, text_of, batch_size=16, limit=None):

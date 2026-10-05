@@ -1,155 +1,157 @@
-# Hướng dẫn chạy pipeline từ dữ liệu crawl đến `submission.zip`
+# Chạy 60.000 bản ghi crawl trên RTX 2050 4GB đến `submission.zip`
 
-Tài liệu cho người trong nhóm cần chạy lại toàn bộ pipeline. Mỗi bước có lệnh, đầu vào, đầu ra và cách kiểm tra. Chi tiết thiết kế từng khâu nằm ở [training_design.md](training_design.md).
+Chạy PowerShell từ thư mục gốc dự án. Cấu hình này dùng **model thật**, dành cho một GPU RTX 2050 4GB. Lệnh điều phối chạy các khâu, lưu log và tiếp tục được khi bị ngắt. Crawl tiếp tục ghi dữ liệu vào run hiện tại; pipeline đọc một snapshot rồi chỉ dùng corpus đã đóng băng.
 
-Các lệnh đã chạy nguyên văn ngày 05/10/2026 trên Windows, với 30.000 bản ghi đầu tiên của `nguyen/output/runs/batch01_nguyen`. Lượt đó dùng `--encoder hash` và `--reranker identity` vì máy chưa cài `torch`; phần chạy với model thật ở mục 9 **chưa được chạy thử**.
+**Trạng thái xác minh:** máy nhận RTX 2050 4096 MiB qua `nvidia-smi`, nhưng môi trường `env` được kiểm tra đang có `torch 2.14.1+cpu`, `torch.cuda.is_available() == False`. Chưa chạy encode/rerank model thật trên GPU và chưa có điểm thi cho cấu hình mới. Tốc độ của lượt `hash`/`identity` 30k cũ không dùng để dự báo lượt này. Pilot đo tốc độ và VRAM tại máy trước khi chạy dài.
 
-## 1. Mọi thứ nằm ở đâu
+## 1. Cấu hình local
+
+| Khâu | Cách chạy |
+|---|---|
+| A2–A3 | Đọc 60.000 bản ghi theo ID, lọc lỗi tải/trang chủ/template, giữ bài `review`, bảo toàn ID và nguồn |
+| A4 | Chunk đích 320 token, overlap 80, trần 768 theo bộ đếm repo; giữ offset nguồn |
+| B0 | Pilot mẫu phân tầng theo độ dài, gồm đoạn dài nhất; đo batch 2/4/8/16 cho từng model |
+| B1 | BM25 với token Việt/Anh và unigram + bigram CJK |
+| B2 | **BGE-M3 + Qwen3-Embedding-0.6B**, fp16, SDPA, hai index riêng, chạy lần lượt |
+| C1 | Query gốc, biến thể bỏ lời xã giao cho BM25; **Qwen3-4B NF4** dịch Anh/Trung khi corpus có ngôn ngữ đó |
+| C2 | Top 300/kênh, weighted RRF, giữ tối đa 600 rồi chọn tối đa 200 để rerank, tối đa 4 chunk/document |
+| C3 | **BGE-reranker-v2-m3 + Qwen3-Reranker-0.6B**, chạy lần lượt, trung bình hai điểm; lưu điểm riêng |
+| D | Giữ 100 ứng viên/query; xuất `recall` và `balanced`, kiểm tra đủ query, ID chính thức, cắt lại chunk từ nguồn |
+| E | Công cụ gán nhãn người và đánh giá; chỉ tính F2 khi có nhãn phù hợp |
+
+Model embedding/reranker 4B fp16 cần riêng khoảng 8GB trọng số nên không thuộc profile 4GB. Hai model nhỏ chạy nối tiếp cung cấp các kênh bổ sung; **chưa có bằng chứng đây là tổ hợp đạt điểm cao nhất**. Điểm sigmoid/yes-no và trung bình ensemble chưa được hiệu chỉnh thành xác suất liên quan. Ngưỡng bài nộp, trọng số dịch 0,5 và giới hạn ứng viên là điểm xuất phát để đo.
+
+Qwen3-4B NF4 cần thử trên máy vì activation/KV cache còn dùng VRAM ngoài trọng số. Nếu không vừa, dùng lựa chọn nhỏ hơn ở mục 7. Dịch chỉ thêm kênh tìm kiếm; `chunk_text` luôn lấy từ corpus. Bản dịch đổi chữ số, rỗng, thiếu dấu hiệu ngôn ngữ đích hoặc hết ngân sách sinh bị loại và ghi `rejected.jsonl`. Kiểm tra này không bảo đảm đúng ngữ nghĩa, cần xem một số mẫu.
+
+Theo `pipeline.txt`, nhánh teacher 32B → student cần Kaggle T4×2 và dev do người gán nhãn. Lượt local này chạy zero-shot. Chưa tự huấn luyện bằng 1.200 truy vấn thi, chưa có student được chứng minh tốt hơn. GraphRAG trong tài liệu tham khảo cũng chưa có triển khai/đo kiểm để đưa vào bài nộp này.
+
+## 2. Cài môi trường CUDA
+
+Các lệnh này để người chạy thực hiện; lượt sửa code chưa tự cài môi trường hay tải trọng số.
+
+```powershell
+$env:PIP_NO_INDEX = "0"
+.\env\Scripts\python.exe -m pip install --index-url https://pypi.org/simple -r requirements/rag.txt
+.\env\Scripts\python.exe -m pip install --upgrade --index-url https://pypi.org/simple "transformers>=4.51,<5" "accelerate>=1.6" "bitsandbytes==0.50.2"
+.\env\Scripts\python.exe -m pip install --force-reinstall torch==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+.\env\Scripts\python.exe scripts/benchmark.py --check-only --quantized
+```
+
+Đã kiểm tra bằng pip `--dry-run --no-deps --only-binary=:all:` trong chính `env` Python 3.13/Windows x64: PyPI cung cấp `bitsandbytes-0.50.2-py3-none-win_amd64.whl`, kết quả `Would install bitsandbytes-0.50.2`. Đây là kiểm tra tìm wheel, chưa phải kiểm tra kernel NF4 trên GPU. Lệnh chỉ định PyPI cho các thư viện và chỉ dùng kho `cu128` cho PyTorch. `$env:PIP_NO_INDEX = "0"` cho phép pip tra cứu index trong phiên PowerShell này, không đổi cấu hình toàn máy.
+
+Nếu gặp `No matching distribution found for bitsandbytes`, chạy lại lệnh có `--index-url https://pypi.org/simple` bên trên; không cần đổi Python hay hạ model chỉ vì thông báo này. Nếu vẫn lỗi, kiểm tra `python.exe -m pip index versions bitsandbytes --index-url https://pypi.org/simple` và log `-v` để phân biệt nguồn package, mạng và wheel không tương thích.
+
+CUDA wheel mang theo runtime; không cần cài riêng CUDA Toolkit để chạy. Cần NVIDIA driver tương thích. Nếu Python không có wheel tương ứng, dùng bộ chọn Windows/Pip/CUDA trên [trang PyTorch](https://docs.pytorch.org/get-started/locally/) và [danh sách wheel CUDA 12.8](https://download.pytorch.org/whl/cu128/torch/). Bản CPU cần được thay, không chỉ thêm `--device cuda`.
+
+Qwen3 cần Transformers ≥4.51 theo [model card reranker](https://huggingface.co/Qwen/Qwen3-Reranker-0.6B). Profile dùng fp16/SDPA, không yêu cầu FlashAttention 2, vLLM hoặc FAISS. NF4 dùng [bitsandbytes cho Windows/NVIDIA](https://huggingface.co/docs/bitsandbytes/en/installation). Tài liệu model: [BGE-M3](https://huggingface.co/BAAI/bge-m3), [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B), [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B). Các họ model này ra đời trước mốc 01/08/2026; manifest lưu revision thực tế để đối chiếu và viết working notes.
+
+Preflight phải hiện RTX 2050, khoảng 4 GiB VRAM và CUDA khác `null`. Không dùng được CUDA thì pipeline dừng trước khi xử lý corpus. Cắm nguồn, dùng chế độ hiệu năng cao, đóng ứng dụng chiếm VRAM; theo dõi bằng `nvidia-smi -l 2`. Tokenizer, đọc đĩa, BM25 và xuất JSON chạy CPU nên GPU không cần luôn đầy.
+
+## 3. Chạy từ đầu đến bài nộp
+
+Xem kế hoạch, chưa tải model/chạy pipeline:
+
+```powershell
+.\env\Scripts\python.exe scripts/pipeline.py --source nguyen/output/runs/batch01_nguyen --limit 60000 --out work/rtx2050_60k --dry-run
+```
+
+Chạy thật:
+
+```powershell
+.\env\Scripts\python.exe scripts/pipeline.py --source nguyen/output/runs/batch01_nguyen --limit 60000 --out work/rtx2050_60k
+```
+
+`--limit 60000` là **60.000 bản ghi đầu vào**, gồm cả bản ghi lỗi; số tài liệu dùng được thường thấp hơn sau lọc. Đây không phải khoảng ID `1..60000`, vì ID có thể khuyết. Chưa đủ 60k thì pipeline báo số thực tế và dừng; dùng output mới với số lượng thực tế hoặc chờ crawl đủ. Nhiều nguồn: `--source <run1> <run2>`; nguồn trước thắng khi trùng ID.
+
+Nếu snapshot chỉ có tiếng Việt, pipeline bỏ dịch Anh/Trung vì chưa có tài liệu đích để tìm. Khi crawl mở rộng sang ngôn ngữ khác, tạo run mới.
+
+Pilot chọn batch có thông lượng cao nhất trong những batch đã thử trên mẫu; lô dài hơn gây OOM thì encoder/reranker giảm batch và nhớ mức đó. Mỗi lúc chỉ có một model trên GPU. Query encoder được giải phóng trước khi tìm vector trên GPU và nạp reranker. Qwen reranker giữ suffix sau khi cắt input và chỉ tính logits vị trí cuối để giảm bộ nhớ.
 
 ```text
-nguyen/output/runs/batch01_nguyen/   Dữ liệu crawl thô (đầu vào), không bị sửa
-work/                                Mọi thứ pipeline sinh ra, bị .gitignore bỏ qua
-  corpus/      corpus.parquet, dropped.jsonl, prepare_manifest.json
-  chunks/      chunks.parquet, chunk_manifest.json
-  index/       bm25.npz, embeddings.npy, doc_ids.npy, chunk_ids.jsonl, *_manifest.json
-  retrieval/   candidates.jsonl, retrieval_manifest.json
-  submission/  submission.json, submission.zip, submission_manifest.json
-  eval/        label_sheet.*, labels.jsonl, metrics.json, EVAL_REPORT.md, ...
+work/rtx2050_60k/
+  corpus/                 snapshot, dropped.jsonl, prepare_manifest.json
+  chunks/                 chunks.parquet, chunk_manifest.json
+  pilot.json              throughput, batch chọn, peak VRAM, mẫu có nguy cơ bị cắt
+  translations/           bản dịch, bản bị loại, SQLite cache, manifest (nếu có)
+  index/bge-m3/           BM25, embedding, checkpoint, manifest
+  index/qwen3-embedding-0.6b/  embedding, checkpoint, manifest
+  retrieval/              candidates.jsonl, điểm từng model, SQLite cache
+  submission/             submission.json, submission.zip, manifest — recall
+  submission_balanced/    cùng định dạng — balanced
+  stages/                 khóa input/code/tham số và SHA-256 output từng bước
+  logs/                   log từng bước, ghi nối tiếp khi chạy lại
 ```
 
-Mọi lệnh đều có đường dẫn mặc định trỏ vào `work/`, nên chạy từ thư mục gốc repo thì không cần truyền đường dẫn. Trọng số model **không** nằm trong `work/`: chúng nằm ở bộ nhớ đệm Hugging Face (`C:\Users\<tên>\.cache\huggingface`).
+**File đem đánh giá lần đầu:** `work/rtx2050_60k/submission/submission.zip`. Bản `submission_balanced/submission.zip` dùng để so sánh; không tự động nộp cả hai. ZIP chứa đúng một JSON ở gốc.
 
-Mỗi thư mục có một file `*_manifest.json` ghi tham số đã dùng và SHA-256 của file đầu ra. Chạy lại một bước với cùng `--out` sẽ **ghi đè** kết quả cũ (trừ phiếu gán nhãn); muốn giữ nhiều phiên bản thì đổi `--out`.
+## 4. Resume và giữ artifact
 
-## 2. Chuẩn bị môi trường
+Chạy lại **đúng lệnh mục 3** khi bị ngắt. Bước hoàn thành chỉ được dùng lại khi khóa/checksum khớp. Corpus không tự cập nhật theo crawl; 60k và 100k là hai run riêng. Code khóa thư mục run để tránh hai tiến trình cùng ghi.
 
-Chạy ở thư mục gốc repo, PowerShell. Repo đang dùng môi trường `env\`:
+- Embedding ghi `embeddings.partial.npy`, flush và checkpoint sau mỗi 512 chunk; chỉ khi đủ mới công bố `embeddings.npy`. Lượt ngắt thường chỉ tính lại shard đang dở. Giữ cả partial và checkpoint.
+- Điểm rerank cache theo revision/config model, prompt, query và passage; commit sau mỗi query. Đổi ngưỡng bài không phải chấm lại, đổi text/model không dùng nhầm điểm cũ.
+- Dịch cache từng query/ngôn ngữ với model revision và prompt; bản không qua kiểm tra cũng được lưu để xem lại.
+- Nếu thay nguồn/config/code làm snapshot cũ không còn tương ứng, dùng `--out` mới. Không xóa corpus để ép run cũ đọc lại crawl đang tăng.
+
+Giữ corpus, chunks, index/checkpoint, cache và manifest cùng nhau. Mỗi ma trận embedding khoảng `số_chunk × 1024 × 2 byte`; có hai ma trận, cộng BM25, corpus, cache model và file tạm. Cache Hugging Face mặc định nằm ngoài `work/`; có thể đặt `$env:HF_HOME` sang ổ đủ chỗ trước lần tải đầu tiên. Lần đầu tải nhiều model cần dung lượng và thời gian mạng đáng kể.
+
+## 5. Kiểm tra trước khi nộp
+
+Trong `prepare_manifest.json`: `rows_read = 60000`; xem số giữ lại, lý do loại, domain/ngôn ngữ. Corpus 60k chỉ phủ một phần nguồn BTC; tài liệu đúng chưa crawl sẽ không thể được retrieve.
+
+Trong `pilot.json`: xem tốc độ, VRAM và mẫu vượt `max_length`. Bộ đếm chunk repo khác tokenizer model và tokenizer BTC. Model cắt ở 1024 token gồm cả tiêu đề/prompt/query, nên có thể bỏ đuôi đoạn dài. Nếu bị cắt nhiều, giảm chunk size hoặc tăng max_length sau khi đo lại VRAM; đổi chunk cần index mới.
+
+Trong `submission/submission_manifest.json`:
+
+- Số query bằng số hàng `data/query.parquet` (bộ hiện tại: 1.200).
+- `queries_without_candidates = 0` nghĩa là không thiếu bản ghi query, không bảo đảm mọi query có tài liệu đúng.
+- Kỳ vọng `dropped_docs = 0`, `dropped_chunks = 0` với corpus chính thức.
+- `resliced_from_offsets` bằng số chunk đã kiểm tra; mọi nội dung khớp lát cắt nguồn.
+
+Code chặn candidates lệch hash chunk/query, thiếu query khi `--require-complete`, trùng query ID và chunk gắn sai tài liệu. Docs và chunks ngoài danh sách ID chính thức đều bị lọc.
+
+## 6. Đánh giá và chỉnh ngưỡng không chạy lại GPU
 
 ```powershell
-.\env\Scripts\python.exe -m pip install -r requirements/rag.txt
-.\env\Scripts\python.exe -m unittest discover -s tests
+.\env\Scripts\python.exe scripts/evaluate.py sheet --candidates work/rtx2050_60k/retrieval/candidates.jsonl --chunks work/rtx2050_60k/chunks/chunks.parquet --out work/rtx2050_60k/eval --limit 50 --per-query 30
+# Đọc label_sheet.html, điền relevant trong label_sheet.jsonl.
+.\env\Scripts\python.exe scripts/evaluate.py collect --sheet work/rtx2050_60k/eval/label_sheet.jsonl --out work/rtx2050_60k/eval
+.\env\Scripts\python.exe scripts/evaluate.py score --labels work/rtx2050_60k/eval/labels.jsonl --submission work/rtx2050_60k/submission/submission.json --candidates work/rtx2050_60k/retrieval/candidates.jsonl --corpus work/rtx2050_60k/corpus/corpus.parquet --out work/rtx2050_60k/eval/recall
 ```
 
-Kết quả mong đợi: `Ran 38 tests ... OK`. Các bước 3–8 chạy được **không cần `torch`**; `torch` chỉ cần khi dùng model thật (mục 9). Nếu `pip` lỗi vì mạng chập chờn, chạy lại với `--retries 20 --timeout 120`.
+So sánh bằng cách chạy `score` với `submission_balanced/submission.json` và `--out .../eval/balanced`. Nhãn trong tập ứng viên có thể thiếu tài liệu đúng chưa tìm ra, nên Recall/F2 local chỉ phản ánh nhãn đã có. Không dùng `pseudo` làm bằng chứng chất lượng. Tokenizer LCS local là giả định được ghi trong `schema.py`, điểm chunk có thể khác BTC.
 
-## 3. Tiền xử lý: dữ liệu crawl → corpus
+Ví dụ tạo bài adaptive từ cùng ứng viên:
 
 ```powershell
-.\env\Scripts\python.exe scripts/prepare.py --source nguyen/output/runs/batch01_nguyen --limit 30000
+.\env\Scripts\python.exe scripts/submit.py --candidates work/rtx2050_60k/retrieval/candidates.jsonl --chunks work/rtx2050_60k/chunks/chunks.parquet --corpus work/rtx2050_60k/corpus/corpus.parquet --queries data/query.parquet --links data/links_corpus.parquet --require-complete --profile recall --adaptive --out work/rtx2050_60k/submission_adaptive
 ```
 
-| | |
-| --- | --- |
-| Đầu vào | Thư mục run có `records/<id>.json` (định dạng crawler hiện tại trong `nguyen/`), hoặc file `.parquet`/`.json`/`.jsonl` xuất từ crawler của nhóm. Truyền nhiều nguồn được; nguồn đứng trước thắng khi trùng `id` |
-| Đầu ra | `work/corpus/corpus.parquet`, `dropped.jsonl` (ID bị loại và lý do), `prepare_manifest.json` |
-| Thời gian đo được | ~37 giây cho 30.000 bản ghi |
+Adaptive có thể cắt mất bằng chứng nên chưa bật mặc định. `model_scores` lưu điểm riêng để phân tích. Muốn so một reranker, chạy `retrieve.py` cùng output và chọn riêng model đó; điểm đã chấm lấy từ SQLite. Sao lưu candidates/manifest trước nếu muốn giữ cả hai cấu hình.
 
-`--limit 30000` đọc 30.000 ID nhỏ nhất. Bỏ cờ này để đọc hết.
+## 7. Lệnh riêng và sự cố
 
-Bước này loại những hàng **không phải bài viết mà ID trỏ tới**: lỗi tải, văn bản rỗng, bị chuyển hướng về trang chủ, và văn bản giống hệt nhau ở quá nhiều ID (mặc định hơn 20, coi là trang mẫu). Bài chỉ bị crawler đánh dấu `review` vẫn được giữ, vì F2 coi trọng Recall.
+`--dry-run` in lệnh của từng khâu. Trên Windows ưu tiên lệnh điều phối: nó truyền JSON trọng số bằng danh sách đối số, tránh lỗi quote PowerShell. CLI cũ vẫn dùng được, xem `scripts/index.py --help`, `scripts/retrieve.py --help`, `scripts/translate.py --help`.
 
-**Kiểm tra:** mở `work/corpus/prepare_manifest.json`. Lượt chạy mẫu: đọc 30.000, giữ 29.990, loại 10 (6 chuyển về trang chủ, 4 lỗi HTTP), 100% tiếng Việt, 4 domain.
+| Tình huống | Xử lý |
+|---|---|
+| CUDA unavailable / CPU-only torch | Làm mục 2 và chạy preflight; không tự chuyển toàn lượt sang CPU |
+| OOM dịch Qwen3-4B batch 1 | Chạy lại pipeline thêm `--translation-model qwen3-1.7b`, vẫn NF4. Nếu lỗi thư viện, sửa bitsandbytes hoặc thử `--translation-model qwen3-0.6b --translation-quantize none`, rồi kiểm tra chất lượng bản dịch |
+| OOM encode/rerank batch >1 | Code tự giảm batch. Nếu batch 1 vẫn lỗi, giải phóng VRAM; giảm max_length/chunk size và đo lại |
+| Đã đo pilot, muốn bỏ qua | `--skip-pilot` dùng batch dự phòng 8 encoder, 4 reranker; không phải batch đã benchmark |
+| Rerank quá lâu | `--rerank-k 100 --keep 100` giảm tối đa 480.000 xuống 240.000 cặp với hai reranker/1.200 query, có thể giảm Recall |
+| Baseline một model | Output mới, thêm `--encoders bge-m3 --rerankers bge-reranker-v2-m3`, có thể thêm `--skip-translation` |
+| Dịch có `rejected` | Xem `translations/rejected.jsonl`; pipeline dùng phần hợp lệ và giữ query gốc |
+| Embedding checkpoint differs | Dùng index/output mới; không ghép model hoặc chunk khác vào checkpoint |
+| Frozen corpus/config changed | Dùng `--out` mới để snapshot mới, giữ run cũ |
+| Hash mismatch | Dùng artifact cùng run hoặc chạy lại từ khâu đã thay đổi |
+| Mạng ngắt tải model | Chạy lại lệnh; cache Hugging Face và cache pipeline độc lập |
 
-> Trong toàn bộ 46.456 bản ghi của batch này có **2.236 bản ghi bị chuyển về trang chủ** suckhoedoisong.vn, 2.230 cái chung một văn bản "Trang chủ". Chúng nằm ở ID cao hơn 30.000 bản ghi đầu nên lượt mẫu chỉ gặp 6. Khi bỏ `--limit`, bước này sẽ loại chúng; nếu để lại, chúng sẽ khớp với rất nhiều truy vấn và chiếm chỗ bài thật trong bài nộp.
-
-## 4. Chia đoạn
+Kiểm thử offline, không tải model:
 
 ```powershell
-.\env\Scripts\python.exe scripts/chunk.py
+.\env\Scripts\python.exe -m unittest discover -s tests -v
+.\env\Scripts\python.exe scripts/test_local_pipeline.py
 ```
 
-| | |
-| --- | --- |
-| Đầu vào | `work/corpus/corpus.parquet` |
-| Đầu ra | `work/chunks/chunks.parquet`, `chunk_manifest.json` |
-| Thời gian đo được | ~80 giây; 29.990 tài liệu → 112.438 đoạn, trung vị 285 token, lớn nhất 946 |
-
-Tham số chính: `--target-tokens 320 --overlap-tokens 64 --max-tokens 1024`. **Kiểm tra:** `chunks_over_1024_tokens` trong manifest phải bằng 0.
-
-## 5. Lập chỉ mục
-
-```powershell
-.\env\Scripts\python.exe scripts/index.py all --encoder hash --device cpu --fp32
-```
-
-| | |
-| --- | --- |
-| Đầu vào | `work/chunks/chunks.parquet` |
-| Đầu ra | `work/index/`: `bm25.npz` (~140 MB), `embeddings.npy` (~55 MB với `hash` 256 chiều), các manifest |
-| Thời gian đo được | ~105 giây |
-
-`--encoder hash` chỉ để chạy thử đường ống; nó **không** cho chất lượng truy hồi thật. Với model thật dùng `--encoder bge-m3` (mục 9); `embeddings.npy` khi đó khoảng số đoạn × 1024 × 2 byte, tức ~230 MB cho 112.438 đoạn.
-
-## 6. Truy xuất
-
-```powershell
-.\env\Scripts\python.exe scripts/retrieve.py --reranker identity --device cpu --fp32 --keyword-variant
-```
-
-| | |
-| --- | --- |
-| Đầu vào | `work/chunks/chunks.parquet`, `work/index/`, `data/query.parquet` |
-| Đầu ra | `work/retrieval/candidates.jsonl` (50 ứng viên mỗi truy vấn), `retrieval_manifest.json` |
-| Thời gian đo được | ~16 giây cho 1.200 truy vấn với `identity` |
-
-Lệnh tự dùng encoder đã ghi trong `dense_manifest.json` và **từ chối** nếu `--encoder` khác encoder đã dựng chỉ mục, hoặc nếu chunk đã đổi sau khi lập chỉ mục. `--keep` không được lớn hơn `--rerank-k`.
-
-## 7. Dựng bài nộp
-
-```powershell
-.\env\Scripts\python.exe scripts/submit.py --links data/links_corpus.parquet --profile recall
-```
-
-| | |
-| --- | --- |
-| Đầu vào | `candidates.jsonl`, `chunks.parquet`, `work/corpus/corpus.parquet`, `data/query.parquet`, `data/links_corpus.parquet` |
-| Đầu ra | `work/submission/submission.zip` (**file để nộp**), `submission.json`, `submission_manifest.json` |
-| Thời gian đo được | ~26 giây |
-
-Mọi đoạn được cắt lại từ corpus và so khớp; lệch là dừng ngay. **Kiểm tra** trong manifest: `queries` = 1200, `resliced_from_offsets` bằng số đoạn đã nộp, `dropped_docs` và `dropped_chunks` bằng 0.
-
-Profile: `recall` (trả rộng), `balanced` (mặc định), `precision`. Lượt mẫu với `identity` cho 30 đoạn mỗi truy vấn và JSON 60 MB, vì điểm `identity` giảm đều nên ngưỡng không cắt được gì. Với reranker thật, điểm là xác suất 0–1 và ngưỡng sẽ cắt; nếu file vẫn quá lớn, thử `--profile balanced` hoặc `--chunk-max 15`.
-
-Đổi profile chỉ cần chạy lại bước này, không cần chạy lại bước 6.
-
-## 8. Đánh giá
-
-```powershell
-.\env\Scripts\python.exe scripts/evaluate.py sheet --limit 50     # xuất phiếu gán nhãn
-# mở work/eval/label_sheet.html để đọc, điền "relevant": true/false trong label_sheet.jsonl
-.\env\Scripts\python.exe scripts/evaluate.py collect               # phiếu đã điền -> labels.jsonl
-.\env\Scripts\python.exe scripts/evaluate.py score                 # -> EVAL_REPORT.md
-```
-
-BTC không phát hành nhãn, nên điểm có nghĩa chỉ đến từ nhãn do **người** gán. `evaluate.py pseudo` sinh nhãn từ chính pipeline để chạy thử, và báo cáo sẽ ghi rõ điểm đó là vòng tròn. Lượt mẫu chạy `pseudo` cho F2 tài liệu 0,37 và đoạn 0,36; các con số này **không** nói gì về chất lượng.
-
-`EVAL_REPORT.md` xếp mỗi tài liệu bị mất vào một nguyên nhân (`not_crawled`, `not_retrieved`, `not_selected`, `chunk_too_narrow`) để biết nên sửa ở block nào.
-
-## 9. Chạy với model thật (chưa chạy thử)
-
-Máy có RTX 2050 4 GB đủ cho `bge-m3` và `bge-reranker-v2-m3` ở fp16, nhưng chậm. Kaggle T4 là nơi hợp lý cho bước 5 và 6.
-
-```powershell
-# Cài torch theo bản CUDA của máy từ https://pytorch.org, rồi:
-.\env\Scripts\python.exe scripts/index.py all --encoder bge-m3
-.\env\Scripts\python.exe scripts/retrieve.py --keyword-variant
-.\env\Scripts\python.exe scripts/submit.py --links data/links_corpus.parquet --profile recall
-```
-
-`retrieve.py` mặc định dùng `bge-reranker-v2-m3`. Lần đầu chạy sẽ tải trọng số từ Hugging Face.
-
-Trên Kaggle: đưa repo và thư mục `work/corpus` (hoặc `work/chunks`) lên dưới dạng Dataset, chạy các lệnh trên với `python` của Kaggle, rồi lưu `work/index` và `work/retrieval` ra Output hoặc Dataset trước khi phiên kết thúc. Bước 7 và 8 chạy lại trên laptop được.
-
-Những gì có thể lộ lỗi ở lần chạy thật đầu tiên: bộ nhớ GPU với `--batch-size 16` (code tự giảm một nửa khi hết bộ nhớ), thời gian encode thật, và việc tải model trong môi trường mạng chậm.
-
-## 10. Sự cố thường gặp
-
-| Thông báo | Nguyên nhân | Cách xử lý |
-| --- | --- | --- |
-| `was built from a different chunks file; rebuild Block B` | Đã chạy lại bước 4 sau bước 5 | Chạy lại bước 5 |
-| `The index was encoded with ... not ...` | `--encoder` ở bước 6 khác bước 5 | Bỏ `--encoder` ở bước 6 |
-| `does not re-slice from the corpus` | Corpus hoặc chunk đổi sau khi lập chỉ mục | Chạy lại từ bước 4 với đúng corpus |
-| `Every document produced zero chunks; check the corpus text column` | Corpus không có cột văn bản quen thuộc | Thêm `--text-field <tên cột>` ở bước 3 |
-| `label_sheet.jsonl already exists` | Phiếu gán nhãn cũ còn đó, được bảo vệ khỏi ghi đè | Đổi tên hoặc chuyển phiếu cũ đi |
-| `UnicodeEncodeError` | Console Windows không phải UTF-8 | Đã được xử lý trong code; nếu vẫn gặp, đặt `$env:PYTHONIOENCODING='utf-8'` |
-| File `*.tmp` còn sót trong `work/` | Lần chạy trước bị ngắt | Xóa được an toàn |
+Bộ bổ sung kiểm tra resume embedding, tìm vector theo block, suffix Qwen, bản dịch cũ/đổi chữ số, ID ngoài corpus, ngưỡng sau giới hạn chunk/document, CLI đến ZIP và cache/snapshot. Các test này không chứng minh chất lượng model hay thông lượng RTX 2050; pilot và lượt nộp thật cung cấp số đo đó.

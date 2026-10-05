@@ -34,6 +34,8 @@ def load_queries(path):
             raise ValueError(f"Query {row.get('id')} is empty; the submission needs every query.")
         out.append({'id': int(row['id']), 'query': text})
     identifiers = [row['id'] for row in out]
+    if not identifiers:
+        raise ValueError('The query file is empty.')
     if len(set(identifiers)) != len(identifiers):
         raise ValueError('Duplicate query ids in the query file.')
     return sorted(out, key=lambda row: row['id'])
@@ -61,9 +63,18 @@ def variants(query, use_keyword=False, translations=None):
     return result
 
 
-def load_translations(path):
+def load_translations(path, queries=None):
     """Prepared translations: JSONL rows of {"id": int, "lang": "zh"|"en", "text": str}."""
     table = {}
+    originals = {row['id']: row['query'] for row in (queries or [])}
     for row in storage.read_jsonl(path):
+        if row['lang'] not in ('en', 'zh') or not row['text'].strip():
+            raise ValueError('Translation must have lang en/zh and nonempty text.')
+        if row.get('query_sha256') and originals:
+            if int(row['id']) not in originals or storage.sha256_text(
+                    originals[int(row['id'])]) != row['query_sha256']:
+                raise ValueError('Translation cache belongs to different query text.')
+        if int(row['id']) in table.get(row['lang'], {}):
+            raise ValueError('Duplicate translation id/language.')
         table.setdefault(row['lang'], {})[int(row['id'])] = row['text']
     return table

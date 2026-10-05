@@ -61,6 +61,11 @@ def build_rows(chosen, chunk_table, documents, query_ids, doc_id_as_string=False
             if int(record['doc_id']) != int(chunk['doc_id']):
                 raise ValueError(f"query {query_id}: chunk {chunk['chunk_id']} claims doc "
                                  f"{chunk['doc_id']} but belongs to {record['doc_id']}.")
+            if allowed_doc_ids is not None and int(record['doc_id']) not in allowed_doc_ids:
+                report['dropped_chunks'] += 1
+                report['warnings'].append(
+                    f"query {query_id}: doc {record['doc_id']} not in links_corpus, chunk dropped")
+                continue
             text = documents.get(int(record['doc_id']))
             if text is None:
                 report['dropped_chunks'] += 1

@@ -46,7 +46,9 @@ def _keep_by_ratio(scores, minimum, maximum, ratio):
     if not scores:
         return 0
     best = scores[0]
-    floor = best * ratio if best > 0 else float('-inf')
+    if best <= 0:
+        return min(minimum, maximum, len(scores))
+    floor = best * ratio
     kept = 0
     for score in scores[:maximum]:
         if kept < minimum or score >= floor:
@@ -70,11 +72,13 @@ def select_for_query(record, settings):
         limit = min(limit, max(settings['chunk_min'],
                                adaptive_cutoff(chunk_scores, min_k=settings['chunk_min'],
                                                max_k=settings['chunk_max'])))
-    keep = _keep_by_ratio(chunk_scores, settings['chunk_min'], limit, settings['chunk_ratio'])
     chunks = []
     per_doc = {}
     for candidate in candidates:
-        if len(chunks) >= keep:
+        if len(chunks) >= limit:
+            break
+        if len(chunks) >= settings['chunk_min'] and (
+                chunk_scores[0] <= 0 or _candidate_score(candidate) < chunk_scores[0]*settings['chunk_ratio']):
             break
         doc_id = int(candidate['doc_id'])
         if per_doc.get(doc_id, 0) >= settings['chunk_per_doc']:
