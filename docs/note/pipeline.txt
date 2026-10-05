@@ -1,8 +1,9 @@
 flowchart TD
     SRC["Nguồn BTC: ID và URL"]
     Q["query.parquet"]
+    ART[("KHO ARTIFACT<br/>Kaggle Dataset + manifest<br/>chạy một lần, dùng lại")]
 
-    subgraph A["A — DỮ LIỆU VÀ ĐỘ PHỦ"]
+    subgraph A["A — DỮ LIỆU VÀ ĐỘ PHỦ  ·  2 LAPTOP"]
         direction TB
         A0["A0 · Kiểm kê nguồn và ngân sách crawl"]
         A1["A1 · Crawl theo ưu tiên, lưu nguồn"]
@@ -12,7 +13,16 @@ flowchart TD
         A0 --> A1 --> A2 --> A3 --> A4
     end
 
-    subgraph B["B — MODEL VÀ CHỈ MỤC"]
+    subgraph T["T — TEACHER → STUDENT  ·  KAGGLE T4×2, chỉ chạy lúc HUẤN LUYỆN"]
+        direction TB
+        T1["T1 · Host teacher lớn nhất vừa 2 card"]
+        T2["T2 · Teacher sinh dữ liệu: câu hỏi, nhãn, điểm"]
+        T3["T3 · Chưng cất vào student nhỏ"]
+        T4["T4 · Đóng gói checkpoint student"]
+        T1 --> T2 --> T3 --> T4
+    end
+
+    subgraph B["B — MODEL VÀ CHỈ MỤC  ·  BM25 laptop, EMBEDDING Kaggle"]
         direction TB
         B0["B0 · Chọn model, đo chi phí, chốt cấu hình"]
         B1["B1 · BM25 với xử lý từng ngôn ngữ"]
@@ -21,7 +31,7 @@ flowchart TD
         B0 --> B2
     end
 
-    subgraph C["C — TRUY XUẤT XUYÊN NGÔN NGỮ"]
+    subgraph C["C — TRUY XUẤT XUYÊN NGÔN NGỮ  ·  chủ yếu KAGGLE, chỉ model STUDENT"]
         direction TB
         C1["C1 · Query gốc và bản dịch nếu bật"]
         C2["C2 · Lexical và dense, hợp nhất RRF"]
@@ -29,7 +39,7 @@ flowchart TD
         C1 --> C2 --> C3
     end
 
-    subgraph D["D — BẰNG CHỨNG VÀ BÀI NỘP"]
+    subgraph D["D — BẰNG CHỨNG VÀ BÀI NỘP  ·  LAPTOP, không cần GPU"]
         direction TB
         D1["D1 · Chọn docs và đoạn bằng chứng"]
         D2["D2 · Lấy đoạn nguồn và validate"]
@@ -39,48 +49,189 @@ flowchart TD
 
     subgraph E["E — ĐO LƯỜNG VÀ CẢI THIỆN"]
         direction TB
-        E1["E1 · Dev độc lập và nhãn có nguồn gốc"]
+        E1["E1 · Dev người gán nhãn, độc lập với teacher"]
         E2["E2 · Đo chất lượng, độ phủ và chi phí"]
-        E3["E3 · Chọn thay đổi; fine-tune nếu có ích"]
+        E3["E3 · Quyết định: giữ zero-shot hay dùng student"]
         E1 --> E2 --> E3
     end
 
     SRC --> A0
     A4 --> B0
+    A4 --> T2
     B1 --> C2
     B2 --> C2
     Q --> C1
     C3 --> D1
     D3 --> OUT["submission.zip"]
 
+    T4 -.->|"checkpoint student"| B0
+    T4 -.-> ART
+    B2 -.-> ART
+    A4 -.-> ART
+    T2 -.->|"dữ liệu teacher"| ART
+    ART -.->|"dùng lại, không chạy lại"| B0
+    ART -.-> C2
+
     A3 -.-> E1
     D1 -.-> E2
     E3 -.->|"Điều chỉnh nguồn và xử lý dữ liệu"| A0
     E3 -.->|"Điều chỉnh model và cấu hình"| B0
+    E3 -.->|"Cần teacher/student mới"| T1
 
 
 
-    | Mã | Chức năng | Input → Output | Chi phí/quy mô cần theo dõi |
+TÀI NGUYÊN VÀ NGÂN SÁCH BỘ NHỚ
+==============================
+
+| Ký hiệu | Tài nguyên | Dùng cho |
+|---|---|---|
+| **L1, L2** | 2 laptop độc lập, mỗi máy 1 GPU RTX 2050 4 GB | Crawl, trích xuất, chunk, BM25, dựng bài nộp, gán nhãn; thử model nhỏ |
+| **K** | Kaggle GPU T4 × 2, mỗi card 16 GB (thực dùng khoảng 15 GB), hai card **tách rời** | Host teacher, encode hàng loạt, rerank, chưng cất |
+
+Ước tính bộ nhớ trọng số ≈ số tham số × byte mỗi tham số (fp16 = 2, int8 = 1, 4-bit ≈ 0,5 cộng 10–20% phụ phí). Đây là số ước tính để chọn model, không phải số đã đo; phải xác nhận ở B0 và T1 bằng cách tải thật, vì KV cache và activation còn tốn thêm.
+
+| Model | Trọng số ước tính | Vừa một card T4? | Vừa hai card T4 (~30 GB)? |
 |---|---|---|---|
-| **A** | **Tạo corpus có độ phủ phù hợp ngân sách** | ID–URL → documents, chunks, nguồn gốc | Thời gian mạng, CPU, dung lượng raw/text |
-| A0 | Thống kê domain; probe mẫu; phân nhóm ngôn ngữ/loại trang; lập lịch ưu tiên | Danh sách URL, thời hạn → crawl manifest và ngân sách theo nhóm | URL/domain, tốc độ thực tế, tỷ lệ lấy được nội dung |
-| A1 | Crawl có checkpoint; retry có giới hạn; giữ raw | Manifest → bản nguồn, log thành công/thất bại | Request, giây tải, byte tải; tỷ lệ retry |
-| A2 | Lấy thân bài, tiêu đề, đề mục, bảng và phần hỏi–đáp | Raw → text và cấu trúc nguồn | Documents/giây; lỗi theo parser/domain |
-| A3 | Nhận diện ngôn ngữ; gắn cờ chất lượng; nhóm trùng mà giữ ID | Text → documents có `lang`, quality flags, duplicate group | Tỷ lệ nội dung dùng được; trùng; suspect |
-| A4 | Tạo đoạn tìm kiếm; lưu vị trí để lấy lại đoạn nguồn | Documents → chunks và ánh xạ | Chunks/document; phân bố token; overlap phát sinh |
-| **B** | **Tạo indexes có phiên bản trong ngân sách máy** | Chunks, tài nguyên → models, indexes, manifest | CPU, GPU, RAM, đĩa và độ phủ index |
-| B0 | Kiểm tra model hợp lệ; đo pilot; chọn cấu hình model/index và giới hạn mỗi giai đoạn | Pilot, tài nguyên, quy định → kế hoạch tính toán | Token/giây hoặc chunks/giây; VRAM; giờ còn lại |
-| B1 | Lập BM25 với tokenizer/analyzer theo ngôn ngữ | Chunks → lexical index | Thời gian build, RAM/đĩa, số chunks đã index |
-| B2 | Encode theo shard, checkpoint; xây vector index | Chunks được lên lịch, embedding model → vectors/index | GPU giờ, số token/chunks, dung lượng vector/index |
-| **C** | **Lấy ứng viên xuyên ngôn ngữ với chi phí giới hạn** | Queries, indexes → ứng viên đã rerank | Thời gian/query; số cặp query–chunk |
-| C1 | Giữ query gốc; tùy chọn dịch sang Anh/Trung và cache | Query Việt → các biểu diễn truy vấn | Thời gian dịch, số biến thể/query |
-| C2 | Tìm lexical và dense; hợp nhất; theo dõi đóng góp từng kênh | Query, indexes → candidate pool | Top-k/kênh; latency; độ phủ ứng viên |
-| C3 | Rerank đa ngôn ngữ, cache điểm theo phiên bản | Query, candidates → điểm và thứ hạng | Số cặp phải chấm, chiều dài đầu vào, GPU giờ |
-| **D** | **Chuyển ứng viên thành bài nộp đúng quy định** | Ranked candidates, corpus → ZIP | Thời gian chọn/validate; kích thước kết quả |
-| D1 | Chọn docs/chunks, xử lý đoạn chồng lấn; tùy chọn mở rộng đoạn nguồn và chấm lại | Candidates → tập bằng chứng cuối | Số docs/chunks/query; chi phí chấm bổ sung |
-| D2 | Lấy đúng đoạn nguồn; kiểm tra ID, schema, đủ query và provenance | Bằng chứng, corpus → JSON records hợp lệ | Lỗi ID, đoạn không khớp nguồn, query thiếu |
-| D3 | Ghi JSON, ZIP và mở lại kiểm tra; lưu manifest | Records → `submission.zip` | Kích thước file, thời gian đóng gói |
-| **E** | **Chọn cải tiến dựa trên bằng chứng** | Nhãn, dự đoán, logs → thay đổi có kiểm chứng | Công gán nhãn, GPU thí nghiệm, thời gian còn lại |
-| E1 | Xây dev được rà soát; lưu nguồn/độ tin cậy nhãn; tạo train riêng nếu cần | Corpus, người gán nhãn, nguồn hợp lệ → nhãn có provenance | Số query được kiểm tra; độ đầy đủ nhãn; công sức |
-| E2 | Đo metrics retrieval, độ phủ vận hành và chi phí; phân loại lỗi | Dev, dự đoán, logs → báo cáo điểm yếu | Document/chunk F2, coverage, thời gian và bộ nhớ |
-| E3 | Ưu tiên sửa crawl/parser, tune hoặc fine-tune; so lại với baseline | Báo cáo, train nếu có → cấu hình/checkpoint mới | Mức cải thiện so với chi phí và thời hạn |
+| 568M (bge-m3, bge-reranker-v2-m3), fp16 | ~1,2 GB | Có, dư nhiều; **vừa cả 2050 4 GB** | — |
+| 4B, fp16 | ~8 GB | Có | Có |
+| 8B, fp16 | ~16 GB | **Không** | Có, chia hai card |
+| 8B, 4-bit | ~5 GB | Có | Có |
+| 14B, 4-bit | ~8–9 GB | Có | Có, thoải mái |
+| 14B, fp16 | ~28 GB | Không | Sát giới hạn, gần như không còn chỗ KV |
+| 32B, 4-bit | ~18–20 GB | **Không** | **Có**, còn khoảng 10 GB cho KV cache |
+| 70B, 4-bit | ~38–42 GB | Không | **Không** |
+
+Kết luận về trần model: **hạng 32B ở 4-bit, chia đều hai card, là mức nặng nhất vừa Kaggle T4×2.** Model 70B không vừa; các model 100B+ (kể cả bản MoE như Qwen3-235B) không dùng được.
+
+Các ràng buộc cần nhớ:
+
+- **T4 không hỗ trợ bf16 tốt và không có FlashAttention 2**: dùng fp16, và các cờ chỉ dành cho GPU đời mới không áp dụng.
+- **Hai card là hai bộ nhớ riêng.** Model vượt một card phải chia theo lớp (model parallel) và chạy chậm hơn; model vừa một card thì chạy **hai bản song song, mỗi card một bản**, thường có thông lượng cao hơn.
+- **Phiên Kaggle có giới hạn thời gian và hạn mức GPU theo tuần**, ổ ghi tạm mất khi kết thúc phiên. Hạn mức cụ thể cần tự đọc trên tài khoản của bạn, không điền vào đây.
+- **Crawl từ Kaggle** dễ bị chặn IP hơn IP nhà; mặc định crawl bằng laptop.
+- **Teacher lớn chỉ được chạy lúc huấn luyện.** Theo Q&A với BTC, dùng model >14B làm teacher để chưng cất student ≤14B là được phép khi teacher không chạy lúc suy luận. Mọi model chạy lúc suy luận phải ≤15B (BTC châm chước đến khoảng 15B), mở, phát hành trước 01/08/2026.
+- **Không dùng LLM đóng** (GPT, Gemini...) ở bất cứ khâu nào, kể cả để gán nhãn hay dịch.
+- Ngày phát hành của từng model cần được đối chiếu trước khi dùng; bảng dưới chỉ là danh sách ứng viên.
+
+
+CHIẾN LƯỢC TEACHER → STUDENT
+============================
+
+Ý tưởng: dùng GPU lớn của Kaggle để host một model nặng nhất có thể làm "người chấm", để nó dạy các model nhỏ chạy lúc suy luận. Teacher đắt nhưng chỉ chạy **một lần** cho một tập dữ liệu cố định; student rẻ và chạy ở mọi lần suy luận.
+
+**Vì sao không dùng teacher trực tiếp lúc suy luận:** luật cấm model >15B lúc chạy, và 32B ở 4-bit cũng quá chậm cho 1.200 truy vấn × hàng trăm ứng viên.
+
+### T1 — chọn và host teacher
+
+| Ưu tiên | Teacher | Kích thước | Cách host | Lý do |
+|---|---|---|---|---|
+| 1 | Qwen3-32B | 32B | 4-bit, chia hai card | Đa ngôn ngữ (Việt, Trung, Anh), mạnh nhất họ Qwen3 vừa Kaggle |
+| 2 | Baichuan-M2-32B | 32B | 4-bit, chia hai card | Chuyên y khoa, mạnh tiếng Trung; ít chắc về tiếng Việt, cần thử |
+| 3 | MedGemma 27B | 27B | 4-bit, chia hai card | Chuyên y khoa; kiểm tra khả năng tiếng Việt và Trung trước |
+| Dự phòng | Qwen3-14B hoặc Gemma 3 12B | 12–14B | 4-bit, **hai bản song song, mỗi card một bản** | Nhanh gấp khoảng hai lần so với 32B chia card, chất lượng thấp hơn; dùng nếu 32B quá chậm |
+
+Cách chạy (cần xác minh trên môi trường Kaggle thật): thư viện suy luận có hỗ trợ GPU T4 và chia tensor qua hai card, ví dụ vLLM với AWQ hoặc llama.cpp với GGUF; hoặc `transformers` với `device_map="auto"` và lượng tử hóa bitsandbytes 4-bit, chậm hơn nhưng ít phụ thuộc. Chọn bằng cách đo thông lượng ở T1, không chọn trước.
+
+### T2 — teacher sinh dữ liệu (chạy một lần, lưu vào kho artifact)
+
+| Đầu ra | Cách sinh | Dùng để dạy | Rủi ro |
+|---|---|---|---|
+| **Câu hỏi tổng hợp cho từng đoạn** (doc2query) | Teacher đọc một đoạn và viết câu hỏi kiểu bệnh nhân hỏi bác sĩ, bằng tiếng Việt | Cặp (câu hỏi, đoạn) cho embedding và reranker | Câu hỏi sạch hơn truy vấn thật; cần ép phong cách bằng prompt mẫu lấy từ `query.parquet` |
+| **Cặp hỏi–đáp có sẵn trong corpus** | Lấy từ các trang hỏi–đáp trong dữ liệu crawl, không cần teacher | Cặp dương tự nhiên, phong cách sát truy vấn thi | Cần hỏi BTC xem dùng nội dung corpus để huấn luyện có được phép không |
+| **Điểm liên quan teacher cho cặp (câu hỏi, ứng viên)** | Teacher chấm các ứng viên do pipeline retrieve ra | Nhãn mềm cho reranker (chưng cất) | Tốn nhiều lượt gọi: số cặp = số câu hỏi × số ứng viên; chỉ chấm top 20–30 |
+| **Bản dịch truy vấn** | Teacher hoặc model 12–14B dịch Việt → Trung/Anh | Kênh BM25 xuyên ngôn ngữ (`--translations`) | Chỉ 1.200 truy vấn; chạy một lần |
+
+**Cảnh báo về luật:** dùng chính 1.200 truy vấn thi (không nhãn) để chưng cất student là vùng xám, vì nó dùng nội dung tập kiểm thử làm dữ liệu huấn luyện. Mặc định an toàn là chỉ dùng câu hỏi tổng hợp từ corpus và cặp hỏi–đáp trong corpus. Nếu muốn dùng truy vấn thi, hỏi BTC trước.
+
+### T3 — chưng cất vào student
+
+| Student | Mục tiêu | Phương pháp | Vì sao đáng làm |
+|---|---|---|---|
+| **Reranker** (bge-reranker-v2-m3, 568M) | Học thứ tự liên quan của teacher | Học từ điểm mềm của teacher bằng MarginMSE hoặc KL trên danh sách | Reranker thường là nơi đạt cải thiện lớn nhất trên mỗi giờ GPU |
+| **Embedding** (bge-m3, 568M) | Kéo truy vấn Việt gần đúng đoạn Trung/Anh | Học tương phản (InfoNCE) trên cặp do teacher sinh, hard negative lấy từ BM25 và dense, lọc âm giả bằng điểm teacher | Tăng khả năng khớp xuyên ngôn ngữ ở đúng chỗ pipeline dựa vào dense |
+| **Lớn hơn nếu đủ chỗ** (Qwen3-Embedding-4B, Qwen3-Reranker-4B) | Trần chất lượng cao hơn | LoRA, gradient checkpointing, fp16 | Vừa một card T4 khi huấn luyện LoRA nhỏ; chậm hơn và chỉ đáng khi bản 568M đã chạm trần |
+
+Cách huấn luyện phù hợp T4: **LoRA** hoặc huấn luyện đầy đủ model 568M với fp16 và batch nhỏ có tích lũy gradient. Không dùng bf16. Mỗi card chạy một thí nghiệm khác nhau (ví dụ một card huấn luyện reranker, card kia huấn luyện embedding) thay vì chia một thí nghiệm cho hai card.
+
+### Nguyên tắc đo, tránh tự lừa mình
+
+- **Dev phải do người gán nhãn**, không do teacher gán. Nếu đo student bằng nhãn của teacher thì điểm chỉ phản ánh mức student bắt chước teacher, không phải chất lượng thật.
+- So ba mốc trên cùng dev: **zero-shot** (chưa huấn luyện), **student** (sau chưng cất), **teacher** (trần). Chỉ nhận student khi vượt zero-shot trên dev người gán nhãn.
+- Chưa có số đo nào cho thấy chưng cất sẽ giúp ích. Chạy zero-shot trước; chỉ đầu tư T khi `EVAL_REPORT.md` chỉ ra phần mất lớn ở `not_retrieved` hoặc `not_selected`. Nếu mất chủ yếu ở `not_crawled` thì teacher không giúp được gì.
+
+
+LỰA CHỌN MODEL TỐT NHẤT THEO TỪNG GIAI ĐOẠN
+============================================
+
+Mọi model chạy lúc suy luận phải mở, ≤15B và phát hành trước 01/08/2026. Cột "Mặc định" là thứ chạy được ngay trong code hiện tại.
+
+| Giai đoạn | Mặc định (đã có trong code) | Lựa chọn mạnh hơn | Chạy ở | Ghi chú |
+|---|---|---|---|---|
+| A3 · nhận diện ngôn ngữ | Dò theo chữ viết (`detect_language`) | Một model nhận diện ngôn ngữ nhỏ chuyên dụng | L | Dò theo chữ viết gộp tiếng Anh vào "Latin không phải Việt" |
+| B1 · lexical | BM25 tự cài (CJK tách unigram + bigram) | Tách từ tiếng Việt và tiếng Trung chuyên dụng | L | Thay đổi tokenizer thì phải dựng lại chỉ mục BM25 |
+| B2 · embedding | `bge-m3` (568M) | `qwen3-embedding-4b` (fp16, ~8 GB); `qwen3-embedding-8b` cần 8-bit hoặc chia hai card vì 8B fp16 ≈ 16 GB không vừa một card | K | Đổi encoder là phải encode lại toàn corpus, nên chọn trước khi encode; xem mục artifact |
+| C1 · dịch truy vấn | Chưa có (hook `--translations`) | Qwen3-14B hoặc Gemma 3 12B, 4-bit; hoặc teacher 32B vì chỉ có 1.200 truy vấn | K | Chạy một lần, lưu cache |
+| C2 · hợp nhất | RRF hằng số 60, trọng số mặc định 1 | Tinh chỉnh trọng số kênh bằng `--weights` trên dev | L/K | Rẻ nhất để thử; chỉ cần retrieve lại |
+| C3 · rerank | `bge-reranker-v2-m3` (568M) | `qwen3-reranker-4b`; reranker LLM theo danh sách (Qwen3-14B 4-bit) cho top 20–30; **student đã chưng cất** | K | Tốn GPU theo số cặp = số truy vấn × `--rerank-k`; cache điểm theo phiên bản model |
+| D1 · chọn bằng chứng | Profile `recall`/`balanced`/`precision`, `--adaptive` | Hiệu chỉnh ngưỡng trên dev | L | Chỉ chạy lại D, không cần retrieve lại |
+| E1 · sinh nhãn/câu hỏi | Chưa có | Teacher 32B (T2) | K | Nhãn teacher chỉ để huấn luyện, không để chấm |
+| T · teacher | — | Qwen3-32B > Baichuan-M2-32B > MedGemma 27B > Qwen3-14B | K | Xem T1 |
+
+
+KHO ARTIFACT: CHẠY MỘT LẦN, DÙNG LẠI
+====================================
+
+Nguyên tắc: khâu nào tốn nhiều giờ GPU hoặc nhiều giờ mạng thì chỉ chạy khi **khóa của nó đổi**. Mỗi artifact lưu kèm manifest ghi khóa, và khâu sau kiểm tra khóa trước khi dùng. Code hiện đã làm việc này cho chunk: `bm25_manifest.json` và `dense_manifest.json` ghi SHA-256 của `chunks.parquet`, và `retrieve.py` từ chối chạy khi chunk đã đổi.
+
+| Artifact | Khâu sinh | Chạy một lần? | Khóa làm nó hết hiệu lực | Lưu ở | Cách dùng lại |
+|---|---|---|---|---|---|
+| Raw HTML, bản crawl | A1 | **Có** | URL hoặc tập ID đổi | Đĩa laptop + bản sao Kaggle Dataset | Trích xuất lại từ raw khi đổi parser, không tải lại |
+| Corpus đã trích xuất | A2–A3 | Khi đổi parser | Phiên bản parser | Kaggle Dataset | Đầu vào của chunk |
+| Chunks | A4 | Khi đổi cỡ chunk | Tham số chunk + hash corpus | Kaggle Dataset | Đầu vào của mọi index |
+| BM25 index | B1 | Rẻ, chạy lại được | Hash chunks, `k1`, `b`, tokenizer | Laptop | Tải lại thay vì dựng lại |
+| **Embedding toàn corpus** | B2 | **Có, đây là khâu đắt nhất** | Hash chunks **và** model embedding (kể cả bản fine-tune) | Kaggle Dataset | Chia shard, mỗi shard một file; chỉ encode lại shard đổi |
+| **Dữ liệu teacher** (câu hỏi tổng hợp, điểm, bản dịch) | T2 | **Có** | Hash chunks, model teacher, prompt | Kaggle Dataset | Dùng lại cho mọi lần huấn luyện student, không gọi teacher lại |
+| **Checkpoint student** | T3–T4 | Mỗi cấu hình một lần | Dữ liệu teacher + siêu tham số huấn luyện | Kaggle Dataset hoặc Model | Tải lại để suy luận; lưu cả optimizer chỉ khi muốn huấn luyện tiếp |
+| Bản dịch truy vấn | C1 | **Có** | Hash `query.parquet`, model dịch, prompt | Kaggle Dataset | `--translations` |
+| Điểm rerank | C3 | Theo phiên bản model | Model reranker, hash chunks, `--rerank-k` | Kaggle Dataset | Cache theo cặp (query, chunk); đổi ngưỡng ở D không cần chấm lại |
+| `candidates.jsonl` | C | Khi đổi retrieve | Mọi khóa ở trên | Kaggle Dataset | Chỉ chạy lại D khi đổi ngưỡng chọn |
+
+Quy ước lưu để không mất công qua các phiên Kaggle:
+
+- Mọi artifact lớn đi ra **Kaggle Dataset** (hoặc Model) ngay khi xong, không để trong ổ ghi tạm. Mỗi phiên bắt đầu bằng việc gắn Dataset cần dùng vào Input.
+- **Chia shard theo hàng/khoảng ID** để một phiên bị ngắt chỉ mất một shard. Mỗi shard ghi manifest riêng.
+- **Tên artifact chứa khóa**: ví dụ `emb__bge-m3__chunks-<8 ký tự hash>__shard-003`. Nhìn tên là biết có dùng lại được không.
+- **Không ghi đè**; thêm phiên bản mới và giữ phiên bản cũ đến khi chắc chắn.
+- Lưu cả **cấu hình và phiên bản model** (id Hugging Face và revision) trong manifest, vì working notes yêu cầu mô tả đầy đủ và BTC có thể kiểm tra.
+- Với checkpoint student: lưu **trọng số + cấu hình + tokenizer**; trọng số adapter LoRA nhỏ nên giữ riêng, tách khỏi model gốc.
+
+
+PHÂN BỔ THEO THỜI GIAN
+======================
+
+Mốc: public test nộp trước 31/10, nộp hệ thống trước 04/11. Hôm nay 05/10, tức còn khoảng 3,5 tuần đến hạn public. Đây là đề xuất thứ tự, chưa có số giờ đo thật.
+
+| Tuần | Laptop L1, L2 | Kaggle T4 × 2 |
+|---|---|---|
+| 1 (từ 05/10) | A0 probe, A1 crawl chia theo domain, A2–A3 | Không dùng; chỉ B0 đo pilot encode và rerank trên mẫu nhỏ để biết số giờ thật |
+| 2 | A4 chunk, B1 BM25, E1 gán nhãn dev cho vài trăm truy vấn bằng người | B2 encode theo shard với `bge-m3`; C2–C3 zero-shot; **nộp lần đầu để có mốc** |
+| 3 | Đọc `EVAL_REPORT.md`, quyết định có đáng làm T hay không | Nếu đáng: T1 host teacher, T2 sinh dữ liệu một lần, lưu vào kho; T3 chưng cất reranker trước (rẻ nhất, hay hiệu quả nhất) |
+| 4 (đến 31/10) | D dựng bài nộp; E đo student so với zero-shot trên dev người | T3 embedding nếu còn giờ; chạy lại phần đã đổi; **giữ dành lượt và giờ GPU cho private phase** |
+
+Quy tắc chốt: mỗi thay đổi chỉ được nhận nếu thắng baseline zero-shot trên dev do **người** gán nhãn. Nếu không có bằng chứng, giữ zero-shot. Đóng băng cấu hình trước 04/11.
+
+
+KHOẢNG TRỐNG: CODE CHƯA CÓ
+==========================
+
+Code hiện chạy được cho khâu zero-shot A4 → E trên một máy. Những việc sau **chưa được viết** và cần làm trước khi dùng Kaggle thật theo chiến lược trên:
+
+1. **Chia shard encode theo card và theo phiên, có resume.** `scripts/index.py dense` mã hóa toàn bộ trong một lần và chưa có cờ chọn khoảng hàng; chưa có bước gộp file embedding rời.
+2. **Chia truy vấn cho hai card khi rerank**, và gộp `candidates.jsonl`.
+3. **Cache điểm rerank** theo (model, query, chunk).
+4. **Host teacher** (T1): script tải model 4-bit, chia hai card, đo thông lượng.
+5. **Sinh dữ liệu teacher** (T2): câu hỏi tổng hợp, điểm liên quan, bản dịch truy vấn; mỗi loại có prompt và manifest.
+6. **Huấn luyện chưng cất** (T3) cho reranker và embedding.
+7. **Quản lý kho artifact:** đặt tên theo khóa, ghi manifest, kiểm tra khóa khi tải lại.
+8. **Dev do người gán nhãn đã có công cụ** (`scripts/evaluate.py sheet` và `collect`), nhưng chưa có ai gán nhãn.
+9. **Chưa đo tốc độ thật** ở bất kỳ khâu nào. Các giả định về giờ GPU trong file này phải được thay bằng số đo từ B0 và T1.
