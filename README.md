@@ -51,6 +51,8 @@ Model mặc định: `bge-m3` (568M) cho embedding và `bge-reranker-v2-m3` (568
 
 Upload [crawl_corpus_kaggle.ipynb](notebooks/crawl_corpus_kaggle.ipynb) lên Kaggle, bật Internet và chỉnh `ID_FROM` / `ID_TO` trong ô cấu hình. Cả hai đầu đều được tính vào khoảng chọn. Notebook tự chứa code, tải Parquet nguồn, crawl/resume và xuất corpus JSONL/Parquet cùng ZIP chứa raw/checkpoint. Không cần clone repo hoặc GPU.
 
+Bản tự upload riêng: [crawl_corpus_kaggle_hf_upload.ipynb](notebooks/crawl_corpus_kaggle_hf_upload.ipynb). Giữ quy trình crawl của bản gốc và thêm mục 10 upload vào `AncientWings/AncientWings_R2AI_STAGE3_ds`. Trước Run All, tạo và bật Kaggle Secret `HF_TOKEN` có quyền ghi vào dataset. Corpus, ZIP và diagnostics được phân biệt theo tên run; manifest ghi khoảng ID, số bản ghi và SHA-256. Run còn pending chưa upload; lỗi mạng có thể chạy lại riêng mục 10. Nếu crawl lại cùng khoảng ID với cấu hình khác, dùng `RUN_TAG` mới.
+
 Đặt `MAX_NEW = 10` để thử trước, rồi đổi thành `None` và chạy lại ô crawl. Khi đổi session, giữ output và thêm run đã giải nén vào Kaggle Input để dùng `RESUME_RUN_PATH`.
 
 Notebook corpus dùng chung engine với `crawl_domain_samples`: User-Agent trình duyệt, timeout 20/45 giây, ngân sách 180 giây/URL và Selenium cho URL Requests lỗi, trang JS hoặc text rỗng/QC lỗi. `RESPECT_ROBOTS` chỉnh ở ô cấu hình. Để nâng cấp run cũ hoặc thử lại lỗi, dùng `RECOVERY_RUN_PATH` và `RUN_TAG` mới. Kết quả cuối chọn engine có QC tốt hơn, giữ Requests khi tương đương; nội dung Selenium qua QC được xuất vào corpus, lỗi Requests vẫn được giữ riêng.
