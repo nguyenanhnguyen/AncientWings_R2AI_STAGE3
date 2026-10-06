@@ -173,6 +173,68 @@ class NotebookUploadTests(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, str(caught.exception))
         self.api.create_commit.assert_not_called()
 
+    def test_original_runtime_message_is_visible_and_logged_without_secrets(self):
+        jwt = 'eyJhbGciOiJIUzI1NiJ9.credential.signature'
+        signed_secret = 'signed-query-credential'
+        raw_error = (f'CAS service error: TLS handshake failed; token={FAKE_TOKEN}; '
+                     f'Authorization: Bearer {jwt}; '
+                     f'https://cas.example/upload?X-Amz-Signature={signed_secret}')
+        self.api.create_commit.side_effect = RuntimeError(raw_error)
+        with self.assertRaises(RuntimeError) as caught:
+            self.upload()
+        log_path = self.env['RUN_DIR'] / 'logs' / 'hf_upload_error.log'
+        log = log_path.read_text(encoding='utf-8')
+        for text in (str(caught.exception), self.output.getvalue(), log):
+            self.assertIn('CAS service error: TLS handshake failed', text)
+            for secret in (FAKE_TOKEN, jwt, signed_secret):
+                self.assertNotIn(secret, text)
+        self.assertIn('"stage": "create_commit"', log)
+        self.assertIn('"attempt": 3', log)
+        self.assertIn('"sdk_versions"', log)
+        self.assertIn('Traceback (most recent call last)', log)
+        self.assertNotIn('Upload lỗi mạng/server', self.output.getvalue())
+
+    def test_http_status_in_runtime_message_is_reported_and_not_retried(self):
+        self.api.create_commit.side_effect = RuntimeError(
+            'Data processing error: CAS service error: HTTP status client error (401 Unauthorized)')
+        with self.assertRaises(RuntimeError) as caught:
+            self.upload()
+        self.assertIn('HTTP 401', str(caught.exception))
+        self.assertIn('401 Unauthorized', str(caught.exception))
+        self.assertEqual(self.api.create_commit.call_count, 1)
+
+    def test_nested_http_error_is_reported_even_if_wrapper_suppresses_context(self):
+        nested = HTTPFailure(403)
+        wrapped = RuntimeError('Upload worker failed')
+        wrapped.__cause__ = nested
+        wrapped.__suppress_context__ = True
+        self.api.create_commit.side_effect = wrapped
+        with self.assertRaises(RuntimeError) as caught:
+            self.upload()
+        self.assertIn('HTTP 403', str(caught.exception))
+        self.assertIn('Upload worker failed', str(caught.exception))
+        self.assertIn('Caused by: HTTPFailure', str(caught.exception))
+        self.assertNotIn(FAKE_TOKEN, str(caught.exception))
+        self.assertEqual(self.api.create_commit.call_count, 1)
+
+    def test_repo_access_root_message_is_preserved(self):
+        self.api.repo_info.side_effect = RuntimeError('DNS resolution failed for huggingface.co')
+        with self.assertRaises(RuntimeError) as caught:
+            self.upload()
+        self.assertIn('DNS resolution failed', str(caught.exception))
+        log = (self.env['RUN_DIR'] / 'logs' / 'hf_upload_error.log').read_text(encoding='utf-8')
+        self.assertIn('"stage": "repo_info"', log)
+        self.assertIn('DNS resolution failed', log)
+        self.api.create_commit.assert_not_called()
+
+    def test_diagnostic_file_write_failure_does_not_hide_upload_error(self):
+        self.api.create_commit.side_effect = RuntimeError('upload protocol mismatch')
+        with patch('traceback.format_exception', side_effect=OSError('log device unavailable')):
+            with self.assertRaises(RuntimeError) as caught:
+                self.upload()
+        self.assertIn('upload protocol mismatch', str(caught.exception))
+        self.assertIn('Không ghi được file log', self.output.getvalue())
+
     def test_transient_failure_retries_with_fresh_operations(self):
         first_operations = []
 
