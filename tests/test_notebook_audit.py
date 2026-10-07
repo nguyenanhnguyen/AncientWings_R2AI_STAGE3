@@ -57,14 +57,14 @@ class NotebookAuditTests(unittest.TestCase):
             raw_path = f'raw/{row["id"]}.gz'
             (self.run / raw_path).write_bytes(gzip.compress(body, mtime=0))
             record = dict(row, raw_path=raw_path, raw_sha256=hashlib.sha256(body).hexdigest(),
-                          status='http_error', http_status=521, quality_flags=[])
+                          status='http_error', http_status=500 if row['id'] == 1 else 521, quality_flags=[])
             if row['id'] == 4:
                 record.update(status='extracted', http_status=200, quality_status='accepted',
                               title='Article', text=text, text_sha256=hashlib.sha256(text.encode()).hexdigest())
             (self.run / 'records' / f'{row["id"]}.json').write_text(json.dumps(record), encoding='utf-8')
 
-    def run_audit(self):
-        with patch.object(sys, 'argv', ['audit.py', '--out', str(self.run)]), redirect_stdout(io.StringIO()):
+    def run_audit(self, *arguments):
+        with patch.object(sys, 'argv', ['audit.py', '--out', str(self.run), *arguments]), redirect_stdout(io.StringIO()):
             self.audit.main()
 
     def test_empty_and_unparseable_responses_are_reported_without_stopping_audit(self):
@@ -87,6 +87,42 @@ class NotebookAuditTests(unittest.TestCase):
         record['raw_sha256'] = 'wrong-hash'
         path.write_text(json.dumps(record), encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'Raw hash mismatch: 1'):
+            self.run_audit()
+
+    def test_relocated_source_is_verified_without_changing_saved_manifest(self):
+        path = self.run / 'manifest.json'
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        source = self.run / 'source.parquet'
+        manifest.update(source='/previous/session/source.parquet',
+                        source_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        original = path.read_bytes()
+        self.run_audit('--source', str(source))
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_relocated_source_cannot_bypass_source_hash(self):
+        path = self.run / 'manifest.json'
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        manifest['source_sha256'] = 'wrong-hash'
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'Source Parquet hash mismatch'):
+            self.run_audit('--source', str(self.run / 'source.parquet'))
+
+    def test_wrong_record_url_is_fatal(self):
+        path = self.run / 'records/1.json'
+        record = json.loads(path.read_text(encoding='utf-8'))
+        record['url'] = 'https://example.org/wrong-page'
+        path.write_text(json.dumps(record), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'unexpected IDs'):
+            self.run_audit()
+
+    def test_text_hash_is_checked_even_without_raw_path(self):
+        path = self.run / 'records/4.json'
+        record = json.loads(path.read_text(encoding='utf-8'))
+        record.pop('raw_path')
+        record['text_sha256'] = 'wrong-hash'
+        path.write_text(json.dumps(record), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'Text hash mismatch: 4'):
             self.run_audit()
 
 

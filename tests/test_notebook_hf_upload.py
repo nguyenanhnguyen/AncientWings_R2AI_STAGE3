@@ -2,6 +2,7 @@
 from contextlib import redirect_stdout
 import hashlib
 import io
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
@@ -34,6 +35,9 @@ class NotebookUploadTests(unittest.TestCase):
         self.env = {}
         exec(compile(definitions, str(NOTEBOOK), 'exec'), self.env)
         self.env.update(WORKDIR=self.work, DATASET_REVISION='test-revision')
+        spec = importlib.util.spec_from_file_location('upload_postprocess_fixture', ROOT / 'scripts/notebook_postprocess.py')
+        self.postprocess = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.postprocess)
         self.make_run(200582, 200682)
 
         self.api = Mock()
@@ -63,6 +67,30 @@ class NotebookUploadTests(unittest.TestCase):
         (run / 'corpus.jsonl').write_text('{"id": 200582, "text": "sample"}\n', encoding='utf-8')
         (self.work / f'{run.name}.zip').write_bytes(b'fixture: full archive')
         (self.work / f'{run.name}_diagnostics.zip').write_bytes(b'fixture: diagnostic archive')
+        (run / 'postprocess_snapshot.py').write_bytes((ROOT / 'scripts/notebook_postprocess.py').read_bytes())
+        self.postprocess.write_json(run / 'manifest.json', {'source_sha256': 'test-source-sha'})
+        (run / 'sample.jsonl').write_text('fixture source mapping\n', encoding='utf-8')
+        (run / 'records').mkdir()
+        self.postprocess.write_json(run / 'audit_summary.json', {
+            'selected': 101, 'completed': 101, 'source_mapping_verified': True,
+            'raw_and_text_hashes_verified': True,
+        })
+        self.postprocess.write_json(run / 'export_manifest.json', {
+            'documents': accepted, 'accepted_source_ids_preserved': True,
+            'parquet_round_trip_verified': True, 'jsonl_round_trip_verified': True,
+            'files': {name: {'bytes': (run / name).stat().st_size,
+                             'sha256': self.postprocess.file_hash(run / name)}
+                      for name in ('corpus.parquet', 'corpus.jsonl')},
+        })
+        self.postprocess.write_json(run / 'postprocess_status.json', {
+            'status': 'complete' if not pending else 'incomplete',
+            'audit_passed': not pending, 'export_passed': not pending,
+            'counts': {key: manifest[key] for key in ('selected', 'completed', 'pending', 'accepted')},
+            'records_sha256': self.postprocess.records_hash(run),
+            **{key: self.postprocess.file_hash(run / name) for name, key in (
+                ('manifest.json', 'source_manifest_sha256'), ('sample.jsonl', 'sample_sha256'),
+                ('audit_summary.json', 'audit_summary_sha256'), ('export_manifest.json', 'export_manifest_sha256'))},
+        })
         self.env.update(RUN_DIR=run, ID_FROM=start, ID_TO=stop)
         return run
 
@@ -130,6 +158,35 @@ class NotebookUploadTests(unittest.TestCase):
     def test_disabled_upload_does_not_access_credentials_or_hub(self):
         self.env['HF_UPLOAD_ENABLED'] = False
         self.assertEqual(self.upload()['status'], 'disabled')
+        self.secret_client.get_secret.assert_not_called()
+        self.hub.HfApi.assert_not_called()
+
+    def test_legacy_complete_manifest_without_audit_proof_cannot_upload(self):
+        (self.env['RUN_DIR'] / 'postprocess_status.json').unlink()
+        with self.assertRaisesRegex(RuntimeError, 'audit/export'):
+            self.upload()
+        self.secret_client.get_secret.assert_not_called()
+        self.hub.HfApi.assert_not_called()
+
+    def test_failed_audit_with_no_pending_cannot_upload(self):
+        self.postprocess.invalidate(self.env['RUN_DIR'], status='failed', failed_step='audit')
+        with self.assertRaisesRegex(RuntimeError, 'Audit/export'):
+            self.upload()
+        self.secret_client.get_secret.assert_not_called()
+        self.hub.HfApi.assert_not_called()
+
+    def test_checkpoint_changed_after_audit_cannot_upload(self):
+        self.postprocess.write_json(self.env['RUN_DIR'] / 'records/1.json', {'id': 1})
+        with self.assertRaisesRegex(RuntimeError, 'Checkpoint'):
+            self.upload()
+        self.secret_client.get_secret.assert_not_called()
+        self.hub.HfApi.assert_not_called()
+
+    def test_corrupt_export_cannot_upload_even_when_jsonl_upload_is_disabled(self):
+        self.env['HF_UPLOAD_JSONL'] = False
+        (self.env['RUN_DIR'] / 'corpus.jsonl').write_bytes(b'corrupt export')
+        with self.assertRaisesRegex(RuntimeError, 'corpus.jsonl'):
+            self.upload()
         self.secret_client.get_secret.assert_not_called()
         self.hub.HfApi.assert_not_called()
 
