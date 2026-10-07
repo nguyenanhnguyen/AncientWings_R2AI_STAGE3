@@ -44,10 +44,10 @@ Student 14B cho reranker và embedding khởi đầu từ model chat, không ph�
 ```powershell
 $env:HF_TOKEN = '<token có quyền ghi>'
 .\env\Scripts\python.exe scripts\teach.py sample --chunks work\rtx2050_60k\chunks\chunks.parquet --out work\teach --target 30000 --shards 4
-.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/vibiomir-teach work\teach\seeds.jsonl work\rtx2050_60k\chunks\chunks.parquet
+.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\seeds.jsonl work\rtx2050_60k\chunks\chunks.parquet
 ```
 
-`--shards` bằng số tài khoản Kaggle chạy song song. `push` đẩy `src/`, `scripts/` và các file input lên một HF dataset private; notebook Kaggle tải về từ đó. Gói HF free là đủ.
+`--shards` bằng số tài khoản Kaggle chạy song song. `push` đẩy `src/`, `scripts/` và các file input lên dataset `AncientWings_R2AI_STAGE3_ds` đã dùng cho crawl, dưới các đường dẫn `code/`, `inputs/`, `teach/` để không đụng dữ liệu crawl cũ; notebook Kaggle tải về từ đó. Gói HF free là đủ.
 
 ### 1. T2 trên Kaggle
 
@@ -60,10 +60,10 @@ Kết quả được đẩy lên `teach/generated/shard_XX_of_04.jsonl` khoảng
 ### 2. T3 trên laptop
 
 ```powershell
-.\env\Scripts\python.exe -c "from huggingface_hub import snapshot_download as d; d('AncientWings/vibiomir-teach', repo_type='dataset', local_dir='work/teach_hub', allow_patterns=['teach/generated/*'])"
+.\env\Scripts\python.exe -c "from huggingface_hub import snapshot_download as d; d('AncientWings/AncientWings_R2AI_STAGE3_ds', repo_type='dataset', local_dir='work/teach_hub', allow_patterns=['teach/generated/*'])"
 Copy-Item -Recurse -Force work\teach_hub\teach\generated work\teach\
 .\env\Scripts\python.exe scripts\teach.py mine --teach work\teach --chunks work\rtx2050_60k\chunks\chunks.parquet --index work\rtx2050_60k\index\bge-m3 --extra-index work\rtx2050_60k\index\qwen3-embedding-0.6b --shards 4
-.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/vibiomir-teach work\teach\groups.jsonl
+.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\groups.jsonl
 ```
 
 Xem `work\teach\groups_manifest.json` → `retriever_on_synthetic_queries`. Đây là recall của retriever hiện tại trên các câu hỏi đã biết chunk đáp án: một thước đo offline không tốn lượt nộp, và cũng là mốc để so sánh student embedding.
