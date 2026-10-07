@@ -9,10 +9,13 @@ from ..common import storage
 from ..common.cache import Cache, cache_key
 from ..common.console import emit
 from ..common.runtime import environment, release_model, Progress
+from ..teach.models import discover_students, load_backbone
 from .query import load_queries
 
 MODELS = {'qwen3-4b': 'Qwen/Qwen3-4B', 'qwen3-1.7b': 'Qwen/Qwen3-1.7B',
           'qwen3-0.6b': 'Qwen/Qwen3-0.6B'}
+# Translator students (teach/train): base model plus LoRA adapter, trained on PROMPT below.
+MODELS.update(discover_students('translator'))
 PROMPT = ('Translate the Vietnamese medical question into {language} for document retrieval. '
           'Preserve every symptom, negation, duration, age, number, unit and drug name. '
           'Do not answer the question or add facts. Output only the translation.')
@@ -35,7 +38,7 @@ def check_translation(source, text, lang):
 
 def build(args):
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     if str(args.device).startswith('cuda') and not torch.cuda.is_available():
         raise RuntimeError('CUDA unavailable. Install a CUDA build of torch before translation.')
@@ -44,20 +47,18 @@ def build(args):
         queries = queries[:args.limit]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    hf_id = MODELS[args.model]
+    if args.quantize == '4bit' and not args.device.startswith('cuda'):
+        raise ValueError('This 4-bit profile requires CUDA.')
+    entry = MODELS[args.model]
+    config = dict(entry) if isinstance(entry, dict) else {'hf_id': entry}
+    config['quantize'] = args.quantize
+    hf_id = config['hf_id']
     tokenizer = AutoTokenizer.from_pretrained(hf_id, revision=args.revision)
-    kwargs = dict(revision=args.revision, attn_implementation='sdpa',
-                  torch_dtype=torch.float16 if args.device.startswith('cuda') else torch.float32)
-    if args.quantize == '4bit':
-        if not args.device.startswith('cuda'):
-            raise ValueError('This 4-bit profile requires CUDA.')
-        kwargs.update(quantization_config=BitsAndBytesConfig(load_in_4bit=True,
-                      bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True,
-                      bnb_4bit_compute_dtype=torch.float16), device_map={'': args.device})
-    model = AutoModelForCausalLM.from_pretrained(hf_id, **kwargs).eval()
-    if args.quantize == 'none':
-        model.to(args.device)
+    dtype = torch.float16 if args.device.startswith('cuda') else torch.float32
+    model = load_backbone(AutoModelForCausalLM, config, args.device, dtype, args.revision,
+                          attn_implementation='sdpa')
     info = {'hf_id': hf_id, 'revision': getattr(model.config, '_commit_hash', None),
+            **({'adapter_sha': config['adapter_sha']} if config.get('adapter_sha') else {}),
             'quantize': args.quantize, 'max_input': args.max_input,
             'max_new_tokens': args.max_new_tokens, 'prompt': PROMPT, 'version': 1}
     rows, failures = [], []

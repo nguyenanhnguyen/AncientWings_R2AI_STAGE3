@@ -26,6 +26,7 @@ import numpy as np
 from .bm25 import tokenize
 from ..common import storage
 from ..common.runtime import model_info
+from ..teach.models import discover_students, load_backbone
 
 ENCODERS = {
     'bge-m3': {'hf_id': 'BAAI/bge-m3', 'pooling': 'cls', 'max_length': 1024,
@@ -44,9 +45,15 @@ ENCODERS = {
                            'max_length': 1024, 'doc_prefix': '', 'dim': 2560,
                            'query_prefix': 'Instruct: Given a Vietnamese medical question, '
                                            'retrieve passages that answer it\nQuery: '},
+    'qwen3-embedding-8b': {'hf_id': 'Qwen/Qwen3-Embedding-8B', 'pooling': 'last',
+                           'max_length': 1024, 'doc_prefix': '', 'dim': 4096, 'quantize': '4bit',
+                           'query_prefix': 'Instruct: Given a Vietnamese medical question, '
+                                           'retrieve passages that answer it\nQuery: '},
     'hash': {'hf_id': None, 'pooling': 'hash', 'max_length': 0,
              'query_prefix': '', 'doc_prefix': '', 'dim': 256},
 }
+# Trained students (teach/train) appear as 'student:<folder>' under $VIBIOMIR_STUDENTS.
+ENCODERS.update(discover_students('embedding'))
 
 
 class HashEncoder:
@@ -98,10 +105,8 @@ class TransformerEncoder:
             self.tokenizer.padding_side = 'left'
         # torch_dtype is accepted by every transformers release this project allows; the newer
         # `dtype` name is silently ignored by older ones, which would load fp32 at twice the VRAM.
-        self.model = AutoModel.from_pretrained(
-            self.config['hf_id'],
-            torch_dtype=torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32,
-            use_safetensors=True, **kwargs).to(self.device).eval()
+        dtype = torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32
+        self.model = load_backbone(AutoModel, self.config, self.device, dtype, **kwargs)
         if hasattr(self.model.config, 'use_cache'):
             self.model.config.use_cache = False
         self.dim = int(getattr(self.model.config, 'hidden_size', self.config['dim']))

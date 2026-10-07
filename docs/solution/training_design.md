@@ -13,7 +13,7 @@ Mọi con số dưới đây là giá trị mặc định trong code tại thờ
 | Đã chạy với model thật (bge-m3, bge-reranker) | **Chưa.** Mọi lượt chạy đều dùng `--encoder hash` và `--reranker identity` |
 | Đã chạy trên corpus thật | **Có**, 30.000 bản ghi đầu của `nguyen/output/runs/batch01_nguyen` với 1.200 truy vấn thật, khoảng 4,8 phút đầu–cuối, nhưng chỉ với `hash`/`identity` |
 | Nhãn dev | **Chưa có.** BTC không phát hành gold; `pseudo` chỉ là vòng tròn |
-| Fine-tune | Không có, mọi model dùng nguyên bản pretrained |
+| Fine-tune | Block T (teacher Qwen3-32B → student 4B/8B/14B cho reranker, embedding, dịch): code và test có, vòng train đã chạy thử bằng bản 0.6B trên laptop; teacher trên Kaggle chưa chạy. Xem [teaching_guide.md](teaching_guide.md) |
 
 `hash` và `identity` chỉ kiểm tra đường ống (offset, ghép index với chunk, hình dạng bài nộp, phép tính metric). Chúng không nói gì về chất lượng truy hồi.
 
