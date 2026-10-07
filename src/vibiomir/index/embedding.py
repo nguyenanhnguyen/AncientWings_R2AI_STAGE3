@@ -101,7 +101,7 @@ class TransformerEncoder:
         self.model = AutoModel.from_pretrained(
             self.config['hf_id'],
             torch_dtype=torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32,
-            **kwargs).to(self.device).eval()
+            use_safetensors=True, **kwargs).to(self.device).eval()
         if hasattr(self.model.config, 'use_cache'):
             self.model.config.use_cache = False
         self.dim = int(getattr(self.model.config, 'hidden_size', self.config['dim']))

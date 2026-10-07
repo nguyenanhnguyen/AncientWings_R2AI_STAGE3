@@ -59,7 +59,8 @@ class CrossEncoderReranker:
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         dtype = torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32
         self.tokenizer = AutoTokenizer.from_pretrained(self.config['hf_id'], revision=revision)
-        kwargs = dict(torch_dtype=dtype, revision=revision, attn_implementation='sdpa')
+        kwargs = dict(torch_dtype=dtype, revision=revision, attn_implementation='sdpa',
+                      use_safetensors=True)
         if self.config['kind'] == 'causal-yes-no':
             from transformers import AutoModelForCausalLM
 
