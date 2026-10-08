@@ -1,6 +1,6 @@
 # R2AI2026 Stage 3 — ViBioMIR
 
-Repo phục vụ pipeline RAG của dự án ViBioMIR, chia theo các block trong [docs/note/pipeline.txt](docs/note/pipeline.txt). Block A (crawl, trích xuất, QC, export) được đóng gói trong hai notebook độc lập. Block A4 đến E (chunking, index, retrieval, bài nộp, đánh giá) đã có code chạy được đầu–cuối, nhưng chưa chạy với model thật trên corpus lớn. Chưa có fine-tune.
+Repo phục vụ pipeline RAG của dự án ViBioMIR, chia theo các block trong [docs/note/pipeline.txt](docs/note/pipeline.txt). Block A (crawl, trích xuất, QC, export) được đóng gói trong notebook crawl corpus tự upload Hugging Face. Block A4 đến E (chunking, index, retrieval, bài nộp, đánh giá) đã có code chạy được đầu–cuối, nhưng chưa chạy với model thật trên corpus lớn. Chưa có fine-tune.
 
 ## Bố cục
 
@@ -12,7 +12,7 @@ src/vibiomir/retrieval/   Block C: query.py, hybrid.py, rerank.py; CLI ở run.p
 src/vibiomir/submission/  Block D: choose.py, validate.py, export.py; CLI ở build.py
 src/vibiomir/evaluation/  Block E: labels.py, metrics.py, errors.py; CLI ở run.py
 scripts/                  Lệnh chạy pipeline A4–E, gọi code trong src/
-notebooks/                Hai notebook crawl độc lập, chứa code và dependencies
+notebooks/                Notebook crawl corpus và kiểm tra domain, chứa code và dependencies
 crawler_minh/             Bộ crawler riêng của Minh
 tests/                    Kiểm tra pipeline A4–E offline
 requirements/             rag.txt cho pipeline A4–E
@@ -23,7 +23,7 @@ notebooks/runs/           Output khi chạy notebook local (ngoài Git)
 work/                     Chunk, index, ứng viên, bài nộp, báo cáo (ngoài Git)
 ```
 
-Các script A4–E đọc tham số rồi gọi hàm trong `src/`. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`. Hai notebook crawl tự chứa snapshot Python; các file code được giải nén vào thư mục run khi chạy.
+Các script A4–E đọc tham số rồi gọi hàm trong `src/`. Script tự thêm `src/` vào đường dẫn import nên chưa cần cài package hoặc đặt `PYTHONPATH`. Các notebook crawl tự chứa snapshot Python; các file code được giải nén vào thư mục run khi chạy.
 
 ## Chạy pipeline từ dữ liệu crawl đến bài nộp
 
@@ -49,9 +49,9 @@ Model mặc định: `bge-m3` (568M) cho embedding và `bge-reranker-v2-m3` (568
 
 ## Notebook Kaggle
 
-Upload [crawl_corpus_kaggle.ipynb](notebooks/crawl_corpus_kaggle.ipynb) lên Kaggle, bật Internet và chỉnh `ID_FROM` / `ID_TO` trong ô cấu hình. Cả hai đầu đều được tính vào khoảng chọn. Notebook tự chứa code, tải Parquet nguồn, crawl/resume và xuất corpus JSONL/Parquet cùng ZIP chứa raw/checkpoint. Không cần clone repo hoặc GPU.
+Upload [crawl_corpus_kaggle_hf_upload.ipynb](notebooks/crawl_corpus_kaggle_hf_upload.ipynb) lên Kaggle, bật Internet và chỉnh `ID_FROM` / `ID_TO` trong ô cấu hình. Cả hai đầu đều được tính vào khoảng chọn. Notebook tự chứa code, tải Parquet nguồn, crawl/resume và xuất corpus JSONL/Parquet cùng ZIP chứa raw/checkpoint. Không cần clone repo hoặc GPU.
 
-Bản tự upload riêng: [crawl_corpus_kaggle_hf_upload.ipynb](notebooks/crawl_corpus_kaggle_hf_upload.ipynb). Giữ quy trình crawl của bản gốc và thêm mục 10 upload vào `AncientWings/AncientWings_R2AI_STAGE3_ds`. Trước Run All, tạo và bật Kaggle Secret `HF_TOKEN` có quyền ghi vào dataset. Corpus, ZIP và diagnostics được phân biệt theo tên run; manifest ghi khoảng ID, số bản ghi và SHA-256. Run còn pending chưa upload; lỗi mạng có thể chạy lại riêng mục 10. Nếu crawl lại cùng khoảng ID với cấu hình khác, dùng `RUN_TAG` mới.
+Mục 10 tự upload output đã hoàn tất vào `AncientWings/AncientWings_R2AI_STAGE3_ds`. Trước Run All, tạo và bật Kaggle Secret `HF_TOKEN` có quyền ghi vào dataset. Đặt `HF_UPLOAD_ENABLED = False` nếu chỉ muốn lưu output trên Kaggle. Corpus, ZIP và diagnostics được phân biệt theo tên run; manifest ghi khoảng ID, số bản ghi và SHA-256. Run còn pending chưa upload; lỗi mạng có thể chạy lại riêng mục 10. Nếu crawl lại cùng khoảng ID với cấu hình khác, dùng `RUN_TAG` mới.
 
 Đặt `MAX_NEW = 10` để thử trước, rồi đổi thành `None` và chạy lại ô crawl. Khi đổi session, giữ output và thêm run đã giải nén vào Kaggle Input để dùng `RESUME_RUN_PATH`.
 
@@ -85,7 +85,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-`requirements/rag.txt` phục vụ phần A4–E; `torch` nên cài theo bản CUDA của máy từ trang pytorch.org thay vì wheel mặc định. Hai notebook crawl cài dependencies trong chính notebook; môi trường của `crawler_minh` được mô tả trong README riêng của bộ crawler đó.
+`requirements/rag.txt` phục vụ phần A4–E; `torch` nên cài theo bản CUDA của máy từ trang pytorch.org thay vì wheel mặc định. Các notebook crawl cài dependencies trong chính notebook; môi trường của `crawler_minh` được mô tả trong README riêng của bộ crawler đó.
 
 Toàn bộ test chạy offline. `tests/test_pipeline.py` chạy A4 → E trên corpus mẫu bằng `--encoder hash` nên không cần GPU hay tải model; nó kiểm tra đường ống, không kiểm tra chất lượng truy hồi.
 
@@ -95,4 +95,4 @@ Giữ nguyên Parquet nguồn trong `data/` và các thư mục run để bảo 
 
 Resume dùng cấu hình và snapshot của cùng run. Recovery tạo run mới để thử lại lỗi hoặc đổi code/cấu hình. Corpus accepted là kết quả QC tự động, vẫn cần rà nội dung.
 
-Git lưu hai notebook crawl, bộ `crawler_minh`, pipeline RAG, dữ liệu nguồn và tài liệu dự án. Output, cache và file tạm local được ignore theo `.gitignore`.
+Git lưu các notebook, bộ `crawler_minh`, pipeline RAG, dữ liệu nguồn và tài liệu dự án. Output, cache và file tạm local được ignore theo `.gitignore`.

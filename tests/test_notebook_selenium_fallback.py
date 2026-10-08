@@ -265,7 +265,7 @@ class SeleniumFallbackTests(unittest.TestCase):
 
     def test_notebooks_have_same_probe_and_enabled_fallback(self):
         expected = (self.root / 'priority_probe_snapshot.py').read_bytes()
-        for name in ('crawl_corpus_kaggle', 'crawl_corpus_kaggle_hf_upload', 'crawl_domain_samples'):
+        for name in ('crawl_corpus_kaggle_hf_upload', 'crawl_domain_samples'):
             nb = json.loads((ROOT / 'notebooks' / f'{name}.ipynb').read_text(encoding='utf-8'))
             config_index, snapshot_index = (3, 7) if name == 'crawl_domain_samples' else (2, 6)
             self.assertEqual(assignments(''.join(nb['cells'][config_index]['source']))['BROWSER_TEST_MODE'], 'failed_only')

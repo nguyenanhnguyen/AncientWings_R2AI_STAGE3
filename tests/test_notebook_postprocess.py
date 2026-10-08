@@ -32,7 +32,7 @@ class NotebookPostprocessTests(unittest.TestCase):
         self.work = Path(self.temp.name)
         self.run = self.work / 'runs/ids_1_4_synced'
         self.run.mkdir(parents=True)
-        self.nb = json.loads((ROOT / 'notebooks/crawl_corpus_kaggle.ipynb').read_text(encoding='utf-8'))
+        self.nb = json.loads((ROOT / 'notebooks/crawl_corpus_kaggle_hf_upload.ipynb').read_text(encoding='utf-8'))
         values = {}
         for node in ast.parse(''.join(self.nb['cells'][6]['source'])).body:
             if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
