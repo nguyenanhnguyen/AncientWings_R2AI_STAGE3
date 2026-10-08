@@ -344,3 +344,9 @@ python scripts/evaluate.py score
 
 Mọi đường dẫn mặc định đều trỏ vào `work/`. Chạy thử không cần model: thêm `--encoder hash` cho `index.py` và `--reranker identity` cho `retrieve.py`. Chi tiết từng bước, thời gian đo được và cách xử lý sự cố: [run_guide.md](run_guide.md).
 
+### C4 — term và độ liên quan: lý thuyết đã dùng, phần còn thiếu
+
+- **Đã dùng:** BM25 ước lượng khớp term bằng tần suất term (TF), độ hiếm trong corpus (IDF) và chuẩn hóa độ dài; embedding dùng cosine cho khớp ngữ nghĩa; RRF hợp nhất thứ hạng; cross-encoder chấm trực tiếp cặp truy vấn--đoạn. Đây là tín hiệu xếp hạng, không phải xác nhận đoạn đúng.
+- **Chưa dùng:** chưa có bước chọn term phản hồi dựa trên nhãn liên quan. Biến thể keyword hiện chỉ bỏ lời xã giao; vòng feedback chưa triển khai. Không nên mặc định mọi term từ top-k đều hữu ích.
+- **Khi thử feedback:** giữ truy vấn gốc; chỉ bổ sung term/facet được nhiều ứng viên độc lập hỗ trợ, ưu tiên term đặc trưng hơn term phổ biến; hợp nhất danh sách rồi rerank một lần. Ghi term được thêm cùng nguồn ứng viên để truy vết.
+- **Đánh giá:** xác định liên quan bằng nhãn tài liệu/?oạn trên dev và Recall@K, MRR/nDCG cùng metric F2 chính thức. Điểm BM25, cosine, RRF hay reranker dùng để xếp hạng, không thay nhãn đúng/sai.

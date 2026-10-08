@@ -313,8 +313,10 @@ def _push(folder, repo, path_in_repo):
         return
     from huggingface_hub import HfApi
 
+    from .store import ensure_repo
+
     api = HfApi(token=hf_token())
-    api.create_repo(repo, private=True, exist_ok=True)
+    ensure_repo(api, repo, 'model')
     try:
         api.upload_folder(folder_path=str(folder), path_in_repo=path_in_repo, repo_id=repo,
                           commit_message=f'sync {path_in_repo}')

@@ -18,6 +18,31 @@ def shard_of(key, shards):
     return zlib.crc32(str(key).encode('utf-8')) % shards
 
 
+def ensure_repo(api, repo_id, repo_type):
+    """Create the repo only if it is truly missing.
+
+    A fine-grained token scoped to specific existing repos can write to them but is denied the
+    org-level right to create new ones; `exist_ok=True` does not help because the Hub checks that
+    create right before it checks whether the repo already exists, so create_repo raises 403 even
+    when nothing needs creating. Checking existence first avoids ever calling create for a repo
+    already on the Hub.
+    """
+    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+
+    try:
+        api.repo_info(repo_id, repo_type=repo_type)
+        return
+    except RepositoryNotFoundError:
+        pass
+    try:
+        api.create_repo(repo_id, repo_type=repo_type, private=True, exist_ok=True)
+    except HfHubHTTPError as error:
+        raise RuntimeError(
+            f'{repo_id} ({repo_type}) không tồn tại và token không có quyền tạo mới. '
+            'Tạo repo này trên huggingface.co trước, hoặc thêm nó vào danh sách repo của '
+            'token.') from error
+
+
 def hf_token():
     token = os.environ.get('HF_TOKEN')
     if token:
@@ -42,7 +67,7 @@ class HubMirror:
         self.api = HfApi(token=self.token)
         self.repo_id, self.path_in_repo, self.every = repo_id, path_in_repo, every
         self.last = time.monotonic()
-        self.api.create_repo(repo_id, repo_type='dataset', private=True, exist_ok=True)
+        ensure_repo(self.api, repo_id, 'dataset')
 
     def pull(self, local):
         """Restore the remote copy when the local file is missing (a fresh Kaggle session)."""
@@ -139,7 +164,7 @@ def push_inputs(repo_id, root, files):
     if not token:
         raise RuntimeError('Set HF_TOKEN (a write token) before pushing.')
     api = HfApi(token=token)
-    api.create_repo(repo_id, repo_type='dataset', private=True, exist_ok=True)
+    ensure_repo(api, repo_id, 'dataset')
     root = Path(root)
     for folder in ('src', 'scripts'):
         api.upload_folder(folder_path=str(root / folder), path_in_repo=f'code/{folder}',
