@@ -1,4 +1,4 @@
-"""Offline audit/export and rescue packaging, embedded in both crawl notebooks."""
+"""Offline audit/export and rescue packaging, embedded in the HF upload crawl notebook."""
 import hashlib
 import json
 from pathlib import Path

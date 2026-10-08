@@ -107,9 +107,7 @@ class NotebookUploadTests(unittest.TestCase):
     def paths(self, call=-1):
         return {op.path_in_repo for op in self.api.create_commit.call_args_list[call].kwargs['operations']}
 
-    def test_copy_preserves_crawl_cells_and_compiles(self):
-        original = json.loads((ROOT / 'notebooks' / 'crawl_corpus_kaggle.ipynb').read_text(encoding='utf-8'))
-        self.assertEqual(self.nb['cells'][1:19], original['cells'][1:19])
+    def test_notebook_cells_compile(self):
         self.assertIn('tự upload Hugging Face', ''.join(self.nb['cells'][0]['source']))
         for i, cell in enumerate(self.nb['cells']):
             if cell['cell_type'] == 'code':
