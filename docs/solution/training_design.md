@@ -215,7 +215,7 @@ Các encoder đã đăng ký (đều là model mở; mốc phát hành và số 
 ### C3 — rerank ([rerank.py](../../src/vibiomir/retrieval/rerank.py))
 
 | Tên | Model | Tham số | Cách chấm |
-| --- | --- | --- | --- |
+| --- | --- | --- | --- | 
 | `bge-reranker-v2-m3` (mặc định) | BAAI/bge-reranker-v2-m3 | 568M | Đầu phân loại trên cặp (truy vấn, đoạn) |
 | `bge-reranker-base` | BAAI/bge-reranker-base | 278M | Như trên, yếu hơn với tiếng Trung |
 | `qwen3-reranker-0.6b` / `-4b` | Qwen/Qwen3-Reranker | 0.6B / 4B | Xác suất của token `yes` so với `no` trong prompt riêng |
