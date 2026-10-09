@@ -29,6 +29,12 @@ FIELDS = ('id', 'url', 'final_url', 'title', 'text', 'domain', 'extractor',
           'published_at', 'raw_path', 'raw_sha256', 'text_sha256', 'duplicate_doc_ids')
 
 
+def canonical_run_name(first_id, last_id):
+    if type(first_id) is not int or type(last_id) is not int or first_id < 0 or last_id < first_id:
+        raise ValueError('Invalid inclusive source ID range.')
+    return f'ids_{first_id}_{last_id}_synced'
+
+
 def sha_stream(stream):
     digest = hashlib.sha256()
     for block in iter(lambda: stream.read(1024 * 1024), b''):
@@ -277,7 +283,7 @@ def make_shard(entries, directory, name, repo, *, archive=True, jsonl=True):
             for row in rows:
                 stream.write(json.dumps(row, ensure_ascii=False) + '\n')
         files.append((path, f'corpus_jsonl/{name}.jsonl'))
-    manifest = {'format_version': 1, 'generated_by': Path(__file__).name,
+    manifest = {'format_version': 1, 'generated_by': Path(__file__).name, 'run_name': name,
         'snapshot_scope': 'new_accepted_records_only', 'full_crawl_resume_supported': False,
         'id_from_inclusive': min(r['id'] for r in rows), 'id_to_inclusive': max(r['id'] for r in rows),
         'dataset_revision': SOURCE_REVISION, 'source_sha256': SOURCE_SHA256,
@@ -371,7 +377,6 @@ def main(argv=None):
     parser.add_argument('--repo-id', default=REPO)
     parser.add_argument('--source-parquet', type=Path, default=ROOT / 'data/links_corpus.parquet')
     parser.add_argument('--out', type=Path, default=ROOT / 'work/hf_local_sync')
-    parser.add_argument('--prefix', default='local-nguyen')
     parser.add_argument('--batch-size', type=int, default=1000, help='Accepted records per HF commit.')
     parser.add_argument('--max-new', type=int, help='Limit new accepted records in this invocation.')
     parser.add_argument('--attempts', type=int, default=3)
@@ -386,8 +391,6 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.batch_size < 1 or args.attempts < 1 or (args.max_new is not None and args.max_new < 1):
         parser.error('Batch size, attempts and max-new must be positive.')
-    if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,63}', args.prefix):
-        parser.error('Prefix must be 1-64 ASCII letters/digits, underscores or hyphens.')
     try:
         import pyarrow  # noqa: F401
     except ImportError:
@@ -430,8 +433,7 @@ def main(argv=None):
         part = 0
         while entries := cursor.fetchmany(args.batch_size):
             part += 1
-            digest = hashlib.sha256('\n'.join(f'{e[0]} {e[1]} {e[2]}' for e in entries).encode()).hexdigest()[:20]
-            name = f'{args.prefix}_{entries[0][0]}_{entries[-1][0]}_{digest}'
+            name = canonical_run_name(entries[0][0], entries[-1][0])
             if api:
                 # Never overwrite an existing run, even if someone left only a partial manifest.
                 for remote in (f'corpus/{name}.parquet', f'corpus_jsonl/{name}.jsonl',

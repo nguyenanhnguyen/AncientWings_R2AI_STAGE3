@@ -116,6 +116,10 @@ def build(args):
                'options': {k: v for k, v in vars(args).items() if not callable(v)}}
     storage.write_manifest(out / 'groups_manifest.json', summary, files=[target])
     emit(json.dumps(summary, ensure_ascii=False, indent=2))
+    if args.hub_repo:
+        from .store import push_result
+
+        push_result(args.hub_repo, [target, out / 'groups_manifest.json'], 'teach')
     return summary
 
 
@@ -133,6 +137,7 @@ def add_arguments(parser):
     parser.add_argument('--search-device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--batch-size', type=int, default=8)
     parser.add_argument('--seed', type=int, default=13)
+    parser.add_argument('--hub-repo', default=None, help='Push groups.jsonl back to teach/ when set.')
 
 
 def main(argv=None):

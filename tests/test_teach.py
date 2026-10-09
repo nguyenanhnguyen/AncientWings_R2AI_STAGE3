@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -93,7 +94,7 @@ class FlowTests(unittest.TestCase):
             teach = root / 'teach'
             summary = sample.build(argparse.Namespace(
                 chunks=str(chunks_file), out=str(teach), target=10, shards=2, min_tokens=8,
-                languages=None, dev_permille=500, seed=1))
+                languages=None, dev_permille=500, seed=1, hub_repo=None))
             seeds = storage.read_jsonl(teach / 'seeds.jsonl')
             self.assertEqual(summary['seeds'], len(seeds))
             self.assertEqual(len({row['doc_id'] for row in seeds}), len(seeds))
@@ -106,7 +107,7 @@ class FlowTests(unittest.TestCase):
             report = mine.build(argparse.Namespace(
                 teach=str(teach), chunks=str(chunks_file), index=str(root / 'index'),
                 extra_index=[], shards=2, top_k=20, hard=3, tail=1, tail_from=4, device='cpu',
-                search_device='cpu', batch_size=4, seed=1))
+                search_device='cpu', batch_size=4, seed=1, hub_repo=None))
             groups = storage.read_jsonl(teach / 'groups.jsonl')
             self.assertEqual(report['groups'], len(seeds))
             doc_of = {row['chunk_id']: row['doc_id']
@@ -127,6 +128,45 @@ class FlowTests(unittest.TestCase):
             self.assertEqual(len(kept), len(groups) - 1)
             self.assertTrue(all(group['items'][0]['label'] for group in kept))
             self.assertTrue(all(item['chunk_id'] in texts for g in kept for item in g['items']))
+
+
+class PushOnKaggleTests(unittest.TestCase):
+    def test_sample_and_mine_push_their_output_when_hub_repo_is_set(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = write_fixture(root)
+            chunking.build(argparse.Namespace(
+                corpus=[str(fixture['corpus'])], out=str(root / 'chunks'), target_tokens=40,
+                overlap_tokens=10, max_tokens=80, min_tokens=8, text_field=None, status='ok'))
+            chunks_file = root / 'chunks' / 'chunks.parquet'
+            index_cli.build_all(argparse.Namespace(
+                chunks=str(chunks_file), out=str(root / 'index'), k1=1.5, b=0.75,
+                encoder='hash', device='cpu', batch_size=4, shard=8, fp32=True, faiss=False,
+                faiss_lists=0))
+            teach = root / 'teach'
+            with patch('vibiomir.teach.store.push_result') as pushed:
+                sample.build(argparse.Namespace(
+                    chunks=str(chunks_file), out=str(teach), target=5, shards=1, min_tokens=8,
+                    languages=None, dev_permille=500, seed=1, hub_repo='acct/repo'))
+            self.assertEqual(pushed.call_args.args[0], 'acct/repo')
+            self.assertEqual(pushed.call_args.args[2], 'inputs')
+            pushed_paths = {Path(p).name for p in pushed.call_args.args[1]}
+            self.assertEqual(pushed_paths, {'seeds.jsonl', 'seeds_manifest.json'})
+
+            seeds = storage.read_jsonl(teach / 'seeds.jsonl')
+            log = store.open_log(teach, 'generated', 0, 1, 'chunk_id')
+            log.append([{'chunk_id': row['chunk_id'], 'doc_id': row['doc_id'],
+                         'split': row['split'], 'error': None, 'query': row['passage'][:60],
+                         'query_en': None, 'query_zh': None} for row in seeds])
+            with patch('vibiomir.teach.store.push_result') as pushed:
+                mine.build(argparse.Namespace(
+                    teach=str(teach), chunks=str(chunks_file), index=str(root / 'index'),
+                    extra_index=[], shards=1, top_k=20, hard=3, tail=1, tail_from=4,
+                    device='cpu', search_device='cpu', batch_size=4, seed=1,
+                    hub_repo='acct/repo'))
+            self.assertEqual(pushed.call_args.args[2], 'teach')
+            pushed_paths = {Path(p).name for p in pushed.call_args.args[1]}
+            self.assertEqual(pushed_paths, {'groups.jsonl', 'groups_manifest.json'})
 
 
 class LossTests(unittest.TestCase):

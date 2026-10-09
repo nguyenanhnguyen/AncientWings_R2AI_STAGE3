@@ -60,11 +60,11 @@ Chế độ offline chưa biết ID trên HF, nên số record mới chỉ có �
 Mỗi đợt mặc định có tối đa 1.000 record accepted mới:
 
 ```text
-corpus/local-nguyen_<min_id>_<max_id>_<hash>.parquet
-corpus_jsonl/local-nguyen_<min_id>_<max_id>_<hash>.jsonl
-archives/local-nguyen_<min_id>_<max_id>_<hash>.zip
-manifests/local-nguyen_<min_id>_<max_id>_<hash>/notebook_manifest.json
-manifests/local-nguyen_<min_id>_<max_id>_<hash>/upload_manifest.json
+corpus/ids_<min_id>_<max_id>_synced.parquet
+corpus_jsonl/ids_<min_id>_<max_id>_synced.jsonl
+archives/ids_<min_id>_<max_id>_synced.zip
+manifests/ids_<min_id>_<max_id>_synced/notebook_manifest.json
+manifests/ids_<min_id>_<max_id>_synced/upload_manifest.json
 ```
 
 Hợp nhất ở đây là bổ sung shard vào `corpus/`. Khi đọc toàn bộ `corpus/*.parquet`, dữ liệu mới cùng tồn tại với shard Kaggle cũ; không tạo một file `merged.parquet` hoặc sửa dataset card. Chọn glob `corpus/*.parquet` rõ ràng khi nạp, tránh đọc cả JSONL/manifest vào corpus.
@@ -96,7 +96,6 @@ Tùy chọn hữu ích:
 | --- | --- |
 | `--max-new 100` | Chỉ lấy tối đa 100 record mới; báo cáo không phải thống kê toàn bộ nguồn |
 | `--batch-size 5000` | Tối đa 5.000 record mỗi shard/commit |
-| `--prefix local-minh` | Nhãn tên shard cho thành viên khác |
 | `--out D:\hf_sync_work` | Chuyển cache/staging sang ổ khác; đặt ngoài thư mục crawl |
 | `--no-archive` | Chỉ upload corpus/manifest; raw vẫn kiểm tra hash nhưng chỉ giữ local |
 | `--no-jsonl` | Chỉ xuất corpus Parquet, bỏ bản JSONL |
@@ -111,3 +110,32 @@ python -m unittest discover -s notebooks -p test_sync_local_corpus_to_hf.py
 ```
 
 Các test kiểm tra trùng/xung đột ID, JSON chưa ghi xong, raw hỏng, đường dẫn raw, archive truy vết, schema HF và commit đồng thời. Không upload dữ liệu thật.
+
+## Chuẩn hóa tên các đợt sync cũ
+
+Các lượt sync mới dùng `ids_<min_id>_<max_id>_synced`, cùng mẫu với notebook Kaggle. Hai ID là min/max thực sự có trong shard; không ngụ ý có đủ mọi ID ở giữa. `--prefix` cũ đã bỏ. Khi tên đích đã tồn tại, script dừng để tránh ghi đè.
+
+Để đổi tên các đợt `local-nguyen_..._<hash>` (hoặc prefix tùy chỉnh cũ) đã có trên HF, chạy công cụ riêng. Nên kết thúc các lượt sync/upload khác trước khi áp dụng:
+
+```powershell
+# Chuẩn bị và xem kế hoạch, chưa thay đổi HF
+python notebooks\normalize_hf_corpus_names.py
+
+# Áp dụng đổi tên trên HF
+python notebooks\normalize_hf_corpus_names.py --apply
+```
+
+Công cụ chỉ xử lý các snapshot do script sync local tạo theo mẫu tên cũ; các đợt notebook đã đúng tên và đợt recovery được giữ nguyên. Nó đổi tên Parquet, JSONL, ZIP, diagnostics nếu có, thư mục manifests; cập nhật `run_name`, `path_in_repo`, tên thư mục trong ZIP và hash/size artifact đã thay đổi. ID, URL và text corpus được giữ nguyên. Tên run gốc trong `parent_runs` giữ nguyên để truy vết.
+
+Các tên cũ được bỏ khỏi nhánh hiện tại trong cùng commit tạo tên mới; lịch sử Git HF vẫn còn. Corpus Parquet/JSONL dùng thao tác copy của Hub; ZIP phải tải về, sửa nội dung tên bên trong rồi upload lại. Mỗi đợt đổi tên là một commit có kiểm tra phiên bản cha. Nếu repo thay đổi hoặc mất kết nối, chạy lại để dựng kế hoạch mới; đợt đã đổi tên thành công được bỏ qua. Khi hai tên cũ cùng trở thành một tên đích hoặc đích đã tồn tại, công cụ dừng trước commit.
+
+Cache, ZIP đã chuẩn hóa và báo cáo nằm ở `work\hf_name_normalization\` trên ổ dự án; cần dung lượng cho cả ZIP cũ và mới. Lệnh preview cũng chuẩn bị ZIP để kiểm tra. Công cụ không đổi tên file trong cache do HF quản lý, không sửa thư mục crawler hoặc lịch sử log cũ.
+
+Nếu cần bản staging local có tên mới (không đụng HF):
+
+```powershell
+python notebooks\normalize_hf_corpus_names.py --local-staging work\hf_local_sync\staging
+python notebooks\normalize_hf_corpus_names.py --local-staging work\hf_local_sync\staging --apply
+```
+
+Chế độ này tạo các thư mục staging tên mới, giữ nguyên thư mục tên cũ làm backup. Báo cáo kế hoạch ở `work\hf_name_normalization\local_rename_plan.json`; không chạy đồng thời với sync đang ghi staging. Nếu tên đích đã tồn tại, dừng để người dùng kiểm tra.

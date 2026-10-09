@@ -172,10 +172,37 @@ def push_inputs(repo_id, root, files):
                           allow_patterns=['*.py'], delete_patterns=['*.py'],
                           commit_message=f'code/{folder}')
     for path in files:
-        api.upload_file(path_or_fileobj=str(path), path_in_repo=f'inputs/{Path(path).name}',
-                        repo_id=repo_id, repo_type='dataset',
-                        commit_message=f'inputs/{Path(path).name}')
-        emit(f'đã đẩy inputs/{Path(path).name}')
+        path = Path(path)
+        if path.is_dir():
+            api.upload_folder(folder_path=str(path), path_in_repo=f'inputs/{path.name}',
+                              repo_id=repo_id, repo_type='dataset',
+                              commit_message=f'inputs/{path.name}')
+        else:
+            api.upload_file(path_or_fileobj=str(path), path_in_repo=f'inputs/{path.name}',
+                            repo_id=repo_id, repo_type='dataset',
+                            commit_message=f'inputs/{path.name}')
+        emit(f'đã đẩy inputs/{path.name}')
+
+
+def push_result(repo_id, local_files, path_in_repo_prefix):
+    """Kaggle -> Hub: push a stage's output files (e.g. seeds.jsonl, groups.jsonl) back.
+
+    Lets T1/T3 run on Kaggle too, reading inputs/ and writing straight back to the Hub, so no
+    stage needs the laptop once the initial code+data push (push_inputs) has happened.
+    """
+    from huggingface_hub import HfApi
+
+    token = hf_token()
+    if not token:
+        raise RuntimeError('Set HF_TOKEN before pushing.')
+    api = HfApi(token=token)
+    ensure_repo(api, repo_id, 'dataset')
+    for path in local_files:
+        path = Path(path)
+        target = f'{path_in_repo_prefix}/{path.name}'
+        api.upload_file(path_or_fileobj=str(path), path_in_repo=target, repo_id=repo_id,
+                        repo_type='dataset', commit_message=target)
+        emit(f'đã đẩy {target}')
 
 
 class Deadline:

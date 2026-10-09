@@ -10,6 +10,8 @@ import unittest
 import uuid
 import zipfile
 
+import normalize_hf_corpus_names as naming
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -143,6 +145,55 @@ class SyncTests(unittest.TestCase):
         api = SimpleNamespace(create_commit=fail)
         with self.assertRaisesRegex(RuntimeError, 'HF changed'):
             sync.commit_shard(api, sync.REPO, 'old', [], 'batch', 3, lambda **kw: kw)
+
+    def test_canonical_name_and_collision_checks(self):
+        self.assertEqual(sync.canonical_run_name(12, 40), 'ids_12_40_synced')
+        old = 'local-nguyen_12_40_' + 'a' * 20
+        paths = naming.artifact_paths(old)
+        self.assertEqual(naming.rename_plan([old], paths)[0][1], 'ids_12_40_synced')
+        with self.assertRaisesRegex(ValueError, 'Destination already exists'):
+            naming.rename_plan([old], paths + ['corpus/ids_12_40_synced.parquet'])
+        second = 'other_12_40_' + 'b' * 20
+        with self.assertRaisesRegex(ValueError, 'Two old runs'):
+            naming.rename_plan([old, second], paths + naming.artifact_paths(second))
+        self.assertEqual(naming.rename_plan(['ids_12_40_synced'], []), [])
+
+    def test_rename_updates_zip_and_hashes_without_rewriting_corpus(self):
+        row = self.record()
+        sync.plan_local(self.db, [self.run], self.root)
+        old = 'local-nguyen_1_1_' + 'a' * 20
+        files = dict((remote, local) for local, remote in sync.make_shard(
+            self.entries(), self.root / 'legacy', old, sync.REPO))
+        old_parquet_hash = sync.sha_file(files[f'corpus/{old}.parquet'])
+        _, new, mapping = naming.rename_plan([old], files)[0]
+        changes = naming.prepare_rename(old, new, mapping, files.__getitem__, self.root / 'renamed')
+        self.assertNotIn(f'corpus/{new}.parquet', changes)
+        self.assertEqual(old_parquet_hash, sync.sha_file(files[f'corpus/{old}.parquet']))
+        proof = sync.read_json(changes[f'manifests/{new}/upload_manifest.json'])
+        self.assertEqual(proof['run_name'], new)
+        for item in proof['files']:
+            self.assertNotIn(old, item['path_in_repo'])
+            if item['path_in_repo'] in changes:
+                self.assertEqual(item['sha256'], sync.sha_file(changes[item['path_in_repo']]))
+        with zipfile.ZipFile(changes[f'archives/{new}.zip']) as bundle:
+            self.assertTrue(all(p.startswith(new + '/') for p in bundle.namelist()))
+            record = next(p for p in bundle.namelist() if '/records/' in p)
+            self.assertEqual(json.loads(bundle.read(record)), row)
+            self.assertEqual(json.loads(bundle.read(new + '/notebook_manifest.json'))['run_name'], new)
+
+    def test_rename_rejects_tampered_manifest(self):
+        self.record()
+        sync.plan_local(self.db, [self.run], self.root)
+        old = 'local-nguyen_1_1_' + 'a' * 20
+        files = dict((remote, local) for local, remote in sync.make_shard(
+            self.entries(), self.root / 'legacy', old, sync.REPO))
+        path = files[f'manifests/{old}/notebook_manifest.json']
+        manifest = sync.read_json(path)
+        manifest['accepted'] = 999
+        sync.write_json(path, manifest)
+        _, new, mapping = naming.rename_plan([old], files)[0]
+        with self.assertRaisesRegex(ValueError, 'hash/size mismatch'):
+            naming.prepare_rename(old, new, mapping, files.__getitem__, self.root / 'renamed')
 
 
 if __name__ == '__main__':
