@@ -11,6 +11,7 @@ T4 has no bfloat16, so the teacher runs in float16.
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 
 from ..common import storage
@@ -57,16 +58,23 @@ class VllmTeacher:
 class HfTeacher:
     """bitsandbytes 4-bit over every visible GPU. Use only when vLLM cannot start."""
 
-    def __init__(self, config, max_model_len, batch=8):
+    def __init__(self, config, max_model_len, batch=2, reserve_gib=3.0):
+        # Must be set before the first CUDA allocation; reduces fragmentation OOMs.
+        os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
         self.torch, self.batch, self.max_model_len = torch, batch, max_model_len
         self.tokenizer = AutoTokenizer.from_pretrained(config['hf_id'])
         self.tokenizer.padding_side = 'left'
+        # device_map='auto' alone fills a card to the brim with weights and leaves nothing for
+        # activations or for bitsandbytes' dequantise fallback on T4, so cap each GPU.
+        max_memory = {i: f'{torch.cuda.get_device_properties(i).total_memory / 2**30 - reserve_gib:.1f}GiB'
+                      for i in range(torch.cuda.device_count())}
         self.model = AutoModelForCausalLM.from_pretrained(
-            config['hf_id'], device_map='auto', torch_dtype=torch.float16,
+            config['hf_id'], device_map='auto', max_memory=max_memory, torch_dtype=torch.float16,
             quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4',
+                                                   bnb_4bit_use_double_quant=True,
                                                    bnb_4bit_compute_dtype=torch.float16)).eval()
 
     def _batches(self, prompts):
@@ -106,6 +114,12 @@ def load_teacher(name, max_model_len, backend=None):
     return HfTeacher(config, max_model_len)
 
 
+def _save_every(teacher, requested, hf_cap):
+    """The hf backend is far slower than vLLM; save after fewer items so a session that dies
+    early still leaves progress on the Hub."""
+    return min(requested, hf_cap) if isinstance(teacher, HfTeacher) else requested
+
+
 def _prompt(tokenizer, messages):
     try:
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True,
@@ -128,10 +142,11 @@ def run_generate(args):
     if not todo:
         return log.close()
     teacher = load_teacher(args.teacher, args.max_model_len, args.backend)
+    step = _save_every(teacher, args.batch, 16)
     deadline, progress = Deadline(args.hours), Progress('generate')
     accepted = done = 0
-    for start in range(0, len(todo), args.batch):
-        part = todo[start:start + args.batch]
+    for start in range(0, len(todo), step):
+        part = todo[start:start + step]
         prompts = [_prompt(teacher.tokenizer, generate_messages(row['passage'], row['style']))
                    for row in part]
         fits = [_fits(teacher.tokenizer, p, args.max_tokens, args.max_model_len) for p in prompts]
@@ -177,10 +192,11 @@ def run_judge(args):
     teacher = load_teacher(args.teacher, args.max_model_len, args.backend)
     tokenizer = teacher.tokenizer
     yes_id, no_id = tokenizer.convert_tokens_to_ids('yes'), tokenizer.convert_tokens_to_ids('no')
+    step = _save_every(teacher, args.batch, 4)
     deadline, progress = Deadline(args.hours), Progress('judge')
     done = 0
-    for start in range(0, len(todo), args.batch):
-        part = todo[start:start + args.batch]
+    for start in range(0, len(todo), step):
+        part = todo[start:start + step]
         pairs = [(row['qid'], cid) for row in part for cid in [row['positive'], *row['negatives']]]
         queries = {row['qid']: row['query'] for row in part}
         prompts = []
