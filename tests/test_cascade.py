@@ -299,6 +299,68 @@ class FetchTests(unittest.TestCase):
         self.assertIn(str(Path('hf') / 'source' / 'query.parquet'), text)
 
 
+class ParallelStateTests(unittest.TestCase):
+    """A finished stage must survive a sibling failing or the run being stopped (Ctrl+C)."""
+
+    def _runner(self, out):
+        from vibiomir import pipeline
+        runner = pipeline.Runner(out)
+        # Each step's command is a snippet of Python instead of a real stage.
+        runner._command = lambda command: [sys.executable, '-c', command[0]]
+        return runner
+
+    def test_finished_step_is_recorded_when_a_sibling_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            runner = self._runner(out)
+            done, missing = out / 'done.txt', out / 'missing.txt'
+            steps = [
+                {'name': 'good', 'command': [f'open(r"{done}", "a").write("x")'],
+                 'inputs': [], 'outputs': [done]},
+                {'name': 'bad', 'command': ['raise SystemExit(3)'],
+                 'inputs': [], 'outputs': [missing]},
+            ]
+            with quiet(), self.assertRaisesRegex(RuntimeError, 'bad'):
+                runner.parallel(steps)
+            self.assertTrue((out / 'stages' / 'good.json').is_file())
+            self.assertFalse((out / 'stages' / 'bad.json').exists())
+            # The rerun reuses `good` (the file is appended to, so a rerun would grow it).
+            with quiet(), self.assertRaisesRegex(RuntimeError, 'bad'):
+                self._runner(out).parallel(steps)
+            self.assertEqual(done.read_text(), 'x')
+
+    def test_a_step_that_exits_zero_without_its_output_is_not_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            runner = self._runner(out)
+            with quiet():
+                runner.parallel([{'name': 'empty', 'command': ['pass'], 'inputs': [],
+                                  'outputs': [out / 'never.txt']}])
+            self.assertFalse((out / 'stages' / 'empty.json').exists())
+
+
+class TranslationPassthroughTests(unittest.TestCase):
+    def test_prepared_file_skips_the_translate_stage(self):
+        from vibiomir import pipeline
+        with tempfile.TemporaryDirectory() as tmp:
+            prepared = Path(tmp) / 'translations.jsonl'
+            storage.write_jsonl(prepared, [{'id': 1, 'lang': 'zh', 'text': '肾结石'}])
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                pipeline.run(pipeline.parse_args(['--dry-run', '--out', str(Path(tmp) / 'run'),
+                                                  '--translations', str(prepared)]))
+            text = output.getvalue()
+            self.assertNotIn('[translate]', text)
+            self.assertIn(str(prepared), text)
+
+    def test_a_missing_file_is_refused_before_any_stage_runs(self):
+        from vibiomir import pipeline
+        with tempfile.TemporaryDirectory() as tmp:
+            with quiet(), self.assertRaisesRegex(FileNotFoundError, 'translations'):
+                pipeline.run(pipeline.parse_args(['--dry-run', '--out', str(Path(tmp) / 'run'),
+                                                  '--translations', str(Path(tmp) / 'nope.jsonl')]))
+
+
 class PipelineCliTests(unittest.TestCase):
     def test_profiles_fill_defaults_and_options_override(self):
         from vibiomir import pipeline

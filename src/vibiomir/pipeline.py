@@ -112,7 +112,9 @@ class Runner:
                 *map(str, command)]
 
     def _reuse_frozen_corpus(self, state, step):
-        if not getattr(self, 'reuse_corpus', False) or step['name'] != 'prepare':
+        # A completed corpus is an immutable input snapshot for this run. Changes to
+        # downstream code/environment do not invalidate its verified bytes.
+        if step['name'] != 'prepare':
             return False
         old = state.get('command', [])
         if len(old) > 4 and Path(old[4]).name == 'prepare.py':
@@ -145,18 +147,19 @@ class Runner:
                              'code': self.code_key, 'environment': self.env})
             if state_path.exists():
                 state = storage.read_json(state_path)
+                if step['name'] == 'prepare':
+                    if self._reuse_frozen_corpus(state, step):
+                        emit('[prepare] Reusing frozen corpus: source/options and output SHA-256 '
+                             'verified. Use a new --out to prepare with new code or new crawl data.')
+                        continue
+                    # The source is live. Re-running prepare would change the population mid-run.
+                    raise ValueError('Frozen corpus verification failed: prepare options differ, '
+                                     'checkpoint is unsupported, or output files are missing/modified. '
+                                     'Keep this run intact; use a new --out for a new snapshot.')
                 if state['key'] == key and all(Path(p).exists() and self._sha(p) == digest
                                                for p, digest in state['outputs'].items()):
                     emit(f"[{step['name']}] Dùng lại kết quả đã kiểm tra SHA-256.")
                     continue
-                if step['name'] == 'prepare':
-                    if self._reuse_frozen_corpus(state, step):
-                        emit('[prepare] Reusing frozen corpus: options and output SHA-256 verified; '
-                             'preparation code may differ (--reuse-corpus).')
-                        continue
-                    # The source is live. Re-running prepare would change the population mid-run.
-                    raise ValueError('Frozen corpus/config changed. Choose a new --out to take a '
-                                     'new snapshot.')
             todo.append((step, cmd, state_path, key))
         if not todo:
             return
@@ -179,18 +182,33 @@ class Runner:
                 running.append((step, process, reader))
             failed = []
             for step, process, reader in running:
-                if process.wait():
-                    failed.append(step['name'])
+                code = process.wait()
                 reader.join()
+                if code:
+                    failed.append(step['name'])
+                else:
+                    # Record each step as soon as it succeeds. Waiting for the whole group would
+                    # throw away hours of finished GPU work when a sibling fails or is stopped.
+                    self._record(todo, step, started)
             if failed:
                 raise RuntimeError(f"Stage(s) {', '.join(failed)} failed; see {logs}")
         except BaseException:
-            for _step, process, _reader in running:
+            for step, process, _reader in running:
                 if process.poll() is None:
                     process.terminate()
                     process.wait()
+                elif process.returncode == 0:
+                    self._record(todo, step, started)
             raise
-        for step, cmd, state_path, key in todo:
+
+    def _record(self, todo, step, started):
+        """Write <out>/stages/<name>.json, so a rerun reuses this step instead of repeating it."""
+        for candidate, cmd, state_path, key in todo:
+            if candidate is not step:
+                continue
+            if not all(Path(p).exists() for p in step['outputs']):
+                emit(f"[{step['name']}] Thoát với mã 0 nhưng thiếu output; sẽ chạy lại lần sau.")
+                return
             storage.write_json(state_path, {'key': key, 'command': cmd,
                                'seconds': time.monotonic() - started,
                                'outputs': {str(p): self._sha(p) for p in step['outputs']}})
@@ -253,7 +271,6 @@ def run(args):
     gpus = list(range(args.gpus))
     device = 'cuda' if gpus else 'cpu'
     r = Runner(out, args.dry_run)
-    r.reuse_corpus = getattr(args, 'reuse_corpus', False)
     if args.source == ['hf']:
         corpus_dir, fetched_queries, fetched_links = _fetch(r, args, out)
         source = [str(corpus_dir)]
@@ -289,7 +306,15 @@ def run(args):
     total = max(1, sum(counts.values()))
     languages = [lang for lang in ('zh', 'en') if counts.get(lang, 0) / total >= 0.01]
     translations = None
-    if not args.skip_translation and (languages or args.hyde):
+    if args.translations:
+        # A file prepared elsewhere (a Kaggle run, a teammate): no translator model is loaded, so
+        # a laptop on a slow line does not have to download several GB of weights.
+        translations = Path(args.translations).resolve()
+        if not translations.is_file():
+            raise FileNotFoundError(f'--translations {translations} không tồn tại.')
+        generate = None
+        emit(f'Dùng bản dịch có sẵn: {translations} (bỏ qua khâu translate)')
+    elif not args.skip_translation and (languages or args.hyde):
         translations = out/'translations'/'translations.jsonl'
         generate = {'name': 'translate', 'gpu': gpus[0] if gpus else None,
                     'command': ['translate', '--queries', queries, '--out', translations.parent,
@@ -381,8 +406,8 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--profile', choices=sorted(PROFILES), default='local')
     p.add_argument('--reuse-corpus', action='store_true',
-                   help='Reuse a completed frozen prepare snapshot after code/CLI changes, '
-                        'only if source/options and all recorded output hashes still match.')
+                   help='Compatibility flag: verified frozen corpus reuse is now automatic. '
+                        'Source/options and all recorded output hashes must still match.')
     p.add_argument('--source', nargs='+', default=None,
                    help="Local crawl folders (nguyen, a run directory) or parquet folders; or 'hf' "
                         'to download the team corpus and BTC files from Hugging Face and pin the '
@@ -408,6 +433,9 @@ def parse_args(argv=None):
     p.add_argument('--hyde', nargs='*', choices=['zh', 'vi', 'en'], default=[],
                    help='Also generate HyDE passages in these languages (slower; off by default).')
     p.add_argument('--skip-translation', action='store_true')
+    p.add_argument('--translations', default=None,
+                   help='Use this prepared translations.jsonl and skip the translate stage, so no '
+                        'translator model is downloaded (e.g. a file generated on Kaggle).')
     p.add_argument('--encoder-batch', type=int, default=None)
     p.add_argument('--rerank-batch', type=int, default=None)
     p.add_argument('--lead-tokens', type=int, default=160)

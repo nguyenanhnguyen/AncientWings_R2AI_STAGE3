@@ -108,7 +108,15 @@ Chạy thật (mặc định `--profile local --source nguyen --limit 100000 --o
 .\env\Scripts\python.exe scripts/vibiomir.py pipeline
 ```
 
-**Chạy tiếp khi bị ngắt:** gõ lại đúng lệnh; khâu đã xong (khớp SHA-256) được dùng lại, embedding tiếp tục từ shard đang dở. Snapshot 100k đã đóng băng ở lần chạy đầu: crawl có thêm dữ liệu cũng không làm đổi run này. Muốn snapshot mới (crawl đã nhiều hơn, hoặc số lượng khác): dùng `--out` mới, ví dụ `--limit 200000 --out work/run_local_200k`, hoặc `--limit 0` để lấy hết.
+Nếu run cũ đã xong `prepare` nhưng dừng vì thiếu `scripts/cards.py` sau khi gom các wrapper, tiếp tục bằng:
+
+```powershell
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline --reuse-corpus
+```
+
+Snapshot đã chuẩn bị được **tự động dùng lại**, kể cả khi đổi wrapper CLI, code hoặc môi trường, chỉ khi tham số nguồn/giới hạn và SHA-256 của corpus cùng manifest khớp checkpoint. `--reuse-corpus` được giữ để tương thích lệnh cũ, không còn bắt buộc. Các bước sau được kiểm tra/chạy lại theo code hiện tại. Muốn áp dụng code chuẩn bị mới hoặc lấy dữ liệu crawl mới, chọn `--out` mới. Không xóa `stages/prepare.json` để ép đọc lại nguồn đang crawl.
+
+**Chạy tiếp khi bị ngắt (kể cả Ctrl+C):** gõ lại đúng lệnh; khâu đã xong (khớp SHA-256) được dùng lại — kể cả khâu xong trước khi bạn ngắt, và model tải dở được tải tiếp, embedding tiếp tục từ shard đang dở. Snapshot 100k đã đóng băng ở lần chạy đầu: crawl có thêm dữ liệu cũng không làm đổi run này. Muốn snapshot mới (crawl đã nhiều hơn, hoặc số lượng khác): dùng `--out` mới, ví dụ `--limit 200000 --out work/run_local_200k`, hoặc `--limit 0` để lấy hết.
 
 Trên GPU 4 GB, LLM dịch và encoder không cùng nằm trên card, nên các khâu GPU chạy lần lượt. Hai shard là trang tiếng Trung (cnkang, wujue), nên khâu dịch sẽ chạy; tắt bằng `--skip-translation`. Lần đầu sẽ tải Qwen3-4B (khoảng 8 GB) vào cache HF; bge-m3 và bge-reranker-v2-m3 đã có sẵn.
 
@@ -200,13 +208,15 @@ Các tham số chỉnh nhanh của `submit.py`: `--window-tokens` (0–1024), `-
 | Tình huống | Xử lý |
 |---|---|
 | CUDA unavailable / CPU-only torch | Làm mục 2 và chạy preflight; không tự chuyển toàn lượt sang CPU |
+| Khâu `translate` đứng rất lâu ở `Fetching 3 files` | Đang **tải Qwen3-4B (7,49 GiB)** lần đầu, không phải treo. Mạng ~1 MB/s thì mất khoảng 2 giờ. Nhấn Ctrl+C rồi chạy lại **tải tiếp** từ chỗ dở (file `.incomplete` trong cache HF). Tải nhanh hơn: `pip install hf_transfer` rồi đặt `$env:HF_HUB_ENABLE_HF_TRANSFER=1`. Không muốn tải: dùng `--translations <file>` (bản dịch tạo sẵn ở Kaggle) hoặc `--skip-translation` (mất kênh tiếng Trung) |
+| Đã có bản dịch từ nơi khác | `--translations <đường dẫn translations.jsonl>`: pipeline bỏ qua khâu translate, không nạp model dịch nào |
 | OOM khi dịch | Batch tự giảm một nửa khi hết VRAM. Nếu batch 1 vẫn lỗi, đóng chương trình khác đang dùng GPU; hoặc chạy `--skip-translation` (mất kênh tiếng Trung, Recall với tài liệu Trung giảm) |
 | OOM encode/rerank batch >1 | Code tự giảm batch. Nếu batch 1 vẫn lỗi, giải phóng VRAM; giảm max_length/chunk size và đo lại |
 | Muốn đổi batch | `--encoder-batch`, `--rerank-batch`, `--translate-batch` |
 | Rerank quá lâu | Giảm `--rerank-k` (số cặp = 1.200 × rerank-k); có thể giảm Recall |
 | Dịch có `rejected` | Xem `translations/rejected.jsonl`; pipeline dùng phần hợp lệ và giữ query gốc |
 | Embedding checkpoint differs | Dùng index/output mới; không ghép model hoặc chunk khác vào checkpoint |
-| Frozen corpus/config changed | Dùng `--out` mới để snapshot mới, giữ run cũ |
+| Frozen corpus verification failed | Tham số prepare đổi, checkpoint không tương thích hoặc output thiếu/sai hash. Giữ run cũ; dùng `--out` mới để lấy snapshot mới |
 | Hash mismatch | Dùng artifact cùng run hoặc chạy lại từ khâu đã thay đổi |
 | Mạng ngắt tải model | Chạy lại lệnh; cache Hugging Face và cache pipeline độc lập |
 

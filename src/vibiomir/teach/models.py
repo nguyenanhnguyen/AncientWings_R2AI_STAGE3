@@ -164,6 +164,9 @@ def load_backbone(model_class, config, device, dtype, revision=None, **extra):
     import torch
 
     kwargs = dict(torch_dtype=dtype, revision=revision, **extra)
+    # Prefer safetensors when available, but support official bin-only checkpoints
+    # such as BAAI/bge-m3. Preserve an explicit caller format restriction.
+    kwargs.setdefault('use_safetensors', config.get('use_safetensors'))
     quantized = config.get('quantize') == '4bit'
     if quantized:
         from transformers import BitsAndBytesConfig
@@ -172,8 +175,6 @@ def load_backbone(model_class, config, device, dtype, revision=None, **extra):
             load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.float16)
         kwargs['device_map'] = {'': str(device)}
-    else:
-        kwargs['use_safetensors'] = True
     model = model_class.from_pretrained(config['hf_id'], **kwargs)
     if config.get('adapter'):
         from peft import PeftModel
