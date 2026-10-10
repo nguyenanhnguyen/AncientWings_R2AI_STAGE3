@@ -4,6 +4,8 @@ Tài liệu mô tả phần pipeline đã soạn sau khi corpus được crawl x
 
 Mọi con số dưới đây là giá trị mặc định trong code tại thời điểm viết, không phải kết quả đã tối ưu.
 
+> **Cập nhật 10/10/2026:** pipeline đã chuyển sang thiết kế thác (thẻ tài liệu → tập con → một reranker chấm cùng ngôn ngữ → chọn theo ngưỡng F2 → cửa sổ nộp ≤768 token), khối T tạm dừng. Bảng khâu và lệnh hiện hành nằm ở [run_guide.md](run_guide.md) mục 1 và 3; lý do ở [research.md](research.md). Các mục dưới vẫn đúng cho từng module (chunk, BM25, embedding, rerank, kiểm tra bài nộp), nhưng phần mô tả luồng tổng và profile mặc định là của phiên bản trước.
+
 ## 0. Hiện trạng
 
 | Hạng mục | Tình trạng |

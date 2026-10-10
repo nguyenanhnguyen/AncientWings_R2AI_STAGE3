@@ -27,6 +27,7 @@ chunk spans cut from this corpus are still spans of the source.
 import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import sys
 from urllib.parse import urlsplit
@@ -66,7 +67,8 @@ _LANG_HINTS = {'vi_hint': 'vi', 'zh_hint': 'zh', 'vi': 'vi', 'zh': 'zh', 'en': '
 
 def _run_directory_rows(path, limit=None):
     """The per-id run layout: <run>/records/<id>.json, raw paths relative to <run>."""
-    files = sorted((path / 'records').glob('*.json'), key=lambda item: int(item.stem))
+    files = sorted((item for item in (path / 'records').glob('*.json') if item.stem.isdigit()),
+                   key=lambda item: int(item.stem))
     if limit:
         files = files[:limit]
     for file in files:
@@ -78,6 +80,40 @@ def _run_directory_rows(path, limit=None):
         if row.get('raw_path'):
             row['raw_path'] = str((path / row['raw_path']).as_posix())
         yield row
+
+
+_SKIP_DIRS = {'records', 'raw', 'requests_records', 'browser_records', 'robots', 'logs',
+              '__pycache__', '.git'}
+
+
+def discover_sources(path):
+    """Expand one --source into concrete sources: run directories or data files.
+
+    A run directory (has records/) is used as is. A directory of Parquet files, such as the
+    `corpus/` folder of the team's Hugging Face dataset, contributes each file. Any other directory
+    is walked for run directories, e.g. `nguyen/` holds `output/runs/<run>` and
+    `shards/<shard>/runs/<run>`. The walk stops at a run root and never descends into records/ or
+    raw/, which hold hundreds of thousands of files.
+    """
+    path = Path(path)
+    if not path.is_dir():
+        return [path]
+    if (path / 'records').is_dir():
+        return [path]
+    runs, files = [], []
+    for folder, directories, names in os.walk(path):
+        here = Path(folder)
+        if 'records' in directories:
+            runs.append(here)
+            directories[:] = []
+            continue
+        directories[:] = sorted(d for d in directories if d not in _SKIP_DIRS)
+        files.extend(here / name for name in sorted(names) if name.endswith('.parquet'))
+    if runs:
+        return sorted(runs)
+    if files:
+        return sorted(files)
+    raise ValueError(f'{path} holds no crawl run (a folder with records/) and no .parquet file.')
 
 
 def read_source(path, limit=None):
@@ -157,7 +193,10 @@ def build(args):
     kept, dropped = {}, []
     seen = set()
     remaining = args.limit
-    for source in args.source:
+    sources = [found for given in args.source for found in discover_sources(given)]
+    emit(f'prepare: {len(sources)} nguồn: ' + ', '.join(str(source) for source in sources[:20])
+         + (' ...' if len(sources) > 20 else ''))
+    for source in sources:
         for row in read_source(source, limit=remaining):
             doc_id = int(row['id'])
             if doc_id in seen:
@@ -215,7 +254,8 @@ def build(args):
         'options': {'limit': args.limit, 'max_duplicates': args.max_duplicates,
                     'min_chars': args.min_chars, 'drop_review': args.drop_review,
                     'text_field': args.text_field},
-        'sources': [str(source) for source in args.source],
+        'sources': [str(source) for source in sources],
+        'source_arguments': [str(source) for source in args.source],
     }
     storage.write_manifest(out / 'prepare_manifest.json', summary, files=[corpus])
     emit(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -225,8 +265,10 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--source', nargs='+', required=True,
-                        help='Crawl run directories (with records/) or exported '
-                             '.parquet/.json/.jsonl files. Earlier sources win on shared ids.')
+                        help='Crawl run directories (with records/), folders that contain them '
+                             '(e.g. nguyen), folders of .parquet files (the HF corpus/), or '
+                             'exported .parquet/.json/.jsonl files. Earlier sources win on shared '
+                             'ids.')
     parser.add_argument('--out', default='work/corpus')
     parser.add_argument('--limit', type=int, default=None,
                         help='Read at most this many source rows, lowest ids first.')

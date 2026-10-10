@@ -64,6 +64,14 @@ def read_parquet(path, columns=None, filters=None):
     return pq.read_table(path, columns=columns, filters=filters).to_pylist()
 
 
+def parquet_files(path):
+    """The .parquet files of a directory (recursively, sorted), or the path itself."""
+    path = Path(path)
+    if path.is_dir():
+        return sorted(p for p in path.rglob('*.parquet') if p.is_file())
+    return [path]
+
+
 def read_rows(path, wanted=None):
     """Rows of a .parquet, .json (one array) or .jsonl file, whichever the crawler wrote.
 
@@ -83,12 +91,23 @@ def read_rows(path, wanted=None):
 
 def write_parquet(path, rows, schema=None, compression='zstd'):
     """Write rows and verify the file reads back identical before returning."""
+    return write_table(path, pa.Table.from_pylist(rows, schema=schema), compression)
+
+
+def write_table(path, table, compression='zstd'):
+    """Write an Arrow table through a temporary file and compare it back in Arrow form.
+
+    Comparing Arrow tables, not Python lists, keeps the check at roughly the size of the data on a
+    corpus of hundreds of thousands of documents instead of several times it.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.Table.from_pylist(rows, schema=schema)
-    pq.write_table(table, path, compression=compression)
-    if pq.read_table(path).to_pylist() != rows:
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    pq.write_table(table, temporary, compression=compression)
+    if not pq.read_table(temporary).equals(table):
+        temporary.unlink(missing_ok=True)
         raise ValueError(f'Parquet round-trip mismatch: {path}')
+    os.replace(temporary, path)
     return path
 
 

@@ -4,6 +4,7 @@
     collect Turn a filled sheet into a label file.
     pseudo  Write circular labels from the pipeline's own output, for offline smoke runs.
     score   Score a submission with a label file and attribute every miss to a block.
+    calibrate  Fit per-language score->probability maps (Platt) for the F2 cut in Block D.
 """
 import argparse
 import json
@@ -69,9 +70,31 @@ def score(args):
     return metric_summary
 
 
+def calibrate(args):
+    from ..submission import calibrate as calibration
+    table, sources = label_tools.load_labels(args.labels)
+    if 'pseudo' in sources:
+        raise ValueError('Calibration on pseudo labels would fit the pipeline to itself; '
+                         'use human labels.')
+    records = [record for path in args.candidates for record in _records(path)]
+    result, counts = calibration.fit(records, table)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    storage.write_json(out / 'calibration.json', {'calibration': result, 'pairs': counts,
+                                                   'label_sources': sources,
+                                                   'candidates': [str(p) for p in args.candidates]})
+    emit(json.dumps({'calibration': result, 'pairs': counts}, ensure_ascii=False, indent=2))
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest='command', required=True)
+    step = sub.add_parser('calibrate', help='Fit score->probability maps from human labels.')
+    step.add_argument('--labels', default='work/eval/labels.jsonl')
+    step.add_argument('--candidates', nargs='+', default=['work/retrieval/candidates.jsonl'])
+    step.add_argument('--out', default='work/eval')
+    step.set_defaults(func=calibrate)
 
     step = sub.add_parser('sheet', help='Export candidates for human labelling.')
     step.add_argument('--candidates', default='work/retrieval/candidates.jsonl')

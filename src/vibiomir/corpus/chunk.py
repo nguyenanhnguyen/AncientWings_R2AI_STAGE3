@@ -62,16 +62,78 @@ def _subdivide(text, start, end, max_tokens):
     return result
 
 
-def plan_spans(text, target_tokens=320, overlap_tokens=64, max_tokens=1024, min_tokens=24):
-    """Pack contiguous segments into overlapping windows and return (start, end) spans."""
-    if not text:
-        return []
+def segment_spans(text, max_tokens):
+    """Paragraphs, with any paragraph over `max_tokens` split at sentences (then characters)."""
     segments = []
     for start, end in paragraph_spans(text):
         if count_tokens(text[start:end]) > max_tokens:
             segments.extend(_subdivide(text, start, end, max_tokens))
         else:
             segments.append((start, end))
+    return segments
+
+
+def lead_span(text, lead_tokens=160):
+    """(start, end) of the document opening: whole segments up to `lead_tokens`, at least one.
+
+    The opening carries the title-level topic of most health articles and, on Q&A pages, the
+    patient's question; it is what the document-level index (cards) embeds.
+    """
+    segments = segment_spans(text, lead_tokens) if text else []
+    if not segments:
+        return 0, 0
+    total, end = 0, segments[0][1]
+    for start, stop in segments:
+        size = count_tokens(text[start:stop])
+        if total and total + size > lead_tokens:
+            break
+        total += size
+        end = stop
+    return segments[0][0], end
+
+
+def expand_window(text, start, end, budget):
+    """Grow [start, end) by whole neighbouring segments while the span stays within `budget`.
+
+    The contest scores a submitted chunk by the share of the *reference* chunk it covers (LCS /
+    reference length) and counts precision per chunk, not per token. A wider window around the
+    passage the reranker liked can therefore only keep or raise its overlap, at no precision cost,
+    up to the ~1024 token advice. Growth alternates right then left so the passage stays near the
+    middle; the result is always an exact slice of `text` that contains [start, end).
+    """
+    if budget <= 0 or count_tokens(text[start:end]) >= budget:
+        return start, end
+    segments = segment_spans(text, budget)
+    if not segments:
+        return start, end
+    left = next((i for i, (_s, e) in enumerate(segments) if e > start), len(segments) - 1)
+    right = max((i for i, (s, _e) in enumerate(segments) if s < end), default=left)
+    left = min(left, right)
+    ws, we = min(start, segments[left][0]), max(end, segments[right][1])
+    if count_tokens(text[ws:we]) > budget:
+        ws, we = start, end
+    grow_right, grow_left = True, True
+    while grow_right or grow_left:
+        if grow_right:
+            if right + 1 < len(segments) and count_tokens(text[ws:segments[right + 1][1]]) <= budget:
+                right += 1
+                we = segments[right][1]
+            else:
+                grow_right = False
+        if grow_left:
+            if left - 1 >= 0 and count_tokens(text[segments[left - 1][0]:we]) <= budget:
+                left -= 1
+                ws = segments[left][0]
+            else:
+                grow_left = False
+    return ws, we
+
+
+def plan_spans(text, target_tokens=320, overlap_tokens=64, max_tokens=1024, min_tokens=24):
+    """Pack contiguous segments into overlapping windows and return (start, end) spans."""
+    if not text:
+        return []
+    segments = segment_spans(text, max_tokens)
     sizes = [count_tokens(text[start:end]) for start, end in segments]
     spans = []
     index = 0

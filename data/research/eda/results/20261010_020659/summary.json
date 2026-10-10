@@ -1,0 +1,295 @@
+{
+  "generated_at_utc": "2026-10-09T19:10:29.220834+00:00",
+  "inputs": [
+    "D:\\z_DaiHoc\\AncientWings_R2AI_STAGE3\\nguyen\\output",
+    "D:\\z_DaiHoc\\AncientWings_R2AI_STAGE3\\nguyen\\shards"
+  ],
+  "records_files_available": {
+    "nguyen\\output\\runs\\batch01_nguyen": 136926,
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": 87463,
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": 107229
+  },
+  "records_selected_for_analysis": 9000,
+  "records_parsed": 9000,
+  "json_parse_errors": 0,
+  "scan_mode": "evenly_spaced_sample",
+  "files_per_run_target": 3000,
+  "records_per_run": {
+    "nguyen\\output\\runs\\batch01_nguyen": 3000,
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": 3000,
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": 3000
+  },
+  "unique_ids_per_run": {
+    "nguyen\\output\\runs\\batch01_nguyen": 3000,
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": 3000,
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": 3000
+  },
+  "duplicate_ids_per_run": {},
+  "text_chars": {
+    "n": 8780,
+    "median": 931.0,
+    "p90": 4469.000000000004,
+    "p95": 5769.549999999992,
+    "max": 30652
+  },
+  "text_chars_by_run": {
+    "nguyen\\output\\runs\\batch01_nguyen": {
+      "n": 2780,
+      "median": 3165.5,
+      "p95": 7290.9999999999945,
+      "max": 30652
+    },
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": {
+      "n": 3000,
+      "median": 682.0,
+      "p95": 1967.349999999998,
+      "max": 12847
+    },
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": {
+      "n": 3000,
+      "median": 708.5,
+      "p95": 2269.5999999999967,
+      "max": 28132
+    }
+  },
+  "title_chars": {
+    "n": 8780,
+    "median": 16.0,
+    "p95": 73.0,
+    "max": 175
+  },
+  "title_chars_by_run": {
+    "nguyen\\output\\runs\\batch01_nguyen": {
+      "n": 2780,
+      "median": 54.0,
+      "p95": 94.0,
+      "max": 175
+    },
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": {
+      "n": 3000,
+      "median": 17.0,
+      "p95": 23.0,
+      "max": 35
+    },
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": {
+      "n": 3000,
+      "median": 11.0,
+      "p95": 16.0,
+      "max": 67
+    }
+  },
+  "approx_word_count": {
+    "median": 104.0,
+    "p95": 1252.0,
+    "max": 7022
+  },
+  "exact_text_duplicate_groups": 64,
+  "exact_text_duplicate_excess_records": 128,
+  "published_year_counts": {
+    "2004": 1,
+    "2005": 35,
+    "2006": 72,
+    "2007": 274,
+    "2008": 88,
+    "2009": 108,
+    "2010": 137,
+    "2011": 432,
+    "2012": 1899,
+    "2013": 112,
+    "2014": 87,
+    "2015": 1363,
+    "2016": 1857,
+    "2017": 76,
+    "2018": 82,
+    "2019": 80,
+    "2020": 117,
+    "2021": 265,
+    "2022": 251,
+    "2023": 291,
+    "2024": 242,
+    "2025": 586,
+    "2026": 325
+  },
+  "quality_flags": {
+    "domain_parser_fallback": 3001,
+    "short_text": 148,
+    "redirect_review": 45,
+    "repeated_lines": 24,
+    "low_letter_ratio": 4
+  },
+  "global_counts": {
+    "status:extracted": 8780,
+    "quality_status:accepted": 5576,
+    "extractor:trafilatura": 6530,
+    "access_status:VAO_DUOC": 8780,
+    "domain:suckhoedoisong.vn": 738,
+    "quality_status:review": 3204,
+    "domain:suckhoeviet.org.vn": 123,
+    "domain:tamanhhospital.vn": 93,
+    "domain:thanhnien.vn": 778,
+    "domain:thaythuocvietnam.vn": 65,
+    "status:unsupported_content_type": 5,
+    "quality_status:missing": 220,
+    "extractor:missing": 220,
+    "access_status:KHONG_VAO_DUOC": 220,
+    "domain:tiemchunglongchau.com.vn": 290,
+    "domain:tienphong.vn": 67,
+    "domain:tuoitre.vn": 85,
+    "domain:vietnamnet.vn": 340,
+    "domain:vnexpress.net": 45,
+    "status:robots_denied": 215,
+    "domain:vov.vn": 215,
+    "domain:vov2.vov.vn": 151,
+    "domain:www.pharmacity.vn": 1,
+    "domain:www.qdnd.vn": 4,
+    "domain:www.sggp.org.vn": 4,
+    "extractor:120ask_qa_dom_v1": 1,
+    "domain:www.120ask.com": 1,
+    "domain:www.cnkang.com": 5250,
+    "extractor:cnkang_article_dom_v1": 2249,
+    "domain:www.wujue.com": 750
+  },
+  "runs": {
+    "nguyen\\output\\runs\\batch01_nguyen": {
+      "status:extracted": 2780,
+      "quality:accepted": 2713,
+      "extractor:trafilatura": 2779,
+      "access:VAO_DUOC": 2780,
+      "with_text": 2780,
+      "with_title": 2780,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 1,
+      "language_hint:vi_hint": 2779,
+      "question_mark_lines": 2149,
+      "records_with_question_mark_line": 846,
+      "records_with_qa_role_marker": 62,
+      "heading_like_lines": 1780,
+      "quality:review": 67,
+      "status:unsupported_content_type": 5,
+      "quality:missing": 220,
+      "extractor:missing": 220,
+      "access:KHONG_VAO_DUOC": 220,
+      "language_hint:missing": 220,
+      "status:robots_denied": 215,
+      "extractor:120ask_qa_dom_v1": 1,
+      "language_hint:zh_hint": 1
+    },
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": {
+      "status:extracted": 3000,
+      "quality:review": 3000,
+      "extractor:trafilatura": 3000,
+      "access:VAO_DUOC": 3000,
+      "with_text": 3000,
+      "with_title": 3000,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 2999,
+      "language_hint:zh_hint": 3000,
+      "question_mark_lines": 2007,
+      "records_with_question_mark_line": 910,
+      "records_with_qa_role_marker": 105,
+      "heading_like_lines": 1584
+    },
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": {
+      "status:extracted": 3000,
+      "quality:accepted": 2863,
+      "extractor:cnkang_article_dom_v1": 2249,
+      "access:VAO_DUOC": 3000,
+      "with_text": 3000,
+      "with_title": 3000,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 2996,
+      "language_hint:zh_hint": 2997,
+      "question_mark_lines": 1112,
+      "records_with_question_mark_line": 610,
+      "records_with_qa_role_marker": 99,
+      "heading_like_lines": 1293,
+      "quality:review": 137,
+      "extractor:trafilatura": 751,
+      "language_hint:latin_or_unknown": 3
+    }
+  },
+  "top_domains_by_run": {
+    "nguyen\\output\\runs\\batch01_nguyen": {
+      "thanhnien.vn": 778,
+      "suckhoedoisong.vn": 738,
+      "vietnamnet.vn": 340,
+      "tiemchunglongchau.com.vn": 290,
+      "vov.vn": 215,
+      "vov2.vov.vn": 151,
+      "suckhoeviet.org.vn": 123,
+      "tamanhhospital.vn": 93,
+      "tuoitre.vn": 85,
+      "tienphong.vn": 67,
+      "thaythuocvietnam.vn": 65,
+      "vnexpress.net": 45,
+      "www.qdnd.vn": 4,
+      "www.sggp.org.vn": 4,
+      "www.pharmacity.vn": 1,
+      "www.120ask.com": 1
+    },
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": {
+      "www.cnkang.com": 3000
+    },
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": {
+      "www.cnkang.com": 2250,
+      "www.wujue.com": 750
+    }
+  },
+  "potential_issue_counts": {
+    "nguyen\\output\\runs\\batch01_nguyen": {
+      "with_text": 2780,
+      "with_title": 2780,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 1,
+      "question_mark_lines": 2149,
+      "records_with_question_mark_line": 846,
+      "records_with_qa_role_marker": 62,
+      "heading_like_lines": 1780
+    },
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": {
+      "with_text": 3000,
+      "with_title": 3000,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 2999,
+      "question_mark_lines": 2007,
+      "records_with_question_mark_line": 910,
+      "records_with_qa_role_marker": 105,
+      "heading_like_lines": 1584
+    },
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": {
+      "with_text": 3000,
+      "with_title": 3000,
+      "decode_warning": 0,
+      "replacement_char": 0,
+      "mojibake_suspect": 0,
+      "html_residue_suspect": 0,
+      "cjk_dominant_text": 2996,
+      "question_mark_lines": 1112,
+      "records_with_question_mark_line": 610,
+      "records_with_qa_role_marker": 99,
+      "heading_like_lines": 1293
+    }
+  },
+  "raw_path_record_counts": {
+    "nguyen\\output\\runs\\batch01_nguyen": 2785,
+    "nguyen\\shards\\shard_01\\runs\\shard_01_ids_1525844_1775843": 3000,
+    "nguyen\\shards\\shard_02\\runs\\shard_02_ids_1775844_2025843": 3000
+  },
+  "strata_count": 27,
+  "sample_per_stratum_cap": 30
+}

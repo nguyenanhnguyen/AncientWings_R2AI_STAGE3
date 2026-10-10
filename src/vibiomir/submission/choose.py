@@ -15,10 +15,23 @@ the default.
 Two limits pull the other way. Several overlapping windows of one document tend to match the same
 reference chunk, so they add nothing to recall while each one costs precision — that is what
 `chunk_per_doc` caps. And the submission has to stay a reasonable file size.
+
+Profile `f2` (the default of the pipeline) applies that break-even rule directly instead of score
+ratios: candidates are sorted by probability p, and one more is taken while
+p > S / (4G + k), where S is the probability mass already taken, k the number taken and G the
+expected number of relevant items (all candidates' mass plus `missing`, the mass the retrieval is
+believed to have missed). This is the F-beta generalisation of the optimal threshold result of
+Lipton, Elkan and Narayanaswamy (2014): with calibrated probabilities the best cut is F*/(1+b^2),
+i.e. F2*/5. Probabilities come from `calibrate.py`; without a calibration file the reranker score
+is used as is, and the min/max bounds keep the lists sane.
 """
 from ..retrieval.rerank import adaptive_cutoff
+from . import calibrate
 
 PROFILES = {
+    # chunk_max bounds the file: 1.200 queries x 15 windows of ~750 tokens is already ~60 MB JSON.
+    'f2': {'doc_min': 1, 'doc_max': 20, 'chunk_min': 1, 'chunk_max': 15, 'chunk_per_doc': 2,
+           'missing': 0.0, 'doc_ratio': 0.0, 'chunk_ratio': 0.0},
     # doc_min/doc_max bound the document list; *_ratio keeps a candidate whose score is at least
     # that fraction of the query's best score.
     'recall': {'doc_min': 5, 'doc_max': 25, 'doc_ratio': 0.25,
@@ -63,8 +76,68 @@ def _candidate_score(candidate):
     return candidate['ce_score'] if candidate.get('ce_score') is not None else candidate['rrf_score']
 
 
+def f2_cut(probabilities, minimum, maximum, missing=0.0):
+    """How many of the descending `probabilities` maximise expected F2 (see module docstring)."""
+    expected = sum(probabilities) + max(0.0, missing)
+    taken, mass = 0, 0.0
+    for p in probabilities[:maximum]:
+        if taken >= minimum and p <= mass / (4 * expected + taken):
+            break
+        taken += 1
+        mass += p
+    return taken
+
+
+def _probabilities(candidates, calibration):
+    """Calibrated probability per candidate. Candidates without a reranker score fall back to
+    their RRF score relative to the query's best, halved: an admittedly rough stand-in."""
+    best_rrf = max((c['rrf_score'] for c in candidates if c.get('ce_score') is None), default=0)
+    result = []
+    for candidate in candidates:
+        if candidate.get('ce_score') is not None:
+            result.append(calibrate.apply(candidate['ce_score'], candidate.get('lang'), calibration))
+        else:
+            result.append(0.5 * candidate['rrf_score'] / best_rrf if best_rrf > 0 else 0.0)
+    return result
+
+
+def _select_f2(record, settings):
+    candidates = record.get('candidates') or []
+    probabilities = _probabilities(candidates, settings.get('calibration'))
+    order = sorted(range(len(candidates)), key=lambda i: -probabilities[i])
+
+    eligible, per_doc = [], {}
+    for i in order:
+        doc_id = int(candidates[i]['doc_id'])
+        if per_doc.get(doc_id, 0) >= settings['chunk_per_doc']:
+            continue
+        per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+        eligible.append(i)
+    keep = f2_cut([probabilities[i] for i in eligible], settings['chunk_min'],
+                  settings['chunk_max'], settings.get('missing', 0.0))
+    chunks = [{'doc_id': int(candidates[i]['doc_id']), 'chunk_id': candidates[i]['chunk_id'],
+               'chunk_order': int(candidates[i]['chunk_order']),
+               'score': round(probabilities[i], 6)} for i in eligible[:keep]]
+
+    # A document is as likely relevant as its most convincing chunk.
+    doc_prob = {}
+    for i in order:
+        doc_prob.setdefault(int(candidates[i]['doc_id']), probabilities[i])
+    ranked_docs = sorted(doc_prob, key=lambda d: (-doc_prob[d], d))
+    keep_docs = f2_cut([doc_prob[d] for d in ranked_docs], settings['doc_min'],
+                       settings['doc_max'], settings.get('missing', 0.0))
+    doc_ids = ranked_docs[:keep_docs]
+    if settings['sync_docs']:
+        for chunk in chunks:
+            if chunk['doc_id'] not in doc_ids:
+                doc_ids.append(chunk['doc_id'])
+    return doc_ids, chunks
+
+
 def select_for_query(record, settings):
     """-> (doc_ids, chunks) for one retrieval record. Chunks keep doc_id and chunk_order."""
+    if settings['profile'] == 'f2':
+        return _select_f2(record, settings)
     candidates = sorted(record.get('candidates') or [], key=_candidate_score, reverse=True)
     chunk_scores = [_candidate_score(candidate) for candidate in candidates]
     limit = settings['chunk_max']

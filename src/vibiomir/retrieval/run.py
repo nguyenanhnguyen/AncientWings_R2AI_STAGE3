@@ -1,5 +1,12 @@
 """Block C CLI: retrieve and rerank candidates for every query.
 
+The same command serves both cascade stages: over document cards (identity reranker, the output
+is each query's ranked documents) and over the chunks of those documents (`--doc-candidates` adds
+the card ranking as a fusion channel, one reranker scores the fused list). With
+`--match-language` the reranker reads a Chinese chunk next to the Chinese translation of the
+question, turning the costliest step into a same-language judgement. `--shard i --shards n` splits
+the queries so two GPUs can work at once; Block D accepts the shard files together.
+
 All query variants are encoded and searched in one pass. The vector matrix is read from disk, so
 searching per query would re-read the whole file 1.200 times; searching once for every query reads
 it once. BM25 is per query because it only touches the postings of the query's own terms.
@@ -41,17 +48,63 @@ def _check_pair(chunks_path, index_dir, names=('bm25_manifest.json', 'dense_mani
                 raise ValueError(f'{name} was built from a different chunks file; rebuild Block B.')
 
 
+def _card_rankings(path, doc_ids, chunk_orders, top_k):
+    """{query id: (rows, scores)}: chunks of each query's card-ranked documents, in that order.
+
+    The document ranking from the card stage becomes one more RRF channel at chunk level, so a
+    document the cards placed first lifts all of its chunks, the way a strong title match should.
+    """
+    order = np.lexsort((chunk_orders, doc_ids))
+    rows_by_doc = {}
+    for row in order.tolist():
+        rows_by_doc.setdefault(int(doc_ids[row]), []).append(row)
+    rankings = {}
+    for record in storage.iter_jsonl(path):
+        rows = []
+        for doc_id in record['doc_ids']:
+            rows.extend(rows_by_doc.get(int(doc_id), ()))
+            if len(rows) >= top_k:
+                break
+        rows = rows[:top_k]
+        rankings[int(record['query_id'])] = (rows, np.linspace(1.0, 0.0, num=len(rows),
+                                                               dtype=np.float32))
+    return rankings
+
+
+def _shard(queries, args):
+    shards, shard = getattr(args, 'shards', 1) or 1, getattr(args, 'shard', 0) or 0
+    if not 0 <= shard < shards:
+        raise ValueError('--shard must be in [0, --shards).')
+    return [query for position, query in enumerate(queries) if position % shards == shard]
+
+
+def _rerank_query(query, table, language, match):
+    """The wording the reranker reads for a chunk: the translation in the chunk's language when
+    one exists and matching is on, else the original Vietnamese question."""
+    if match and language in ('zh', 'en'):
+        return table.get(f'translated_{language}') or query['query']
+    return query['query']
+
+
 def run(args):
     started_all = time.monotonic()
+    match = getattr(args, 'match_language', False)
     chunks = storage.read_parquet(args.chunks)
     if not chunks:
         raise ValueError(f'No chunks in {args.chunks}')
     index_dir = Path(args.index)
     _check_pair(args.chunks, index_dir)
-    queries = load_queries(args.queries)
-    translations = load_translations(args.translations, queries) if args.translations else None
+    all_queries = load_queries(args.queries)
+    queries = _shard(all_queries, args)
+    translations = load_translations(args.translations, all_queries) if args.translations else None
     doc_ids = np.array([chunk['doc_id'] for chunk in chunks], dtype=np.int64)
     texts = [retrieval_text(chunk) for chunk in chunks]
+    languages = [chunk.get('lang') or 'unknown' for chunk in chunks]
+    card_hits = {}
+    if getattr(args, 'doc_candidates', None):
+        card_hits = _card_rankings(args.doc_candidates, doc_ids,
+                                   np.array([chunk['chunk_order'] for chunk in chunks]),
+                                   args.top_k)
 
     bm25 = None
     if not args.no_bm25:
@@ -131,6 +184,8 @@ def run(args):
                     rankings[f'bm25:{name}'] = (hit_rows, hit_scores)
         for name, hit in dense_hits.get(query['id'], {}).items():
             rankings[f'dense:{name}'] = hit
+        if card_hits.get(query['id']) and card_hits[query['id']][0]:
+            rankings['card'] = card_hits[query['id']]
         fused = hybrid.rrf_fuse(rankings, weights=weights, top_k=args.fuse_k)
         cap = getattr(args, 'candidate_per_doc', 0)
         if cap:
@@ -160,18 +215,26 @@ def run(args):
             try:
                 for qi, (query, fused) in enumerate(zip(queries, fused_queries)):
                     passages = [texts[row] for row, _, _ in fused]
+                    asked = [_rerank_query(query, variant_tables[query['id']], languages[row],
+                                           match) for row, _, _ in fused]
                     keys = [cache_key({'model': info, 'version': 3,
-                                       'query': query['query'], 'text': text,
-                                       'instruction': INSTRUCTION}) for text in passages]
+                                       'query': question, 'text': text,
+                                       'instruction': INSTRUCTION})
+                            for question, text in zip(asked, passages)]
                     values = [cache.get(key) for key in keys] if name != 'identity' else [None]*len(keys)
                     missing = [i for i, value in enumerate(values) if value is None]
-                    if missing:
-                        fresh = scorer.score(query['query'], [passages[i] for i in missing],
+                    # One call per query wording: Chinese chunks with the Chinese question, etc.
+                    for question in dict.fromkeys(asked[i] for i in missing):
+                        group = [i for i in missing if asked[i] == question]
+                        fresh = scorer.score(question, [passages[i] for i in group],
                                              batch_size=args.rerank_batch)
-                        for i, value in zip(missing, fresh):
+                        if name == 'identity':
+                            # Identity keeps the fused order across the whole list.
+                            fresh = np.linspace(1.0, 0.0, num=len(passages))[group]
+                        for i, value in zip(group, fresh):
                             values[i] = float(value)
-                        if name != 'identity':
-                            cache.put_many([(keys[i], values[i]) for i in missing])
+                    if missing and name != 'identity':
+                        cache.put_many([(keys[i], values[i]) for i in missing])
                     all_scores[qi].append(values)
                     progress(qi+1, len(queries))
             finally:
@@ -192,7 +255,7 @@ def run(args):
             'query_id': query['id'],
             'query': query['query'],
             'candidates': [{'chunk_id': chunks[row]['chunk_id'], 'doc_id': int(doc_ids[row]),
-                            'chunk_order': chunks[row]['chunk_order'],
+                            'chunk_order': chunks[row]['chunk_order'], 'lang': languages[row],
                             'rrf_score': round(float(fused_score), 6),
                             'ce_score': None if ce is None else round(float(ce), 6),
                             'channels': channels}
@@ -223,6 +286,10 @@ def run(args):
         'translations_sha256': storage.sha256_file(args.translations) if args.translations else None,
         'queries_sha256': storage.sha256_file(args.queries),
         'candidate_per_doc': getattr(args, 'candidate_per_doc', 0),
+        'match_language': match,
+        'doc_candidates': str(args.doc_candidates) if getattr(args, 'doc_candidates', None) else None,
+        'shard': [getattr(args, 'shard', 0) or 0, getattr(args, 'shards', 1) or 1],
+        'queries_total': len(all_queries),
         'top_k': args.top_k, 'fuse_k': args.fuse_k, 'rerank_k': args.rerank_k, 'keep': args.keep,
         'weights': weights,
         'candidates_median': int(np.median([len(row['candidates']) for row in results])),
@@ -260,6 +327,12 @@ def main():
     parser.add_argument('--keyword-variant', action='store_true',
                         help='Also search a filler-stripped query with BM25.')
     parser.add_argument('--translations', default=None, help='JSONL of prepared query translations.')
+    parser.add_argument('--doc-candidates', default=None,
+                        help='doc_candidates.jsonl from `cards.py subset`: adds the "card" channel.')
+    parser.add_argument('--match-language', action='store_true',
+                        help='Rerank Chinese/English chunks with the translated question.')
+    parser.add_argument('--shard', type=int, default=0, help='Process queries i, i+n, ...')
+    parser.add_argument('--shards', type=int, default=1, help='...out of n (one per GPU).')
     parser.add_argument('--no-bm25', action='store_true')
     parser.add_argument('--no-dense', action='store_true')
     parser.add_argument('--faiss', action='store_true', help='Use faiss.index when present.')
@@ -273,6 +346,8 @@ def main():
         parser.error('Counts, batches and search blocks must be positive.')
     if args.candidate_per_doc < 0:
         parser.error('--candidate-per-doc must be nonnegative.')
+    if not 0 <= args.shard < args.shards:
+        parser.error('Require 0 <= --shard < --shards.')
     if args.no_bm25 and args.no_dense:
         parser.error('At least one of BM25 or dense retrieval must stay enabled.')
     if args.keep > args.rerank_k:

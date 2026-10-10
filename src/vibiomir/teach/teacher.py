@@ -58,7 +58,7 @@ class VllmTeacher:
 class HfTeacher:
     """bitsandbytes 4-bit over every visible GPU. Use only when vLLM cannot start."""
 
-    def __init__(self, config, max_model_len, batch=2, reserve_gib=3.0):
+    def __init__(self, config, max_model_len, batch=2, reserve_gib=1.5):
         # Must be set before the first CUDA allocation; reduces fragmentation OOMs.
         os.environ.setdefault('PYTORCH_CUDA_ALLOC_CONF', 'expandable_segments:True')
         import torch
@@ -67,12 +67,14 @@ class HfTeacher:
         self.torch, self.batch, self.max_model_len = torch, batch, max_model_len
         self.tokenizer = AutoTokenizer.from_pretrained(config['hf_id'])
         self.tokenizer.padding_side = 'left'
-        # device_map='auto' alone fills a card to the brim with weights and leaves nothing for
-        # activations or for bitsandbytes' dequantise fallback on T4, so cap each GPU.
+        # 'auto' fills the first card to the brim and leaves nothing for activations or for
+        # bitsandbytes' dequantise fallback on T4. 'balanced' splits the layers evenly, and the cap
+        # keeps headroom on each card. transformers takes a further 10% off max_memory for 4-bit,
+        # so the reserve stays small: too large and the model no longer fits on GPU at all.
         max_memory = {i: f'{torch.cuda.get_device_properties(i).total_memory / 2**30 - reserve_gib:.1f}GiB'
                       for i in range(torch.cuda.device_count())}
         self.model = AutoModelForCausalLM.from_pretrained(
-            config['hf_id'], device_map='auto', max_memory=max_memory, torch_dtype=torch.float16,
+            config['hf_id'], device_map='balanced', max_memory=max_memory, torch_dtype=torch.float16,
             quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4',
                                                    bnb_4bit_use_double_quant=True,
                                                    bnb_4bit_compute_dtype=torch.float16)).eval()
