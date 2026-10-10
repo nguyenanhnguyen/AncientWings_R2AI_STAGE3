@@ -111,6 +111,22 @@ class Runner:
         return [sys.executable, '-X', 'utf8', '-u', str(ROOT/'scripts'/'vibiomir.py'),
                 *map(str, command)]
 
+    def _reuse_frozen_corpus(self, state, step):
+        if not getattr(self, 'reuse_corpus', False) or step['name'] != 'prepare':
+            return False
+        old = state.get('command', [])
+        if len(old) > 4 and Path(old[4]).name == 'prepare.py':
+            old_options = old[5:]
+        elif len(old) > 5 and Path(old[4]).name == 'vibiomir.py' and old[5] == 'prepare':
+            old_options = old[6:]
+        else:
+            return False
+        if old_options != list(map(str, step['command'][1:])):
+            return False
+        recorded = state.get('outputs', {})
+        return (set(recorded) == {str(p) for p in step['outputs']}
+                and all(Path(p).is_file() and self._sha(p) == digest for p, digest in recorded.items()))
+
     def step(self, name, command, inputs, outputs, gpu=None):
         self.parallel([{'name': name, 'command': command, 'inputs': inputs,
                         'outputs': outputs, 'gpu': gpu}])
@@ -134,6 +150,10 @@ class Runner:
                     emit(f"[{step['name']}] Dùng lại kết quả đã kiểm tra SHA-256.")
                     continue
                 if step['name'] == 'prepare':
+                    if self._reuse_frozen_corpus(state, step):
+                        emit('[prepare] Reusing frozen corpus: options and output SHA-256 verified; '
+                             'preparation code may differ (--reuse-corpus).')
+                        continue
                     # The source is live. Re-running prepare would change the population mid-run.
                     raise ValueError('Frozen corpus/config changed. Choose a new --out to take a '
                                      'new snapshot.')
@@ -233,6 +253,7 @@ def run(args):
     gpus = list(range(args.gpus))
     device = 'cuda' if gpus else 'cpu'
     r = Runner(out, args.dry_run)
+    r.reuse_corpus = getattr(args, 'reuse_corpus', False)
     if args.source == ['hf']:
         corpus_dir, fetched_queries, fetched_links = _fetch(r, args, out)
         source = [str(corpus_dir)]
@@ -359,6 +380,9 @@ def parse_args(argv=None):
     from .retrieval.translate import MODELS
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--profile', choices=sorted(PROFILES), default='local')
+    p.add_argument('--reuse-corpus', action='store_true',
+                   help='Reuse a completed frozen prepare snapshot after code/CLI changes, '
+                        'only if source/options and all recorded output hashes still match.')
     p.add_argument('--source', nargs='+', default=None,
                    help="Local crawl folders (nguyen, a run directory) or parquet folders; or 'hf' "
                         'to download the team corpus and BTC files from Hugging Face and pin the '
