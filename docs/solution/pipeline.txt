@@ -226,14 +226,14 @@ KHOẢNG TRỐNG: CODE CHƯA CÓ
 
 Code hiện chạy được cho khâu zero-shot A4 → E trên một máy. Những việc sau **chưa được viết** và cần làm trước khi dùng Kaggle thật theo chiến lược trên:
 
-1. **Chia shard encode theo card và theo phiên, có resume.** `scripts/index.py dense` mã hóa toàn bộ trong một lần và chưa có cờ chọn khoảng hàng; chưa có bước gộp file embedding rời.
+1. **Chia shard encode theo card và theo phiên, có resume.** `scripts/vibiomir.py index dense` mã hóa toàn bộ trong một lần và chưa có cờ chọn khoảng hàng; chưa có bước gộp file embedding rời.
 2. **Chia truy vấn cho hai card khi rerank**, và gộp `candidates.jsonl`.
 3. **Cache điểm rerank** theo (model, query, chunk).
 4. **Host teacher** (T1): script tải model 4-bit, chia hai card, đo thông lượng.
 5. **Sinh dữ liệu teacher** (T2): câu hỏi tổng hợp, điểm liên quan, bản dịch truy vấn; mỗi loại có prompt và manifest.
 6. **Huấn luyện chưng cất** (T3) cho reranker và embedding.
 7. **Quản lý kho artifact:** đặt tên theo khóa, ghi manifest, kiểm tra khóa khi tải lại.
-8. **Dev do người gán nhãn đã có công cụ** (`scripts/evaluate.py sheet` và `collect`), nhưng chưa có ai gán nhãn.
+8. **Dev do người gán nhãn đã có công cụ** (`scripts/vibiomir.py evaluate sheet` và `collect`), nhưng chưa có ai gán nhãn.
 9. **Chưa đo tốc độ thật** ở bất kỳ khâu nào. Các giả định về giờ GPU trong file này phải được thay bằng số đo từ B0 và T1.
 
 
@@ -269,7 +269,7 @@ Quy tắc của ART: mỗi artifact có khóa (hash đầu vào, tên model, tha
 | A1 | Crawl theo ưu tiên, lưu HTML thô và bằng chứng truy cập | Đợt ID (batches/batch_XX.parquet) | records/<id>.json, raw/ (gzip), robots/ | L hoặc K | crawl.py, notebooks/crawl_corpus_kaggle_hf_upload.ipynb | Có | Giữ raw để trích xuất lại mà không crawl lại. Tôn trọng robots.txt khi RESPECT_ROBOTS = True. Dừng và chạy lại được nhờ checkpoint. |
 | A2 | Trích xuất nội dung có cấu trúc: tiêu đề, văn bản chính, ngày đăng | Raw HTML hoặc PDF | title, text, published_at, extractor | L | extract.py (trafilatura, quy tắc riêng từng site), reextract.py | Có | Trích lại offline khi đổi parser. Chưa lấy categories, description, canonical_url. Có thể lẫn tiêu đề bài liên quan (nhiễu). |
 | A3 | Ngôn ngữ, chất lượng, nhóm trùng | Văn bản đã trích xuất | quality_status, lang, canonical_id | L | quality.py, merge.py (duplicates.parquet), detect_language trong src/vibiomir/common/schema.py | Một phần | Ngôn ngữ chỉ dò theo chữ viết, không phải model nhận diện. Trùng lặp mới so khớp văn bản đã chuẩn hóa, chưa bắt trùng gần đúng. |
-| A4 | Chia đoạn, giữ ID và vị trí nguồn | Corpus đã lọc | chunks.parquet: chunk_id, doc_id, char_start, char_end, text | L | scripts/chunk.py, src/vibiomir/corpus/chunk.py | Có | Mỗi chunk là một đoạn liên tục của văn bản gốc. Tham số: target_tokens, overlap_tokens. Vị trí ký tự giúp D2 lấy lại đúng đoạn nguồn. |
+| A4 | Chia đoạn, giữ ID và vị trí nguồn | Corpus đã lọc | chunks.parquet: chunk_id, doc_id, char_start, char_end, text | L | scripts/vibiomir.py chunk, src/vibiomir/corpus/chunk.py | Có | Mỗi chunk là một đoạn liên tục của văn bản gốc. Tham số: target_tokens, overlap_tokens. Vị trí ký tự giúp D2 lấy lại đúng đoạn nguồn. |
 
 Thứ tự chạy: A0 → A1 → A2 → A3 → A4, theo đợt. Không để hai người crawl cùng một domain lớn.
 
@@ -287,7 +287,7 @@ Thứ tự chạy: A0 → A1 → A2 → A3 → A4, theo đợt. Không để hai
 | Mã | Việc làm | Đầu vào | Đầu ra | Nơi chạy | Code hiện tại | Trạng thái | Ghi chú |
 |---|---|---|---|---|---|---|---|
 | B0 | Chọn model, đo chi phí (thời gian, bộ nhớ), chốt cấu hình | Model ứng viên, mẫu chunk nhỏ | Cấu hình đã chốt, số đo thật | L (thử), K (đo) | Chưa có quy trình đo | Chưa | Thay các con số ước lượng trong file bằng số đo. Kiểm tra model phát hành trước 01/08/2026 và ≤15B. |
-| B1 | BM25 với xử lý từng ngôn ngữ (CJK tách unigram + bigram) | chunks.parquet | Chỉ mục BM25, bm25_manifest.json | L | src/vibiomir/index/bm25.py, src/vibiomir/index/build.py, scripts/index.py | Có | Rẻ, dựng lại được. Đổi tokenizer thì phải dựng lại. Khóa: hash chunks, k1, b. |
+| B1 | BM25 với xử lý từng ngôn ngữ (CJK tách unigram + bigram) | chunks.parquet | Chỉ mục BM25, bm25_manifest.json | L | src/vibiomir/index/bm25.py, src/vibiomir/index/build.py, scripts/vibiomir.py index | Có | Rẻ, dựng lại được. Đổi tokenizer thì phải dựng lại. Khóa: hash chunks, k1, b. |
 | B2 | Embedding theo shard và chỉ mục vector (mặc định bge-m3, 568M) | chunks.parquet | Vector theo shard, dense_manifest.json | K | src/vibiomir/index/embedding.py, src/vibiomir/index/build.py | Một phần | Khâu tốn GPU nhất. Chưa có chia shard theo phiên và gộp file. Đổi model là phải encode lại toàn bộ. |
 
 ## Khối C — Truy xuất xuyên ngôn ngữ (chủ yếu K, model student khi có)
@@ -295,7 +295,7 @@ Thứ tự chạy: A0 → A1 → A2 → A3 → A4, theo đợt. Không để hai
 | Mã | Việc làm | Đầu vào | Đầu ra | Nơi chạy | Code hiện tại | Trạng thái | Ghi chú |
 |---|---|---|---|---|---|---|---|
 | C1 | Đưa truy vấn gốc vào, và bản dịch nếu bật | query.parquet, bản dịch (nếu có) | Truy vấn cho từng kênh | K hoặc L | src/vibiomir/retrieval/query.py, cờ --translations | Một phần | Bản dịch chưa có. Cần chạy một lần và lưu cache. |
-| C2 | Tìm kiếm lexical (BM25) và dense, hợp nhất bằng RRF | Chỉ mục B1, B2, truy vấn C1 | candidates.jsonl: query_id, chunk_id, rrf_score, channels | L hoặc K | src/vibiomir/retrieval/hybrid.py, src/vibiomir/retrieval/run.py, scripts/retrieve.py | Có | RRF hằng số 60. Trọng số kênh chỉnh bằng --weights trên dev. Chạy lại không cần encode lại. |
+| C2 | Tìm kiếm lexical (BM25) và dense, hợp nhất bằng RRF | Chỉ mục B1, B2, truy vấn C1 | candidates.jsonl: query_id, chunk_id, rrf_score, channels | L hoặc K | src/vibiomir/retrieval/hybrid.py, src/vibiomir/retrieval/run.py, scripts/vibiomir.py retrieve | Có | RRF hằng số 60. Trọng số kênh chỉnh bằng --weights trên dev. Chạy lại không cần encode lại. |
 | C3 | Rerank đa ngôn ngữ cho top-k ứng viên | candidates.jsonl, chunk | Điểm ce_score, thứ hạng cuối | K | src/vibiomir/retrieval/rerank.py | Có | Tốn GPU theo số cặp = số truy vấn × --rerank-k. Nên cache điểm theo phiên bản model. |
 
 ## Khối D — Bằng chứng và bài nộp (L, không cần GPU)
@@ -304,13 +304,13 @@ Thứ tự chạy: A0 → A1 → A2 → A3 → A4, theo đợt. Không để hai
 |---|---|---|---|---|---|---|---|
 | D1 | Chọn tài liệu và đoạn làm bằng chứng theo profile recall, balanced, precision | candidates.jsonl | relevant_docs và relevant_chunks đã chọn | L | src/vibiomir/submission/choose.py, cờ --adaptive | Có | Chỉ chạy lại khâu này khi đổi ngưỡng, không cần retrieve lại. |
 | D2 | Lấy lại đoạn nguồn bằng char_start/char_end và kiểm tra | Lựa chọn từ D1, corpus | chunk_text khớp đúng với nguồn | L | src/vibiomir/submission/export.py, src/vibiomir/submission/validate.py | Có | Ràng buộc BTC: chunk_text phải là văn bản trích xuất, không viết lại. Khâu này đảm bảo điều đó. |
-| D3 | Ghi JSON, đóng ZIP, kiểm tra lại | Kết quả D2 | submission.zip chỉ chứa một file JSON | L | src/vibiomir/submission/build.py, scripts/submit.py | Có | ZIP chỉ một file, không nằm trong thư mục con. Thiếu câu hỏi thì không được chấm. Tối đa 10 lần nộp/ngày/đội. |
+| D3 | Ghi JSON, đóng ZIP, kiểm tra lại | Kết quả D2 | submission.zip chỉ chứa một file JSON | L | src/vibiomir/submission/build.py, scripts/vibiomir.py submit | Có | ZIP chỉ một file, không nằm trong thư mục con. Thiếu câu hỏi thì không được chấm. Tối đa 10 lần nộp/ngày/đội. |
 
 ## Khối E — Đo lường và cải thiện (L)
 
 | Mã | Việc làm | Đầu vào | Đầu ra | Nơi chạy | Code hiện tại | Trạng thái | Ghi chú |
 |---|---|---|---|---|---|---|---|
-| E1 | Dev do người gán nhãn, độc lập với teacher | Mẫu truy vấn và ứng viên | Nhãn dev do người viết | L | scripts/evaluate.py sheet và collect | Một phần (công cụ có, chưa có nhãn) | Điểm tựa để kiểm tra mọi thay đổi. Đo bằng nhãn teacher chỉ cho biết mức bắt chước. |
+| E1 | Dev do người gán nhãn, độc lập với teacher | Mẫu truy vấn và ứng viên | Nhãn dev do người viết | L | scripts/vibiomir.py evaluate sheet và collect | Một phần (công cụ có, chưa có nhãn) | Điểm tựa để kiểm tra mọi thay đổi. Đo bằng nhãn teacher chỉ cho biết mức bắt chước. |
 | E2 | Đo chất lượng, độ phủ và chi phí | Kết quả C, D và nhãn E1 | Precision, Recall, F2 ở cấp document và chunk; EVAL_REPORT.md | L | src/vibiomir/evaluation/metrics.py, labels.py, errors.py, run.py | Có | Báo cáo chỉ ra lỗi thuộc not_crawled, not_retrieved hay not_selected. Ba loại này cần hướng xử lý khác nhau. |
 | E3 | Quyết định giữ zero-shot hay dùng student | So sánh E2 giữa các cấu hình | Quyết định có lý do | Người phụ trách | — | Quy trình | Chỉ nhận thay đổi khi thắng zero-shot trên dev người gán nhãn. Không có bằng chứng thì giữ zero-shot. |
 

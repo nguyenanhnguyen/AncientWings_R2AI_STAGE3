@@ -2,7 +2,7 @@
 
 Teacher `Qwen3-32B-AWQ` tự viết dữ liệu huấn luyện từ corpus, rồi các student ≤15B học lại ba vai trò đang dùng model trong pipeline: **reranker**, **embedding** và **dịch query**. BTC đã xác nhận được dùng teacher lớn hơn 15B nếu nó chỉ chạy lúc huấn luyện (`docs/note/Q&A, tools.txt`, câu 3). Teacher không bao giờ nhìn thấy 1.200 query test.
 
-Code nằm trong [src/vibiomir/teach/](../../src/vibiomir/teach), gọi qua `scripts/teach.py`. Notebook Kaggle: [teach_kaggle.ipynb](teach_kaggle.ipynb).
+Code nằm trong [src/vibiomir/teach/](../../src/vibiomir/teach), gọi qua `scripts/vibiomir.py teach`. Notebook Kaggle: [teach_kaggle.ipynb](teach_kaggle.ipynb).
 
 ## Luồng
 
@@ -18,11 +18,11 @@ chunks.parquet ─T1 sample─▶ seeds.jsonl ─T2 generate (Kaggle)─▶ gene
 
 | Bước | Lệnh | Máy | Kiểm soát chất lượng |
 | --- | --- | --- | --- |
-| T1 | `teach.py sample` | laptop | Mỗi tài liệu tối đa 1 chunk; domain giới hạn theo căn bậc hai kích thước; 5% làm dev. |
-| T2 | `teach.py generate` | Kaggle, chia shard | Query phải là tiếng Việt, không chép nguyên từ passage; `evidence` phải có thật trong passage; teacher được trả lời `usable: false` cho trang không có nội dung y tế. |
-| T3 | `teach.py mine` | laptop (bge-m3 vừa 4 GB) | Bỏ toàn bộ chunk cùng tài liệu với positive. Ghi recall@k của retriever hiện tại trên query tổng hợp vào `groups_manifest.json`. |
-| T4 | `teach.py judge` | Kaggle, chia shard | Nhóm có positive bị teacher chấm dưới 0,5 sẽ bị bỏ. Negative được chấm từ 0,8 trở lên được coi là positive phụ, không bị đẩy xa. |
-| T5 | `teach.py train` | Kaggle, mỗi T4 một student | Có MRR/top-1 trên tập dev trước và sau khi train, lưu trong `vibiomir_student.json`. |
+| T1 | `vibiomir.py teach sample` | laptop | Mỗi tài liệu tối đa 1 chunk; domain giới hạn theo căn bậc hai kích thước; 5% làm dev. |
+| T2 | `vibiomir.py teach generate` | Kaggle, chia shard | Query phải là tiếng Việt, không chép nguyên từ passage; `evidence` phải có thật trong passage; teacher được trả lời `usable: false` cho trang không có nội dung y tế. |
+| T3 | `vibiomir.py teach mine` | laptop (bge-m3 vừa 4 GB) | Bỏ toàn bộ chunk cùng tài liệu với positive. Ghi recall@k của retriever hiện tại trên query tổng hợp vào `groups_manifest.json`. |
+| T4 | `vibiomir.py teach judge` | Kaggle, chia shard | Nhóm có positive bị teacher chấm dưới 0,5 sẽ bị bỏ. Negative được chấm từ 0,8 trở lên được coi là positive phụ, không bị đẩy xa. |
+| T5 | `vibiomir.py teach train` | Kaggle, mỗi T4 một student | Có MRR/top-1 trên tập dev trước và sau khi train, lưu trong `vibiomir_student.json`. |
 
 ## Student
 
@@ -43,8 +43,8 @@ Student 14B cho reranker và embedding khởi đầu từ model chat, không ph�
 
 ```powershell
 $env:HF_TOKEN = '<token có quyền ghi>'
-.\env\Scripts\python.exe scripts\teach.py sample --chunks work\rtx2050_60k\chunks\chunks.parquet --out work\teach --target 30000 --shards 4
-.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\seeds.jsonl work\rtx2050_60k\chunks\chunks.parquet
+.\env\Scripts\python.exe scripts\vibiomir.py teach sample --chunks work\rtx2050_60k\chunks\chunks.parquet --out work\teach --target 30000 --shards 4
+.\env\Scripts\python.exe scripts\vibiomir.py teach push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\seeds.jsonl work\rtx2050_60k\chunks\chunks.parquet
 ```
 
 `--shards` bằng số tài khoản Kaggle chạy song song. `push` đẩy `src/`, `scripts/` và các file input lên dataset `AncientWings_R2AI_STAGE3_ds` đã dùng cho crawl, dưới các đường dẫn `code/`, `inputs/`, `teach/` để không đụng dữ liệu crawl cũ; notebook Kaggle tải về từ đó. Gói HF free là đủ.
@@ -62,8 +62,8 @@ Kết quả được đẩy lên `teach/generated/shard_XX_of_04.jsonl` khoảng
 ```powershell
 .\env\Scripts\python.exe -c "from huggingface_hub import snapshot_download as d; d('AncientWings/AncientWings_R2AI_STAGE3_ds', repo_type='dataset', local_dir='work/teach_hub', allow_patterns=['teach/generated/*'])"
 Copy-Item -Recurse -Force work\teach_hub\teach\generated work\teach\
-.\env\Scripts\python.exe scripts\teach.py mine --teach work\teach --chunks work\rtx2050_60k\chunks\chunks.parquet --index work\rtx2050_60k\index\bge-m3 --extra-index work\rtx2050_60k\index\qwen3-embedding-0.6b --shards 4
-.\env\Scripts\python.exe scripts\teach.py push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\groups.jsonl
+.\env\Scripts\python.exe scripts\vibiomir.py teach mine --teach work\teach --chunks work\rtx2050_60k\chunks\chunks.parquet --index work\rtx2050_60k\index\bge-m3 --extra-index work\rtx2050_60k\index\qwen3-embedding-0.6b --shards 4
+.\env\Scripts\python.exe scripts\vibiomir.py teach push --hub-repo AncientWings/AncientWings_R2AI_STAGE3_ds work\teach\groups.jsonl
 ```
 
 Xem `work\teach\groups_manifest.json` → `retriever_on_synthetic_queries`. Đây là recall của retriever hiện tại trên các câu hỏi đã biết chunk đáp án: một thước đo offline không tốn lượt nộp, và cũng là mốc để so sánh student embedding.
@@ -84,7 +84,7 @@ Tải `students/<task>-<size>/` về một thư mục rồi đặt `VIBIOMIR_STU
 
 ```powershell
 $env:VIBIOMIR_STUDENTS = 'work\students'
-.\env\Scripts\python.exe scripts\pipeline.py --source ... --encoders student:embedding-4b --rerankers student:reranker-4b --translation-model student:translator-4b
+.\env\Scripts\python.exe scripts\vibiomir.py pipeline --source ... --encoders student:embedding-4b --rerankers student:reranker-4b --translation-model student:translator-4b
 ```
 
 Laptop 4 GB không chạy được student 4B trở lên, nên bước index và retrieve có student cũng phải chạy trên Kaggle.

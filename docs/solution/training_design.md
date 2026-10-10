@@ -23,21 +23,21 @@ Mọi con số dưới đây là giá trị mặc định trong code tại thờ
 
 ```text
 dữ liệu crawl (thư mục run hoặc parquet/json/jsonl)
-   │  scripts/prepare.py
+   │  scripts/vibiomir.py prepare
    ▼
 work/corpus/corpus.parquet
-   │  scripts/chunk.py
+   │  scripts/vibiomir.py chunk
    ▼
 chunks.parquet ──────────────┬─────────────────────────┐
-   │ scripts/index.py        │                         │
+   │ scripts/vibiomir.py index        │                         │
    ▼                         │                         │
 bm25.npz + embeddings.npy    │                         │
-   │ scripts/retrieve.py  ◄──┘ (query.parquet)         │
+   │ scripts/vibiomir.py retrieve  ◄──┘ (query.parquet)         │
    ▼                                                   │
 candidates.jsonl                                       │
-   │ scripts/submit.py  ◄──────────────────────────────┘ (re-slice từ corpus)
+   │ scripts/vibiomir.py submit  ◄──────────────────────────────┘ (re-slice từ corpus)
    ▼
-submission.zip ──► scripts/evaluate.py (cần labels.jsonl) ──► EVAL_REPORT.md
+submission.zip ──► scripts/vibiomir.py evaluate (cần labels.jsonl) ──► EVAL_REPORT.md
 ```
 
 Hai ràng buộc xuyên suốt:
@@ -86,7 +86,7 @@ Bảng này khớp với bảng "đổi gì thì chạy lại gì" của pipelin
 
 ## 2a. Block A2→A3 — tiền xử lý dữ liệu crawl
 
-**Lệnh:** `scripts/prepare.py` → [corpus/prepare.py](../../src/vibiomir/corpus/prepare.py)
+**Lệnh:** `scripts/vibiomir.py prepare` → [corpus/prepare.py](../../src/vibiomir/corpus/prepare.py)
 
 | | |
 | --- | --- |
@@ -107,7 +107,7 @@ Lý do loại: `fetch_failed`, `empty_text`, `homepage_redirect` (URL bị chuy�
 
 ## 3. Block A4 — chunking
 
-**Lệnh:** `scripts/chunk.py` → [corpus/chunk.py](../../src/vibiomir/corpus/chunk.py)
+**Lệnh:** `scripts/vibiomir.py chunk` → [corpus/chunk.py](../../src/vibiomir/corpus/chunk.py)
 
 | | |
 | --- | --- |
@@ -133,7 +133,7 @@ Lý do loại: `fetch_failed`, `empty_text`, `homepage_redirect` (URL bị chuy�
 
 ## 4. Block B — lập chỉ mục
 
-**Lệnh:** `scripts/index.py {bm25|dense|all}` → [index/build.py](../../src/vibiomir/index/build.py)
+**Lệnh:** `scripts/vibiomir.py index {bm25|dense|all}` → [index/build.py](../../src/vibiomir/index/build.py)
 
 | | |
 | --- | --- |
@@ -180,7 +180,7 @@ Các encoder đã đăng ký (đều là model mở; mốc phát hành và số 
 
 ## 5. Block C — truy xuất
 
-**Lệnh:** `scripts/retrieve.py` → [retrieval/run.py](../../src/vibiomir/retrieval/run.py)
+**Lệnh:** `scripts/vibiomir.py retrieve` → [retrieval/run.py](../../src/vibiomir/retrieval/run.py)
 
 | | |
 | --- | --- |
@@ -229,7 +229,7 @@ Mọi reranker trả **xác suất trong [0, 1]** (sigmoid của logit, hoặc s
 
 ## 6. Block D — bài nộp
 
-**Lệnh:** `scripts/submit.py` → [submission/build.py](../../src/vibiomir/submission/build.py)
+**Lệnh:** `scripts/vibiomir.py submit` → [submission/build.py](../../src/vibiomir/submission/build.py)
 
 | | |
 | --- | --- |
@@ -260,7 +260,7 @@ Ghi JSON, nén ZIP với mốc thời gian cố định (cùng kết quả cho c
 
 ## 7. Block E — đánh giá
 
-**Lệnh:** `scripts/evaluate.py {sheet|collect|pseudo|score}` → [evaluation/run.py](../../src/vibiomir/evaluation/run.py)
+**Lệnh:** `scripts/vibiomir.py evaluate {sheet|collect|pseudo|score}` → [evaluation/run.py](../../src/vibiomir/evaluation/run.py)
 
 | Lệnh con | Nhận | Trả |
 | --- | --- | --- |
@@ -333,15 +333,15 @@ Phân biệt hai dạng chuẩn hóa: dạng lưu giữ nguyên văn bản gần
 ```powershell
 python -m pip install -r requirements/rag.txt
 
-python scripts/prepare.py --source nguyen/output/runs/batch01_nguyen --limit 30000
-python scripts/chunk.py
-python scripts/index.py all --encoder bge-m3
-python scripts/retrieve.py --keyword-variant
-python scripts/submit.py --links data/links_corpus.parquet --profile recall
+python scripts/vibiomir.py prepare --source nguyen/output/runs/batch01_nguyen --limit 30000
+python scripts/vibiomir.py chunk
+python scripts/vibiomir.py index all --encoder bge-m3
+python scripts/vibiomir.py retrieve --keyword-variant
+python scripts/vibiomir.py submit --links data/links_corpus.parquet --profile recall
 
-python scripts/evaluate.py sheet   # xuất phiếu gán nhãn
-python scripts/evaluate.py collect # phiếu đã điền -> labels.jsonl
-python scripts/evaluate.py score
+python scripts/vibiomir.py evaluate sheet   # xuất phiếu gán nhãn
+python scripts/vibiomir.py evaluate collect # phiếu đã điền -> labels.jsonl
+python scripts/vibiomir.py evaluate score
 ```
 
 Mọi đường dẫn mặc định đều trỏ vào `work/`. Chạy thử không cần model: thêm `--encoder hash` cho `index.py` và `--reranker identity` cho `retrieve.py`. Chi tiết từng bước, thời gian đo được và cách xử lý sự cố: [run_guide.md](run_guide.md).

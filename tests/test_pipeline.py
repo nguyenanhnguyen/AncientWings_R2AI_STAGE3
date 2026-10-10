@@ -600,7 +600,7 @@ class RegressionTests(unittest.TestCase):
                     rerank_batch=4, fp32=True))
 
     def test_retrieval_cli_rejects_keep_beyond_the_reranked_slice(self):
-        result = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'retrieve.py'),
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'vibiomir.py'), 'retrieve',
                                  '--keep', '80', '--rerank-k', '50'],
                                 capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)

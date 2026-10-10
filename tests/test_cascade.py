@@ -42,6 +42,29 @@ class SourceDiscoveryTests(unittest.TestCase):
             self.assertEqual([p.relative_to(root).as_posix() for p in found],
                              ['output/runs/batch01', 'shards/shard_01/runs/s1'])
 
+    def test_limit_is_shared_over_runs_by_size(self):
+        self.assertEqual(prepare.proportional_quotas([137, 87, 107], 100), [42, 26, 32])
+        self.assertEqual(prepare.proportional_quotas([5, 3], 100), [5, 3])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'nguyen'
+            ids = {'output/runs/a': range(100, 160), 'shards/s1/runs/b': range(500, 530),
+                   'shards/s2/runs/c': range(900, 910)}
+            for run, numbers in ids.items():
+                (root / run / 'records').mkdir(parents=True)
+                for i in numbers:
+                    storage.write_json(root / run / 'records' / f'{i}.json',
+                                       {'id': i, 'url': f'https://x.vn/bai-{i}', 'status': 'extracted',
+                                        'quality_status': 'accepted', 'text': f'Bài số {i} về sỏi thận.'})
+            with quiet():
+                summary = prepare.build(argparse.Namespace(
+                    source=[str(root)], out=str(Path(tmp) / 'out'), limit=20, split='proportional',
+                    max_duplicates=20, min_chars=0, drop_review=False, text_field=None))
+            self.assertEqual(sorted(summary['rows_read_per_source'].values()), [2, 6, 12])
+            self.assertEqual(summary['rows_read'], 20)
+            ids_kept = [row['id'] for row in storage.read_parquet(Path(tmp) / 'out' / 'corpus.parquet')]
+            # Lowest ids of each run.
+            self.assertEqual(ids_kept, list(range(100, 112)) + list(range(500, 506)) + [900, 901])
+
     def test_parquet_folder_contributes_each_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / 'corpus'
@@ -172,14 +195,18 @@ class CascadeTests(unittest.TestCase):
                                                      index=str(root / 'icards'),
                                                      out=str(root / 'docs'), **common))
                 cards.subset(argparse.Namespace(candidates=[str(root / 'docs' / 'candidates.jsonl')],
-                                                chunks=str(root / 'chunks' / 'chunks.parquet'),
-                                                out=str(root / 'subset'), docs_per_query=2))
+                                                corpus=[str(fixture['corpus'])],
+                                                out=str(root / 'subset'), docs_per_query=2,
+                                                target_tokens=60, overlap_tokens=15,
+                                                max_tokens=120, min_tokens=8, text_field=None))
             ranked = storage.read_jsonl(root / 'subset' / 'doc_candidates.jsonl')
             self.assertEqual(len(ranked), 3)
             wanted = {d for row in ranked for d in row['doc_ids']}
             subset = storage.read_parquet(root / 'subset' / 'chunks.parquet')
             self.assertEqual({row['doc_id'] for row in subset}, wanted)
+            # Chunking only the candidates gives exactly the chunks a full chunking would.
             full = {row['chunk_id']: row for row in storage.read_parquet(root / 'chunks' / 'chunks.parquet')}
+            self.assertEqual(len(subset), sum(row['doc_id'] in wanted for row in full.values()))
             self.assertTrue(all(full[row['chunk_id']] == row for row in subset))
             with quiet():
                 index_cli.build_all(argparse.Namespace(chunks=str(root / 'subset' / 'chunks.parquet'),
@@ -260,11 +287,12 @@ class FetchTests(unittest.TestCase):
             # The fetched folder feeds prepare directly.
             self.assertEqual(len(prepare.discover_sources(paths['corpus'])), 1)
 
-    def test_default_pipeline_starts_from_hugging_face(self):
+    def test_hf_source_plans_the_fetch_stage(self):
         from vibiomir import pipeline
         output = io.StringIO()
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(output):
-            pipeline.run(pipeline.parse_args(['--dry-run', '--out', tmp, '--hf-revision', 'd' * 40]))
+            pipeline.run(pipeline.parse_args(['--dry-run', '--source', 'hf', '--out', tmp,
+                                              '--hf-revision', 'd' * 40]))
         text = output.getvalue()
         self.assertIn('[fetch]', text)
         self.assertIn('corpus_dddddddddddd', text)
@@ -276,8 +304,13 @@ class PipelineCliTests(unittest.TestCase):
         from vibiomir import pipeline
         local = pipeline.parse_args(['--dry-run'])
         self.assertEqual((local.gpus, local.reranker, local.translation_quantize), (1, 'bge-reranker-v2-m3', '4bit'))
+        self.assertEqual((local.source, local.limit, local.out), (['nguyen'], 100000, 'work/run_local_100k'))
+        self.assertEqual(pipeline.parse_args(['--limit', '0']).limit, 0)
         kaggle = pipeline.parse_args(['--profile', 'kaggle', '--reranker', 'bge-reranker-v2-m3'])
-        self.assertEqual((kaggle.gpus, kaggle.reranker, kaggle.pilot), (2, 'bge-reranker-v2-m3', False))
+        self.assertEqual((kaggle.gpus, kaggle.reranker), (2, 'bge-reranker-v2-m3'))
+        self.assertEqual(local.reranker, pipeline.parse_args(['--profile', 'kaggle']).reranker)
+        self.assertEqual(local.hyde, [])
+        self.assertEqual((kaggle.source, kaggle.limit), (['hf'], 0))
 
     def test_dry_run_plans_parallel_gpu_stages(self):
         from vibiomir import pipeline
@@ -287,9 +320,11 @@ class PipelineCliTests(unittest.TestCase):
                                               str(Path(tempfile.gettempdir()) / 'vibiomir-dry')]))
         text = output.getvalue()
         for stage in ('[cards_dense_part1] GPU 1', '[subset_dense_merge]', '[retrieve_0] GPU 0',
-                      '[retrieve_1] GPU 1', '[translate] GPU 1', '[submit_nowindow]'):
+                      '[retrieve_1] GPU 1', '[translate] GPU 1', '[submit]'):
             self.assertIn(stage, text)
         self.assertIn('--match-language', text)
+        for gone in ('[chunk]', '[pilot]', 'submit_nowindow', 'qwen3-reranker'):
+            self.assertNotIn(gone, text)
         self.assertEqual(json.loads(json.dumps(pipeline.WEIGHTS))['card'], 1.0)
 
 

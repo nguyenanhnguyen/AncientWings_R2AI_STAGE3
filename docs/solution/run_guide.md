@@ -1,30 +1,58 @@
-# Chạy pipeline thác đến `submission.zip`: laptop và Kaggle, cùng dữ liệu từ Hugging Face
+# Chạy pipeline thác đến `submission.zip`: laptop (dữ liệu local) và Kaggle (dữ liệu HF)
 
-Chạy PowerShell từ thư mục gốc dự án. Một lệnh điều phối (`scripts/pipeline.py`) chạy mọi khâu, mỗi khâu một tiến trình riêng, lưu log và dùng lại khâu đã xong khi chạy lại. Pipeline đọc một **snapshot** dữ liệu crawl rồi đóng băng; crawl vẫn chạy song song không ảnh hưởng run hiện tại. Lý do thiết kế: [research.md](research.md).
+Chạy PowerShell từ thư mục gốc dự án. Một lệnh điều phối (`scripts/vibiomir.py pipeline`) chạy mọi khâu, mỗi khâu một tiến trình riêng, lưu log và dùng lại khâu đã xong khi chạy lại. Pipeline đọc một **snapshot** dữ liệu crawl rồi đóng băng; crawl vẫn chạy song song không ảnh hưởng run hiện tại. Lý do thiết kế: [research.md](research.md).
 
-**Trạng thái xác minh (10/10/2026):** toàn bộ luồng mới đã chạy đầu–cuối trên CPU với encoder `hash` và reranker `identity`, trên 3.000 tài liệu thật của corpus HF và 1.200 truy vấn thật; 129 test offline đạt. **Chưa chạy với model thật trên GPU nào, chưa có điểm leaderboard cho thiết kế mới.** Các con số mặc định (số tài liệu ứng viên, `rerank-k`, cửa sổ 768 token) là điểm xuất phát để đo, chưa phải giá trị tối ưu.
+**Trạng thái xác minh (10/10/2026):** toàn bộ luồng mới đã chạy đầu–cuối trên CPU với encoder `hash` và reranker `identity`, trên 3.000 tài liệu thật của corpus HF và 1.200 truy vấn thật; 133 test offline đạt (126 trong `tests/`, 7 trong `scripts/`). Môi trường `env` có `torch 2.10.0+cu128`, CUDA khả dụng. **Chưa chạy với model thật trên GPU nào, chưa có điểm leaderboard cho thiết kế mới.** Các con số mặc định (số tài liệu ứng viên, `rerank-k`, cửa sổ 768 token) là điểm xuất phát để đo, chưa phải giá trị tối ưu.
 
 ## 1. Thiết kế đang chạy
 
 | Khâu | Cách chạy | Ghi chú |
 |---|---|---|
-| fetch | Tải `corpus/*.parquet` của dataset nhóm và `query`/`links_corpus` của BTC từ HF; **ghim commit** của corpus cho thư mục run | Mặc định `--source hf`; chạy lại cùng `--out` dùng đúng commit đã ghim |
-| prepare | Đọc corpus HF vừa tải (hoặc run crawl local nếu `--source nguyen`); lọc lỗi tải/trang chủ/template; giữ `review` | `--source` còn nhận thư mục cha, run hoặc file |
-| chunk | Chunk đích 320 token, overlap 80, trần 768; giữ offset nguồn | Chạy cho toàn corpus, chỉ CPU |
+| fetch | **Chỉ Kaggle** (`--source hf`): tải `corpus/*.parquet` của dataset nhóm và `query`/`links_corpus` của BTC; ghim commit corpus cho thư mục run | Laptop bỏ qua khâu này |
+| prepare | Laptop: đọc các run crawl trong `nguyen\` (batch01 + 2 shard), **100.000 bản ghi chia theo tỷ lệ số bản ghi của từng run**, ID nhỏ trước trong mỗi run. Kaggle: corpus HF vừa tải. Lọc lỗi tải/trang chủ/template; giữ `review` | `--limit 0` đọc hết; `--split sequential` lấy từ run đầu trước |
 | cards | Một **thẻ** mỗi tài liệu: tiêu đề + đoạn mở đầu ≤160 token | Trang hỏi–đáp: thẻ chứa câu hỏi của bệnh nhân |
-| translate | **Một LLM** (Qwen3-4B) sinh theo batch: bản dịch tiếng Trung (+Anh nếu corpus có ≥1% tài liệu Anh) và đoạn trả lời giả HyDE tiếng Trung/Việt | Chỉ để tìm; `chunk_text` luôn lấy từ corpus |
+| translate | **Một LLM** (Qwen3-4B) dịch theo batch 1.200 truy vấn sang tiếng Trung (+Anh nếu corpus có ≥1% tài liệu Anh) | Chỉ để tìm; `chunk_text` luôn lấy từ corpus. HyDE tắt mặc định (`--hyde zh vi` để bật) |
 | cards_bm25, cards_dense | BM25 + BGE-M3 trên thẻ của toàn corpus | Rẻ hơn nhiều so với encode mọi chunk |
 | doc_search | Tìm trên thẻ, giữ `--docs-per-query` tài liệu mỗi truy vấn | Không rerank ở tầng này |
-| subset | Giữ chunk của các tài liệu ứng viên (hợp của mọi truy vấn) | Chunk id/offset giữ nguyên |
+| subset | **Chỉ chunk các tài liệu ứng viên** (hợp của mọi truy vấn): đích 384 token, overlap 32, trần 768; giữ offset nguồn | Không chunk toàn corpus: phần lớn tài liệu không truy vấn nào chạm tới |
 | subset_bm25, subset_dense | Chỉ mục đoạn trên tập con | |
 | retrieve | BM25 + dense + **kênh card** (thứ hạng tài liệu từ tầng thẻ) → RRF → **một reranker**, chấm đoạn tiếng Trung bằng bản dịch tiếng Trung của câu hỏi | Với nhiều GPU, chia truy vấn mỗi card một phần |
-| submit | Profile **`f2`**: giữ một mục khi xác suất > F2 kỳ vọng / 5; **mở rộng đoạn nộp** thành cửa sổ ≤768 token (vẫn là đoạn trích nguyên văn); bỏ đoạn đã nằm trong cửa sổ khác | Xuất thêm bản `submission_nowindow` để so sánh A/B |
+| submit | Profile **`f2`**: giữ một mục khi xác suất > F2 kỳ vọng / 5; **mở rộng đoạn nộp** thành cửa sổ ≤768 token (vẫn là đoạn trích nguyên văn); bỏ đoạn đã nằm trong cửa sổ khác | Một bài nộp duy nhất |
 
-Hồ sơ `--profile local` (mặc định): 1 GPU 4 GB, BGE-M3, **bge-reranker-v2-m3**, Qwen3-4B 4-bit, 150 tài liệu/truy vấn, rerank 60 đoạn. Hồ sơ `kaggle`: T4×2, BGE-M3, **Qwen3-Reranker-4B**, Qwen3-4B fp16, 250 tài liệu/truy vấn, rerank 80 đoạn. Mọi giá trị đều ghi đè được bằng tham số.
+**Pipeline tối giản, ưu tiên xử lý nhiều dữ liệu:** đúng một model mỗi vai trò, dùng chung cho laptop và Kaggle:
 
-Điểm reranker chưa được hiệu chỉnh thành xác suất. Khi có nhãn dev do người gán, chạy `scripts/evaluate.py calibrate` để sinh `calibration.json` rồi truyền `--calibration` cho pipeline (mục 6).
+| Vai trò | Model | Ghi chú |
+|---|---|---|
+| Encoder | BAAI/bge-m3 (568M) | Đã có trong cache máy |
+| Reranker (duy nhất) | BAAI/bge-reranker-v2-m3 (568M) | Đã có trong cache máy; vừa GPU 4 GB và T4 |
+| LLM dịch truy vấn | Qwen/Qwen3-4B | 4-bit trên laptop, fp16 trên Kaggle; lần đầu tải ~8 GB |
+
+Không còn bước pilot đo batch: batch cố định (laptop 16 encoder / 8 reranker; Kaggle 128 / 32), tự giảm một nửa khi hết VRAM. Các model khác (Qwen3-Embedding, Qwen3-Reranker, e5, gte) đã gỡ khỏi code và cache.
+
+Hồ sơ `--profile local` (mặc định): dữ liệu `nguyen\`, 100.000 bản ghi, `query`/`links` từ `data\`, 1 GPU 4 GB, 100 tài liệu ứng viên/truy vấn, rerank 50 đoạn/truy vấn. Hồ sơ `kaggle`: dữ liệu HF, toàn bộ corpus, T4×2, 200 tài liệu/truy vấn, rerank 60 đoạn. Mọi giá trị đều ghi đè được bằng tham số.
+
+Điểm reranker chưa được hiệu chỉnh thành xác suất. Khi có nhãn dev do người gán, chạy `scripts/vibiomir.py evaluate calibrate` để sinh `calibration.json` rồi truyền `--calibration` cho pipeline (mục 6).
+
+## 1b. Cấu trúc code
+
+| Đường dẫn | Vai trò |
+|---|---|
+| `scripts/vibiomir.py` | **Cửa vào duy nhất** cho mọi khâu: `pipeline`, `fetch`, `prepare`, `cards`, `chunk`, `index`, `translate`, `retrieve`, `submit`, `evaluate`, `benchmark`, `teach`. Ví dụ `scripts/vibiomir.py submit --help` |
+| `scripts/build_notebooks.py` | Nhúng code repo vào `notebooks/for_kaggle.ipynb` và `notebooks/teach_kaggle.ipynb` |
+| `scripts/notebook_postprocess.py` | Công cụ của notebook crawl (đóng gói/kiểm tra khi upload HF), không thuộc pipeline truy xuất |
+| `src/vibiomir/corpus/` | `prepare`, `cards` (thẻ + tập con), `chunk` (cắt đoạn, cửa sổ nộp), `fetch` (HF) |
+| `src/vibiomir/index/` | BM25, embedding (bge-m3) |
+| `src/vibiomir/retrieval/` | truy vấn, dịch, RRF, reranker, CLI truy xuất |
+| `src/vibiomir/submission/` | chọn theo F2, hiệu chỉnh, kiểm tra, đóng ZIP |
+| `src/vibiomir/evaluation/` | gán nhãn dev, chấm điểm, quy lỗi |
+| `src/vibiomir/teach/` | Khối T (teacher → student), **tạm dừng**; giữ lại vì `rerank`/`embedding` dùng chung hàm nạp model và có thể bật lại |
+| `tests/` | Toàn bộ test offline: `.\env\Scripts\python.exe -m unittest discover -s tests` |
+
+Đã gom ngày 10/10: 12 file wrapper một dòng (`scripts/prepare.py`, `index.py`, `retrieve.py`...) thành `scripts/vibiomir.py`; hai script build notebook thành `scripts/build_notebooks.py`; `scripts/test_local_pipeline.py` chuyển về `tests/`; bỏ hai hàm không còn ai gọi.
 
 ## 2. Chuẩn bị môi trường CUDA (chạy một lần)
+
+> **Đã cài xong trên máy này** (10/10: `torch 2.10.0+cu128`, CUDA khả dụng). File wheel trong `work\wheels` đã được xóa để giải phóng 2,7 GB; chỉ chạy lại khối lệnh dưới khi phải cài lại `env`, lúc đó wheel được tải lại.
 
 Dùng PowerShell ở thư mục gốc dự án với `env` Python 3.13 x64. Đóng kernel đang dùng `torch` trong `env` và không chạy hai lệnh pip cùng lúc; crawler không dùng `torch` vẫn có thể tiếp tục. **Chạy toàn bộ khối lệnh dưới đây trong cùng một cửa sổ PowerShell:**
 
@@ -46,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Cài torch CUDA thất bại.' }
 if ($LASTEXITCODE -ne 0) { throw 'Cài thư viện pipeline thất bại.' }
 & $py -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'Các thư viện đang xung đột.' }
-& $py scripts/benchmark.py --check-only --quantized
+& $py scripts/vibiomir.py benchmark --check-only --quantized
 if ($LASTEXITCODE -ne 0) { throw 'Kiểm tra CUDA/NF4 chưa đạt; xem lỗi phía trên.' }
 ```
 
@@ -54,62 +82,62 @@ Kết quả cuối phải có `gpu` là RTX 2050, `cuda` khác `null` và `nf4_g
 
 ## 3. Chạy từ đầu đến bài nộp
 
-### Trên laptop
+### Trên laptop: dữ liệu local trong `nguyen\`, không dùng HF
 
-Dữ liệu lấy từ Hugging Face giống hệt Kaggle: corpus nhóm `AncientWings/AncientWings_R2AI_STAGE3_ds` (`corpus/*.parquet`) và `query.parquet`, `links_corpus.parquet` của BTC. Dataset nhóm là **private**, nên đăng nhập một lần bằng token có quyền đọc:
+Dữ liệu đầu vào là các run crawl trên máy: `nguyen\output\runs\batch01_nguyen`, `nguyen\shards\shard_01\runs\...` và `nguyen\shards\shard_02\runs\...` (pipeline tự tìm). `query.parquet` và `links_corpus.parquet` lấy từ `data\`. Không cần đăng nhập HF.
 
-```powershell
-.\env\Scripts\hf.exe auth login
-```
+Mặc định lấy **tổng 100.000 bản ghi**, chia theo tỷ lệ số bản ghi hiện có của từng run; trong mỗi run lấy ID nhỏ trước. Với số bản ghi ngày 10/10:
 
-(Kiểm tra ngày 10/10: token đang lưu trên máy bị HF trả 401, cần đăng nhập lại.)
+| Run | Bản ghi hiện có | Lấy |
+|---|---:|---:|
+| batch01_nguyen | 139.160 | 40.043 |
+| shard_01 | 94.764 | 27.268 |
+| shard_02 | 113.602 | 32.689 |
 
-Xem kế hoạch các khâu, chưa tải gì:
+Con số thực tế được tính lại lúc chạy và ghi ở `corpus/prepare_manifest.json` (`rows_read_per_source`). Đây là **bản ghi đầu vào**, gồm cả bản ghi tải lỗi hay bị robots chặn; số tài liệu dùng được thấp hơn sau lọc (xem `documents_kept`, `drop_reasons`).
 
-```powershell
-.\env\Scripts\python.exe scripts/pipeline.py --out work/run_hf --dry-run
-```
-
-Chạy thật (mặc định `--source hf --profile local`):
+Xem kế hoạch các khâu, chưa chạy gì:
 
 ```powershell
-.\env\Scripts\python.exe scripts/pipeline.py --out work/run_hf
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline --dry-run
 ```
 
-**Chạy tiếp khi bị ngắt:** gõ lại đúng lệnh. Khâu `fetch` tiếp tục tải phần còn thiếu; commit corpus đã ghim trong `work/run_hf/hf/pinned.json` nên dữ liệu không đổi dù nhóm vừa đẩy thêm lên HF; khâu đã xong được dùng lại. Muốn dùng dữ liệu mới nhất trên HF: chạy với `--out` mới. Muốn chạy lại đúng một snapshot cũ: `--hf-revision <commit>`.
+Chạy thật (mặc định `--profile local --source nguyen --limit 100000 --out work/run_local_100k`):
 
-Chạy thử nhỏ trước: thêm `--limit 20000` (20.000 dòng đầu vào theo ID tăng dần) và dùng `--out` riêng. Vẫn chạy được trên crawl local mà không cần HF: `--source nguyen` (khi đó `query`/`links` lấy từ `data\`).
+```powershell
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline
+```
 
-Trên GPU 4 GB, LLM dịch và encoder không cùng nằm trên card, nên các khâu GPU chạy lần lượt. Pilot đo batch cho đúng một encoder và một reranker trước khi chạy dài. Snapshot hiện tại gồm cả trang tiếng Trung của các shard, nên khâu dịch sẽ chạy; tắt bằng `--skip-translation`, tắt HyDE bằng `--hyde` không kèm giá trị.
+**Chạy tiếp khi bị ngắt:** gõ lại đúng lệnh; khâu đã xong (khớp SHA-256) được dùng lại, embedding tiếp tục từ shard đang dở. Snapshot 100k đã đóng băng ở lần chạy đầu: crawl có thêm dữ liệu cũng không làm đổi run này. Muốn snapshot mới (crawl đã nhiều hơn, hoặc số lượng khác): dùng `--out` mới, ví dụ `--limit 200000 --out work/run_local_200k`, hoặc `--limit 0` để lấy hết.
+
+Trên GPU 4 GB, LLM dịch và encoder không cùng nằm trên card, nên các khâu GPU chạy lần lượt. Hai shard là trang tiếng Trung (cnkang, wujue), nên khâu dịch sẽ chạy; tắt bằng `--skip-translation`. Lần đầu sẽ tải Qwen3-4B (khoảng 8 GB) vào cache HF; bge-m3 và bge-reranker-v2-m3 đã có sẵn.
+
+Chạy thử 3.000 bản ghi (10/10, CPU, encoder `hash`, không dịch) đi hết các khâu trong 83 giây: 1.199 tài liệu Việt + 1.801 Trung, tập con 2.273 tài liệu → 5.591 chunk (2,46 chunk/tài liệu). Thời gian với model thật trên GPU chưa đo.
 
 ```text
-work/run_hf/
-  hf/                pinned.json (commit đã ghim), fetch_manifest.json, corpus_<commit>/corpus/*.parquet, source/ (query, links)
+work/run_local_100k/
   corpus/            snapshot, dropped.jsonl, prepare_manifest.json
-  chunks/            chunk của toàn corpus
   cards/             thẻ tài liệu
-  pilot.json         batch đã chọn, VRAM (chỉ profile local)
-  translations/      bản dịch + HyDE, bản bị loại, SQLite cache
+  translations/      bản dịch, bản bị loại, SQLite cache
   index/cards/       BM25 + embedding của thẻ
   doc_search/        tài liệu ứng viên mỗi truy vấn
-  subset/            chunk của tài liệu ứng viên, doc_candidates.jsonl
+  subset/            chunk chỉ của tài liệu ứng viên, doc_candidates.jsonl
   index/subset/      BM25 + embedding của tập con
   retrieval/         candidates.jsonl (một thư mục part<i> mỗi GPU khi có nhiều GPU), cache điểm
   submission/        BÀI NỘP CHÍNH: f2 + cửa sổ 768 token
-  submission_nowindow/  cùng lựa chọn, không mở rộng cửa sổ — để A/B
   stages/, logs/     khóa và SHA-256 từng khâu; log nối tiếp
 ```
 
-**File nộp:** `work/run_hf/submission/submission.zip`. Bản `submission_nowindow` chỉ dùng để đo riêng tác động của việc mở rộng cửa sổ trên leaderboard.
+**File nộp:** `work/run_local_100k/submission/submission.zip`. Muốn so A/B việc mở rộng cửa sổ: chạy riêng `submit.py ... --window-tokens 0` (mục 6), không cần chạy lại GPU.
 
 ### Trên Kaggle, dữ liệu lấy từ Hugging Face
 
-Dùng [notebooks/for_kaggle.ipynb](../../notebooks/for_kaggle.ipynb). Notebook chạy **cùng lệnh** `pipeline.py --source hf` với `--profile kaggle`: khâu `fetch` tải và ghim dữ liệu HF, rồi hai T4 chạy song song hai nửa embedding và hai nửa truy vấn rerank. Cần Secret `HF_TOKEN` vì dataset nhóm private. Chạy lại ô pipeline trong cùng phiên thì các khâu đã xong được dùng lại. Kết quả: `/kaggle/working/submission.zip`.
+Dùng [notebooks/for_kaggle.ipynb](../../notebooks/for_kaggle.ipynb). Notebook chạy cùng `pipeline.py` với `--profile kaggle --source hf`: khâu `fetch` tải `corpus/*.parquet` của dataset nhóm và `query`/`links` của BTC, **ghim commit** corpus cho run (chạy lại trong cùng phiên dùng đúng commit đó, khâu đã xong được dùng lại), rồi hai T4 chạy song song hai nửa embedding và hai nửa truy vấn rerank. Dataset nhóm là private: cần Secret `HF_TOKEN` (token Read). Kết quả: `/kaggle/working/submission.zip`, kèm thư mục `run/hf/` chứa commit đã ghim.
 
 Code của repo được nhúng sẵn trong notebook. Sau khi sửa code trên laptop:
 
 ```powershell
-.\env\Scripts\python.exe scripts/build_kaggle_notebook.py
+.\env\Scripts\python.exe scripts/build_notebooks.py kaggle
 ```
 
 rồi upload lại notebook. Không sửa tay ô code nhúng.
@@ -129,7 +157,7 @@ Giữ corpus, chunks, index/checkpoint, cache và manifest cùng nhau. Mỗi ma 
 
 Trong `corpus/prepare_manifest.json`: xem `sources` (đúng các run mong muốn), số giữ lại, lý do loại, domain/ngôn ngữ. Corpus chỉ phủ phần nguồn BTC đã crawl; tài liệu đúng chưa crawl sẽ không thể được retrieve. Trong `subset/chunk_manifest.json`: số tài liệu ứng viên và số chunk của tập con.
 
-Trong `pilot.json`: xem tốc độ, VRAM và mẫu vượt `max_length`. Bộ đếm chunk repo khác tokenizer model và tokenizer BTC. Model cắt ở 1024 token gồm cả tiêu đề/prompt/query, nên có thể bỏ đuôi đoạn dài. Nếu bị cắt nhiều, giảm chunk size hoặc tăng max_length sau khi đo lại VRAM; đổi chunk cần index mới.
+Trong `logs/`: xem tốc độ encode/rerank và các lần tự giảm batch. Bộ đếm chunk repo khác tokenizer model và tokenizer BTC. Model cắt ở 1024 token gồm cả tiêu đề/prompt/query, nên có thể bỏ đuôi đoạn dài. Nếu bị cắt nhiều, giảm chunk size hoặc tăng max_length sau khi đo lại VRAM; đổi chunk cần index mới.
 
 Trong `submission/submission_manifest.json`:
 
@@ -147,18 +175,18 @@ Code chặn candidates lệch hash chunk/query, thiếu query khi `--require-com
 Với một GPU, ứng viên nằm ở `retrieval/candidates.jsonl`; với nhiều GPU là các file `retrieval/part*/candidates.jsonl` (truyền tất cả cho `--candidates`). Chunk của bài nộp lấy từ `subset/chunks.parquet`.
 
 ```powershell
-$R = 'work/run_hf'
-.\env\Scripts\python.exe scripts/evaluate.py sheet --candidates $R/retrieval/candidates.jsonl --chunks $R/subset/chunks.parquet --out $R/eval --limit 60 --per-query 20
+$R = 'work/run_local_100k'
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate sheet --candidates $R/retrieval/candidates.jsonl --chunks $R/subset/chunks.parquet --out $R/eval --limit 60 --per-query 20
 # Đọc label_sheet.html, điền relevant trong label_sheet.jsonl.
-.\env\Scripts\python.exe scripts/evaluate.py collect --sheet $R/eval/label_sheet.jsonl --out $R/eval
-.\env\Scripts\python.exe scripts/evaluate.py score --labels $R/eval/labels.jsonl --submission $R/submission/submission.json --candidates $R/retrieval/candidates.jsonl --corpus $R/corpus/corpus.parquet --out $R/eval/main
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate collect --sheet $R/eval/label_sheet.jsonl --out $R/eval
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate score --labels $R/eval/labels.jsonl --submission $R/submission/submission.json --candidates $R/retrieval/candidates.jsonl --corpus $R/corpus/corpus.parquet --out $R/eval/main
 ```
 
 Hiệu chỉnh điểm reranker thành xác suất (Platt, tách theo ngôn ngữ tài liệu), rồi dựng lại bài nộp mà không chạy lại GPU:
 
 ```powershell
-.\env\Scripts\python.exe scripts/evaluate.py calibrate --labels $R/eval/labels.jsonl --candidates $R/retrieval/candidates.jsonl --out $R/eval
-.\env\Scripts\python.exe scripts/submit.py --candidates $R/retrieval/candidates.jsonl --chunks $R/subset/chunks.parquet --corpus $R/corpus/corpus.parquet --queries data/query.parquet --links data/links_corpus.parquet --require-complete --profile f2 --calibration $R/eval/calibration.json --window-tokens 768 --out $R/submission_calibrated
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate calibrate --labels $R/eval/labels.jsonl --candidates $R/retrieval/candidates.jsonl --out $R/eval
+.\env\Scripts\python.exe scripts/vibiomir.py submit --candidates $R/retrieval/candidates.jsonl --chunks $R/subset/chunks.parquet --corpus $R/corpus/corpus.parquet --queries data/query.parquet --links data/links_corpus.parquet --require-complete --profile f2 --calibration $R/eval/calibration.json --window-tokens 768 --out $R/submission_calibrated
 ```
 
 `calibrate` từ chối nhãn `pseudo`. Nhãn dev gộp từ chính ứng viên của hệ thống nên đánh giá thấp lỗi `not_retrieved`; Recall/F2 local chỉ phản ánh nhãn đã có. Tokenizer LCS local là giả định ghi trong `schema.py`, điểm chunk có thể khác BTC.
@@ -167,16 +195,15 @@ Các tham số chỉnh nhanh của `submit.py`: `--window-tokens` (0–1024), `-
 
 ## 7. Lệnh riêng và sự cố
 
-`--dry-run` in lệnh của từng khâu. Trên Windows ưu tiên lệnh điều phối: nó truyền JSON trọng số bằng danh sách đối số, tránh lỗi quote PowerShell. CLI cũ vẫn dùng được, xem `scripts/index.py --help`, `scripts/retrieve.py --help`, `scripts/translate.py --help`.
+`--dry-run` in lệnh của từng khâu. Trên Windows ưu tiên lệnh điều phối: nó truyền JSON trọng số bằng danh sách đối số, tránh lỗi quote PowerShell. CLI cũ vẫn dùng được, xem `scripts/vibiomir.py index --help`, `scripts/vibiomir.py retrieve --help`, `scripts/vibiomir.py translate --help`.
 
 | Tình huống | Xử lý |
 |---|---|
 | CUDA unavailable / CPU-only torch | Làm mục 2 và chạy preflight; không tự chuyển toàn lượt sang CPU |
-| OOM khi dịch | Batch tự giảm một nửa khi hết VRAM. Nếu batch 1 vẫn lỗi: `--translation-model qwen3-1.7b` (vẫn NF4), hoặc `--translation-model qwen3-0.6b --translation-quantize none`, rồi kiểm tra chất lượng bản dịch |
+| OOM khi dịch | Batch tự giảm một nửa khi hết VRAM. Nếu batch 1 vẫn lỗi, đóng chương trình khác đang dùng GPU; hoặc chạy `--skip-translation` (mất kênh tiếng Trung, Recall với tài liệu Trung giảm) |
 | OOM encode/rerank batch >1 | Code tự giảm batch. Nếu batch 1 vẫn lỗi, giải phóng VRAM; giảm max_length/chunk size và đo lại |
-| Đã đo pilot, muốn bỏ qua | `--skip-pilot` (hoặc `--encoder-batch`, `--rerank-batch`); dự phòng 16 encoder, 4 reranker, không phải batch đã benchmark |
-| Rerank quá lâu | Giảm `--rerank-k` (số cặp = 1.200 × rerank-k) hoặc đổi sang reranker nhỏ hơn; có thể giảm Recall |
-| Đổi model | Output mới, `--encoder qwen3-embedding-0.6b` hoặc `--reranker qwen3-reranker-0.6b`; luôn chỉ một reranker |
+| Muốn đổi batch | `--encoder-batch`, `--rerank-batch`, `--translate-batch` |
+| Rerank quá lâu | Giảm `--rerank-k` (số cặp = 1.200 × rerank-k); có thể giảm Recall |
 | Dịch có `rejected` | Xem `translations/rejected.jsonl`; pipeline dùng phần hợp lệ và giữ query gốc |
 | Embedding checkpoint differs | Dùng index/output mới; không ghép model hoặc chunk khác vào checkpoint |
 | Frozen corpus/config changed | Dùng `--out` mới để snapshot mới, giữ run cũ |
@@ -187,7 +214,6 @@ Kiểm thử offline, không tải model:
 
 ```powershell
 .\env\Scripts\python.exe -m unittest discover -s tests -v
-.\env\Scripts\python.exe -m unittest discover -s scripts -p "test_*.py"
 ```
 
 Bộ bổ sung kiểm tra resume embedding, tìm vector theo block, suffix Qwen, bản dịch cũ/đổi chữ số, ID ngoài corpus, ngưỡng sau giới hạn chunk/document, CLI đến ZIP và cache/snapshot. `tests/test_cascade.py` kiểm tra phần thác: tìm nguồn trong `nguyen\`, thẻ và tập con giữ nguyên chunk, kênh card, chia truy vấn theo shard, ghép embedding nhiều phần, ngưỡng F2 (so với vét cạn), hiệu chỉnh Platt và cửa sổ nộp. Các test này không chứng minh chất lượng model hay thông lượng RTX 2050; pilot và lượt nộp thật cung cấp số đo đó.

@@ -1,17 +1,13 @@
-"""B3: encode chunks and build the vector index.
+"""B3: encode texts (document cards, candidate chunks) and search the vectors.
 
-Cross-lingual retrieval is the point of this task: queries are Vietnamese, documents are also
-Chinese and English, so the dense channel carries the matches BM25 cannot make. The registry below
-only lists open multilingual encoders published before 2026-08-01 and at or under 15B parameters,
-which is what the rules allow. Sizes are the published parameter counts.
+Cross-lingual retrieval is the point of this task: queries are Vietnamese, most documents Chinese,
+so the dense channel carries matches BM25 cannot make. One encoder is used everywhere:
 
-    bge-m3                  BAAI/bge-m3, 568M, 2024-01, 8192 ctx, CLS pooling. Default: strong
-                            multilingual retrieval at a size that fits a 4GB laptop GPU.
-    multilingual-e5-large   intfloat/multilingual-e5-large, 560M, 2024-02, needs query:/passage:.
-    gte-multilingual-base   Alibaba-NLP/gte-multilingual-base, 305M, 2024-07, cheapest option.
-    qwen3-embedding-0.6b    Qwen/Qwen3-Embedding-0.6B, 0.6B, 2025-06, last-token pooling.
-    qwen3-embedding-4b      Qwen/Qwen3-Embedding-4B, 4B, 2025-06. Top of the MTEB multilingual
-                            board in its family; needs a 16GB GPU for comfortable encoding.
+    bge-m3      BAAI/bge-m3, 568M, 2024-01, open, multilingual, CLS pooling. Fast enough to encode
+                every document card of a large crawl on a T4 or a 4 GB laptop GPU.
+
+Larger encoders (Qwen3-Embedding-4B/8B) were removed: encoding every card with them costs several
+times more GPU hours, which the pipeline now spends on covering more documents.
 
 `hash` is not a model. It is a deterministic feature-hashing encoder used to run the whole flow
 offline, in tests and on a machine with no GPU. It proves the plumbing, never retrieval quality.
@@ -31,24 +27,6 @@ from ..teach.models import discover_students, load_backbone
 ENCODERS = {
     'bge-m3': {'hf_id': 'BAAI/bge-m3', 'pooling': 'cls', 'max_length': 1024,
                'query_prefix': '', 'doc_prefix': '', 'dim': 1024},
-    'multilingual-e5-large': {'hf_id': 'intfloat/multilingual-e5-large', 'pooling': 'mean',
-                              'max_length': 512, 'query_prefix': 'query: ',
-                              'doc_prefix': 'passage: ', 'dim': 1024},
-    'gte-multilingual-base': {'hf_id': 'Alibaba-NLP/gte-multilingual-base', 'pooling': 'cls',
-                              'max_length': 1024, 'query_prefix': '', 'doc_prefix': '',
-                              'dim': 768, 'trust_remote_code': True},
-    'qwen3-embedding-0.6b': {'hf_id': 'Qwen/Qwen3-Embedding-0.6B', 'pooling': 'last',
-                             'max_length': 1024, 'doc_prefix': '', 'dim': 1024,
-                             'query_prefix': 'Instruct: Given a Vietnamese medical question, '
-                                             'retrieve passages that answer it\nQuery: '},
-    'qwen3-embedding-4b': {'hf_id': 'Qwen/Qwen3-Embedding-4B', 'pooling': 'last',
-                           'max_length': 1024, 'doc_prefix': '', 'dim': 2560,
-                           'query_prefix': 'Instruct: Given a Vietnamese medical question, '
-                                           'retrieve passages that answer it\nQuery: '},
-    'qwen3-embedding-8b': {'hf_id': 'Qwen/Qwen3-Embedding-8B', 'pooling': 'last',
-                           'max_length': 1024, 'doc_prefix': '', 'dim': 4096, 'quantize': '4bit',
-                           'query_prefix': 'Instruct: Given a Vietnamese medical question, '
-                                           'retrieve passages that answer it\nQuery: '},
     'hash': {'hf_id': None, 'pooling': 'hash', 'max_length': 0,
              'query_prefix': '', 'doc_prefix': '', 'dim': 256},
 }

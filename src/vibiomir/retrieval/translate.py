@@ -27,8 +27,8 @@ from ..common.runtime import environment, release_model, Progress
 from ..teach.models import discover_students, load_backbone
 from .query import load_queries
 
-MODELS = {'qwen3-8b': 'Qwen/Qwen3-8B', 'qwen3-4b': 'Qwen/Qwen3-4B',
-          'qwen3-1.7b': 'Qwen/Qwen3-1.7B', 'qwen3-0.6b': 'Qwen/Qwen3-0.6B'}
+# One translator: Qwen3-4B (2025-04, open, 4B), 4-bit on a 4 GB laptop GPU, fp16 on a T4.
+MODELS = {'qwen3-4b': 'Qwen/Qwen3-4B'}
 # Translator students (teach/train): base model plus LoRA adapter, trained on PROMPT below.
 MODELS.update(discover_students('translator'))
 LANGUAGE_NAMES = {'en': 'English', 'zh': 'Simplified Chinese', 'vi': 'Vietnamese'}
@@ -42,10 +42,6 @@ HYDE_PROMPT = ('Write a short passage in {language}, 3 to 5 sentences, as it wou
 KINDS = {'translate': PROMPT, 'hyde': HYDE_PROMPT}
 _VIETNAMESE = re.compile(r'[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]',
                          re.IGNORECASE)
-
-
-def variant_name(kind, lang):
-    return f'translated_{lang}' if kind == 'translate' else f'{kind}_{lang}'
 
 
 def check_translation(source, text, lang):

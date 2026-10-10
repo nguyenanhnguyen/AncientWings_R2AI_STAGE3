@@ -65,6 +65,115 @@ def record_files(inputs: list[Path]):
     return groups
 
 
+OK_STATUSES = {"extracted", "ok"}
+FAILED_FIELDS = ["run", "id", "category", "reason", "domain", "url", "final_url", "status",
+                 "access_status", "quality_status", "http_status", "error_kind", "error",
+                 "browser_status"]
+CATEGORY_HELP = {
+    "robots_4xx": "robots.txt trả 4xx (thường 403) nên crawler coi như cấm; theo RFC 9309, 4xx nghĩa là không có robots.txt, có thể crawl lại",
+    "robots_disallow": "robots.txt cấm rõ ràng URL này; không crawl",
+    "robots_unreachable": "không đọc được robots.txt (timeout/5xx); thử lại sau",
+    "dead": "link chết: 404/410, DNS lỗi, URL hỏng",
+    "blocked": "site chặn: 401/403/429/451 hoặc trang challenge chống bot",
+    "temporary": "lỗi tạm thời: timeout, 5xx, mất kết nối, SSL; thử lại sau",
+    "not_article": "tải được nhưng không phải bài: ảnh/PDF lạ, quá lớn, chuyển về trang chủ, rỗng",
+    "quality_rejected": "tải được nhưng QC loại (trang lỗi, template, chữ quá ít)",
+    "other": "trạng thái khác, cần xem `error`",
+}
+
+
+def classify_failure(row: dict):
+    """-> (category, reason) for a record that did not yield a usable article, else None."""
+    status = str(row.get("status") or row.get("requests_status") or "missing")
+    quality = str(row.get("quality_status") or "")
+    if status in OK_STATUSES and quality != "rejected":
+        return None
+    if status in OK_STATUSES:
+        flags = ",".join(row.get("quality_flags") or []) or "rejected"
+        return "quality_rejected", flags
+    http = row.get("requests_http_status") or row.get("http_status")
+    kind = str(row.get("requests_error_kind") or row.get("error_kind") or "")
+    error = str(row.get("requests_error") or row.get("error") or "")
+    text = f"{status} {kind} {error}".lower()
+    if status.startswith("robots"):
+        if "unreachable" in text or "timeout" in text or "http 5" in text:
+            return "robots_unreachable", error[:80] or status
+        if re.search(r"robots http 4\d\d", text):
+            return "robots_4xx", re.search(r"robots http 4\d\d", text).group(0)
+        return "robots_disallow", status
+    if http in (404, 410) or any(k in text for k in ("http_404", "http_410", "dns", "invalid_url",
+                                                      "bad_url", "name or service not known")):
+        return "dead", kind or (f"http_{http}" if http else status)
+    if http in (401, 403, 429, 451) or any(k in text for k in ("challenge", "blocked", "http_403",
+                                                              "http_429", "captcha")):
+        return "blocked", kind or (f"http_{http}" if http else status)
+    if (isinstance(http, int) and http >= 500) or any(k in text for k in (
+            "timeout", "conn", "ssl", "http_5", "reset", "temporar")):
+        return "temporary", kind or status
+    if any(k in text for k in ("unsupported_content_type", "too_large", "empty", "homepage",
+                               "redirect", "extract")):
+        return "not_article", status
+    return "other", status
+
+
+def failed_link_row(row: dict, run: str):
+    found = classify_failure(row)
+    if found is None:
+        return None
+    url = str(row.get("url") or "")
+    return {"run": run, "id": row.get("id"), "category": found[0], "reason": found[1],
+            "domain": (urlsplit(str(row.get("final_url") or url)).hostname or row.get("domain") or "").lower(),
+            "url": url, "final_url": row.get("final_url") or "",
+            "status": row.get("status") or row.get("requests_status") or "",
+            "access_status": row.get("access_status") or "", "quality_status": row.get("quality_status") or "",
+            "http_status": row.get("requests_http_status") or row.get("http_status") or "",
+            "error_kind": row.get("requests_error_kind") or row.get("error_kind") or "",
+            "error": str(row.get("requests_error") or row.get("error") or "")[:200],
+            "browser_status": row.get("browser_status") or ""}
+
+
+def write_failed_links(out: Path, failed: list, scanned: dict, complete: bool):
+    """failed_links.csv (one row per link), failed_summary.json and FAILED_LINKS.md."""
+    failed.sort(key=lambda r: (r["category"], r["domain"], r["run"], int(r["id"]) if str(r["id"]).isdigit() else 0))
+    with (out / "failed_links.csv").open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=FAILED_FIELDS)
+        writer.writeheader()
+        writer.writerows(failed)
+    by_category = Counter(r["category"] for r in failed)
+    by_run = defaultdict(Counter)
+    by_domain = defaultdict(Counter)
+    for r in failed:
+        by_run[r["run"]][r["category"]] += 1
+        by_domain[r["domain"]][r["category"]] += 1
+    total = sum(scanned.values())
+    summary = {"complete_scan": complete, "records_scanned": scanned, "failed": len(failed),
+               "failed_share": round(len(failed) / total, 4) if total else None,
+               "by_category": dict(by_category.most_common()),
+               "by_run": {run: dict(c.most_common()) for run, c in by_run.items()},
+               "by_domain": {d: dict(c.most_common()) for d, c in
+                             sorted(by_domain.items(), key=lambda kv: -sum(kv[1].values()))}}
+    (out / "failed_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+                                             encoding="utf-8")
+    lines = ["# Link lỗi / không vào được", "",
+             f"- Phạm vi: **{'quét đủ mọi bản ghi' if complete else 'chỉ các bản ghi trong mẫu EDA'}**; "
+             f"đã đọc {total:,} bản ghi, lỗi **{len(failed):,}**"
+             + (f" ({100 * len(failed) / total:.1f}%)" if total else "") + ".",
+             "- Danh sách đầy đủ từng link: `failed_links.csv` (mở bằng Excel; lọc theo `category`, `domain`).",
+             "", "## Theo nguyên nhân", "", "| Nhóm | Số link | Ý nghĩa |", "|---|---:|---|"]
+    lines += [f"| `{c}` | {n:,} | {CATEGORY_HELP.get(c, '')} |" for c, n in by_category.most_common()]
+    lines += ["", "## Theo run", "", "| Run | Đã đọc | Lỗi | Chi tiết |", "|---|---:|---:|---|"]
+    for run in sorted(scanned):
+        c = by_run.get(run, Counter())
+        lines.append(f"| `{run}` | {scanned[run]:,} | {sum(c.values()):,} | "
+                     + ", ".join(f"{k}: {v}" for k, v in c.most_common()) + " |")
+    lines += ["", "## Domain lỗi nhiều nhất", "", "| Domain | Lỗi | Chi tiết |", "|---|---:|---|"]
+    for domain, c in list(sorted(by_domain.items(), key=lambda kv: -sum(kv[1].values())))[:30]:
+        lines.append(f"| `{domain}` | {sum(c.values()):,} | " + ", ".join(f"{k}: {v}" for k, v in c.most_common()) + " |")
+    lines.append("")
+    (out / "FAILED_LINKS.md").write_text("\n".join(lines), encoding="utf-8")
+    return summary
+
+
 def load_record(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -85,6 +194,10 @@ def main():
     parser.add_argument("--full-scan", action="store_true",
                         help="Parse every record JSON. This can take a long time for hundreds of thousands of small files.")
     parser.add_argument("--seed", type=int, default=20261008)
+    parser.add_argument("--failed-only", action="store_true",
+                        help="Only list failed/dead links, reading EVERY record of every run "
+                             "(skips the text statistics). Writes failed_links.csv, "
+                             "failed_summary.json and FAILED_LINKS.md.")
     args = parser.parse_args()
     if args.sample_per_stratum < 1 or args.files_per_run < 1:
         parser.error("sample limits must be positive")
@@ -112,9 +225,30 @@ def main():
     raw_ref = Counter()
     raw_exists_sample = Counter()
     quality_flags = Counter()
+    failed_rows = []
     max_examples = 12
 
     run_files = record_files(args.input)
+    if args.failed_only:
+        failed, scanned, bad = [], Counter(), 0
+        for run_dir, paths in sorted(run_files.items(), key=lambda pair: str(pair[0])):
+            run = str(run_dir.relative_to(ROOT)) if run_dir.is_relative_to(ROOT) else str(run_dir)
+            for position, path in enumerate(paths, 1):
+                row = load_record(path)
+                if "_eda_parse_error" in row:
+                    bad += 1
+                    continue
+                scanned[run] += 1
+                item = failed_link_row(row, run)
+                if item:
+                    failed.append(item)
+                if position % 20000 == 0:
+                    print(f"{run}: {position:,}/{len(paths):,}", flush=True)
+        summary = write_failed_links(out, failed, dict(scanned), complete=True)
+        print(json.dumps({k: summary[k] for k in ("records_scanned", "failed", "failed_share",
+                                                  "by_category")}, ensure_ascii=False, indent=2))
+        print(f"{bad:,} JSON errors. Wrote: {out / 'FAILED_LINKS.md'}, {out / 'failed_links.csv'}")
+        return
     available_per_run = {}
     selected_files = []
     for run_dir, paths in sorted(run_files.items(), key=lambda pair: str(pair[0])):
@@ -140,6 +274,9 @@ def main():
             continue
         parsed += 1
         records_per_run[run] += 1
+        failed_item = failed_link_row(row, run)
+        if failed_item:
+            failed_rows.append(failed_item)
         rid = row.get("id")
         if rid is not None:
             if rid in run_ids[run]:
@@ -257,6 +394,9 @@ def main():
         "raw_path_record_counts": dict(raw_ref), "strata_count": len(sample_reservoirs),
         "sample_per_stratum_cap": args.sample_per_stratum,
     }
+    failed_summary = write_failed_links(out, failed_rows, dict(records_per_run), complete=args.full_scan)
+    report["failed_links"] = {k: failed_summary[k] for k in ("complete_scan", "failed", "failed_share",
+                                                             "by_category", "by_run")}
     (out / "summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     with (out / "domain_counts.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
@@ -300,6 +440,11 @@ def main():
             "decode_warning", "mojibake_suspect", "html_residue_suspect", "cjk_dominant_text"})
         lines.append(f"| `{run}` | {statuses} | {flags} |")
     lines += ["", f"Quality flags in sample: `{json.dumps(dict(quality_flags.most_common()), ensure_ascii=False)}`.",
+              "", "## Failed / dead links", "",
+              f"{failed_summary['failed']:,} of {parsed:,} analysed records did not yield a usable article: "
+              + ", ".join(f"{k} {v:,}" for k, v in failed_summary["by_category"].items()) + ".",
+              "Details by run and domain: `FAILED_LINKS.md`; one row per link: `failed_links.csv`.",
+              "" if args.full_scan else "This covers the sampled records only; run with `--failed-only` for every link.",
               "", "## Quality and text integrity signals", "",
               "Counts are heuristic indicators requiring inspection; a mojibake marker can occur legitimately.", "",
               "`question_mark_lines`, `records_with_question_mark_line`, and `records_with_qa_role_marker` are weak FAQ/Q&A structure signals, not proof that a clean question–answer pair was found.", "",

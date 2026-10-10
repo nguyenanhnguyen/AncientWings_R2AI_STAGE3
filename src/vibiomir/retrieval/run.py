@@ -110,7 +110,7 @@ def run(args):
     if not args.no_bm25:
         bm25_path = index_dir / 'bm25.npz'
         if not bm25_path.exists():
-            raise FileNotFoundError(f'{bm25_path} missing; run scripts/index.py bm25 first.')
+            raise FileNotFoundError(f'{bm25_path} missing; run `vibiomir.py index bm25` first.')
         bm25 = BM25.load(bm25_path)
         if bm25.n_docs != len(chunks):
             raise ValueError('BM25 index size does not match the chunks file.')
@@ -134,7 +134,7 @@ def run(args):
         _check_pair(args.chunks, dense_dir, names=('dense_manifest.json',))
         embeddings = dense_dir / 'embeddings.npy'
         if not embeddings.exists():
-            raise FileNotFoundError(f'{embeddings} missing; run scripts/index.py dense first.')
+            raise FileNotFoundError(f'{embeddings} missing; run `vibiomir.py index dense` first.')
         manifest = storage.read_json(dense_dir / 'dense_manifest.json')
         matrix = np.load(embeddings, mmap_mode='r')
         if matrix.shape[0] != len(chunks):

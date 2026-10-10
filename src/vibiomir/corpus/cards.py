@@ -9,12 +9,12 @@ hours; encoding one short card per document costs a fraction of that. So retriev
    matching question to question is far easier than question to answer. Cards use the chunk
    schema, so the BM25/dense index builders and the retrieval CLI work on them unchanged.
 2. Retrieval over the cards gives each query its top documents.
-3. `subset` keeps the chunks of those documents only (the union over all queries) and writes, per
-   query, its ranked document list. Chunk-level indexing, retrieval and reranking then run on this
-   much smaller set, and the document ranking returns as its own fusion channel ("card").
+3. `subset` chunks those documents only (the union over all queries) and writes, per query, its
+   ranked document list. Chunk-level indexing, retrieval and reranking then run on this much
+   smaller set, and the document ranking returns as its own fusion channel ("card").
 
-Chunk ids, offsets and text in the subset are the rows of the full chunk file, untouched, so the
-submission re-slice check still proves every chunk is source text.
+Chunks carry exact char offsets into the corpus text, so the submission re-slice check still
+proves every chunk is source text.
 """
 import argparse
 import json
@@ -29,7 +29,7 @@ from ..common import storage
 from ..common.console import emit
 from ..common.schema import (CHUNK_SCHEMA, count_tokens, detect_language, document_columns,
                              document_text)
-from .chunk import lead_span
+from .chunk import chunk_document, lead_span
 
 CARD_SUFFIX = 'card'
 
@@ -108,30 +108,47 @@ def ranked_documents(candidate_files, limit=None):
 
 
 def subset(args):
+    """Chunk only the documents some query found through the cards (the union over queries).
+
+    Chunking the whole corpus would spend most of its time on documents no query ever reaches;
+    here only candidates are read (a Parquet filter on id) and cut, with the same chunker and the
+    same span guarantees as `chunk.py`.
+    """
     ranked = ranked_documents(args.candidates, args.docs_per_query)
     if not ranked:
         raise ValueError('No card candidates; run card retrieval first.')
     wanted = sorted({doc_id for docs in ranked.values() for doc_id in docs})
-    table = pq.read_table(args.chunks)
-    mask = pc.is_in(table['doc_id'], value_set=pa.array(wanted, type=pa.int64()))
-    picked = table.filter(mask)
-    if picked.num_rows == 0:
-        raise ValueError('No chunk belongs to a candidate document; cards and chunks differ.')
+    options = {'target_tokens': args.target_tokens, 'overlap_tokens': args.overlap_tokens,
+               'max_tokens': args.max_tokens, 'min_tokens': args.min_tokens}
+    rows, seen = [], set()
+    id_filter = pa.array(wanted, type=pa.int64())
+    for source in args.corpus:
+        for path in storage.parquet_files(source):
+            table = pq.read_table(path, columns=None)
+            table = table.filter(pc.is_in(table['id'], value_set=id_filter))
+            for document in table.to_pylist():
+                doc_id = int(document['id'])
+                if doc_id in seen:
+                    continue
+                seen.add(doc_id)
+                rows.extend(chunk_document(document, text_field=args.text_field, **options))
+    if not rows:
+        raise ValueError('No chunk from the candidate documents; cards and corpus differ.')
+    rows.sort(key=lambda row: (row['doc_id'], row['chunk_order']))
     out = Path(args.out)
-    path = storage.write_table(out / 'chunks.parquet', picked)
+    path = storage.write_parquet(out / 'chunks.parquet', rows, schema=CHUNK_SCHEMA)
     doc_path = out / 'doc_candidates.jsonl'
     storage.write_jsonl(doc_path, [{'query_id': query_id, 'doc_ids': docs}
                                    for query_id, docs in sorted(ranked.items())])
     summary = {'stage': 'subset', 'queries': len(ranked), 'documents': len(wanted),
-               'documents_per_query': args.docs_per_query, 'chunks': picked.num_rows,
-               'chunks_in_full_file': table.num_rows,
-               'chunks_file': str(args.chunks), 'chunks_sha256': storage.sha256_file(args.chunks),
-               'candidates': [str(path) for path in args.candidates]}
-    # A chunk_manifest next to the subset lets Block D recover the text field used by chunking.
-    source_manifest = Path(args.chunks).with_name('chunk_manifest.json')
-    text_field = storage.read_json(source_manifest).get('text_field') if source_manifest.exists() else None
-    storage.write_manifest(out / 'chunk_manifest.json', {**summary, 'text_field': text_field},
-                           files=[path, doc_path])
+               'documents_chunked': len(seen), 'documents_per_query': args.docs_per_query,
+               'chunks': len(rows), 'chunks_per_document': round(len(rows) / max(1, len(seen)), 2),
+               'options': options, 'text_field': args.text_field,
+               'corpus': [str(source) for source in args.corpus],
+               'candidates': [str(path) for path in args.candidates],
+               'span_exactness': 'char_start/char_end verified against normalised document text'}
+    # Named like chunk.py's manifest: Block D reads the text field used for chunking from it.
+    storage.write_manifest(out / 'chunk_manifest.json', summary, files=[path, doc_path])
     emit(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary
 
@@ -145,12 +162,17 @@ def main():
     step.add_argument('--lead-tokens', type=int, default=160)
     step.add_argument('--text-field', default=None)
     step.set_defaults(func=build)
-    step = sub.add_parser('subset', help='Chunks of the documents found through the cards.')
+    step = sub.add_parser('subset', help='Chunk the documents found through the cards.')
     step.add_argument('--candidates', nargs='+', required=True,
                       help='candidates.jsonl from retrieval over the cards (one or more shards).')
-    step.add_argument('--chunks', default='work/chunks/chunks.parquet')
+    step.add_argument('--corpus', nargs='+', default=['work/corpus/corpus.parquet'])
     step.add_argument('--out', default='work/subset')
     step.add_argument('--docs-per-query', type=int, default=200)
+    step.add_argument('--target-tokens', type=int, default=384)
+    step.add_argument('--overlap-tokens', type=int, default=32)
+    step.add_argument('--max-tokens', type=int, default=768)
+    step.add_argument('--min-tokens', type=int, default=24)
+    step.add_argument('--text-field', default=None)
     step.set_defaults(func=subset)
     args = parser.parse_args()
     if getattr(args, 'lead_tokens', 16) < 16 or getattr(args, 'docs_per_query', 1) < 1:

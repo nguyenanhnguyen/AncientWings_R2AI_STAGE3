@@ -260,7 +260,7 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--corpus', nargs='+', default=['work/corpus/corpus.parquet'],
-                        help='Corpus files written by scripts/prepare.py.')
+                        help='Corpus files written by `vibiomir.py prepare`.')
     parser.add_argument('--out', default='work/chunks')
     parser.add_argument('--status', default='ok',
                         help="Keep only rows whose `status` equals this when the column exists; "

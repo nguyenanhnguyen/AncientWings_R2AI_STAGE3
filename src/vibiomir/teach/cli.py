@@ -1,4 +1,4 @@
-"""Block T CLI: teach.py {sample|generate|mine|judge|train} ..."""
+"""Block T CLI: vibiomir.py teach {sample|generate|mine|judge|train} ..."""
 import argparse
 from pathlib import Path
 

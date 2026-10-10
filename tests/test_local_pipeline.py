@@ -111,10 +111,10 @@ class ResumableTests(unittest.TestCase):
             storage.write_parquet(queries, [{'id': 1, 'query': 'Điều trị sỏi thận?'}])
             storage.write_parquet(links, [{'id': 1}, {'id': 2}])
             out = root/'run'
-            command = [sys.executable, str(ROOT/'scripts/pipeline.py'), '--source', str(corpus),
+            command = [sys.executable, str(ROOT/'scripts/vibiomir.py'), 'pipeline', '--source', str(corpus),
                        '--out', str(out), '--queries', str(queries), '--links', str(links),
                        '--limit', '2', '--gpus', '0', '--encoder', 'hash',
-                       '--reranker', 'identity', '--skip-pilot', '--skip-translation']
+                       '--reranker', 'identity', '--skip-translation']
             first = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(first.returncode, 0, first.stdout+first.stderr)
             digest = storage.sha256_file(out/'submission/submission.zip')
@@ -126,8 +126,6 @@ class ResumableTests(unittest.TestCase):
             self.assertIn('Dùng lại', second.stdout)
             self.assertEqual(digest, storage.sha256_file(out/'submission/submission.zip'))
 
-            # The window variant and its no-window twin both come out of one run.
-            self.assertTrue((out/'submission_nowindow/submission.zip').is_file())
             args = argparse.Namespace(chunks=str(out/'subset/chunks.parquet'), index=str(out/'index/subset'),
                    queries=str(queries), out=str(out/'ensemble'), translations=None, no_bm25=False,
                    no_dense=False, encoder=None, keyword_variant=True, top_k=10, fuse_k=10,

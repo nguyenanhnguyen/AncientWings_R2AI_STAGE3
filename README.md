@@ -32,18 +32,18 @@ Hướng dẫn đầy đủ từng bước, thời gian đo được và cách x
 ```powershell
 .\env\Scripts\python.exe -m pip install -r requirements/rag.txt
 
-.\env\Scripts\python.exe scripts/prepare.py --source nguyen/output/runs/batch01_nguyen --limit 30000
-.\env\Scripts\python.exe scripts/chunk.py
-.\env\Scripts\python.exe scripts/index.py all --encoder bge-m3
-.\env\Scripts\python.exe scripts/retrieve.py --keyword-variant
-.\env\Scripts\python.exe scripts/submit.py --links data/links_corpus.parquet --profile recall
+.\env\Scripts\python.exe scripts/vibiomir.py prepare --source nguyen/output/runs/batch01_nguyen --limit 30000
+.\env\Scripts\python.exe scripts/vibiomir.py chunk
+.\env\Scripts\python.exe scripts/vibiomir.py index all --encoder bge-m3
+.\env\Scripts\python.exe scripts/vibiomir.py retrieve --keyword-variant
+.\env\Scripts\python.exe scripts/vibiomir.py submit --links data/links_corpus.parquet --profile recall
 ```
 
 Mọi đường dẫn mặc định đều trỏ vào `work/`. `prepare.py` đọc thư mục run có `records/` hoặc file `.parquet`/`.json`/`.jsonl` xuất từ crawler; nhiều nguồn thì truyền nhiều đường dẫn vào `--source`. Kết quả nộp là `work/submission/submission.zip`.
 
 Muốn chạy thử toàn bộ flow mà không tải model, dùng `--encoder hash` và `--reranker identity`. Hai tùy chọn này chỉ kiểm tra đường ống, không phản ánh chất lượng truy hồi.
 
-`scripts/evaluate.py` lo phần đánh giá: `sheet` xuất phiếu để người gán nhãn, `collect` biến phiếu đã điền thành `labels.jsonl`, `score` tính Precision/Recall/F2 hai cấp và quy từng tài liệu bị mất về block gây ra. BTC không phát hành nhãn, nên `pseudo` chỉ dùng cho smoke test và báo cáo sẽ ghi rõ điểm đó là vòng tròn.
+`scripts/vibiomir.py evaluate` lo phần đánh giá: `sheet` xuất phiếu để người gán nhãn, `collect` biến phiếu đã điền thành `labels.jsonl`, `score` tính Precision/Recall/F2 hai cấp và quy từng tài liệu bị mất về block gây ra. BTC không phát hành nhãn, nên `pseudo` chỉ dùng cho smoke test và báo cáo sẽ ghi rõ điểm đó là vòng tròn.
 
 Model mặc định: `bge-m3` (568M) cho embedding và `bge-reranker-v2-m3` (568M) cho reranking. Các lựa chọn khác liệt kê trong docstring của [embedding.py](src/vibiomir/index/embedding.py) và [rerank.py](src/vibiomir/retrieval/rerank.py), gồm `qwen3-embedding-4b` và `qwen3-reranker-4b`. Mọi model trong hai danh sách đều là model mở, phát hành trước 01/08/2026 và không quá 15B tham số, theo quy định cuộc thi; trước khi nộp vẫn cần tự đối chiếu lại ngày phát hành và số tham số thực tế.
 

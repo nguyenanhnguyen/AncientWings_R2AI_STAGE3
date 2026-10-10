@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -29,7 +30,7 @@ def atomic_write_bytes(path, data):
     try:
         with os.fdopen(handle, 'wb') as stream:
             stream.write(data)
-        os.replace(temporary, path)
+        _replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
@@ -104,11 +105,25 @@ def write_table(path, table, compression='zstd'):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + '.tmp')
     pq.write_table(table, temporary, compression=compression)
-    if not pq.read_table(temporary).equals(table):
+    with pq.ParquetFile(temporary) as reader:
+        same = reader.read().equals(table)
+    if not same:
         temporary.unlink(missing_ok=True)
         raise ValueError(f'Parquet round-trip mismatch: {path}')
-    os.replace(temporary, path)
+    _replace(temporary, path)
     return path
+
+
+def _replace(source, target, attempts=20):
+    """os.replace that waits out Windows' brief locks on a just-written file (antivirus, indexer)."""
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.25)
 
 
 def write_manifest(path, payload, files=()):
