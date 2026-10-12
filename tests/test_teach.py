@@ -203,23 +203,17 @@ class LossTests(unittest.TestCase):
         self.assertIn('9', [item['chunk_id'] for item in picked])
 
 
-class StudentRegistryTests(unittest.TestCase):
-    def test_finished_student_is_discovered_with_adapter_digest(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            folder = Path(temporary) / 'reranker-4b'
-            folder.mkdir()
-            (folder / 'adapter_model.safetensors').write_bytes(b'weights')
-            storage.write_json(folder / models.STUDENT_FILE, {
-                'task': 'reranker', 'size': '4b', 'base': 'Qwen/Qwen3-Reranker-4B',
-                'quantize': 'none', 'config': {'kind': 'causal-yes-no', 'max_length': 640}})
-            found = models.discover_students('reranker', temporary)
-            self.assertIn('student:reranker-4b', found)
-            self.assertEqual(found['student:reranker-4b']['hf_id'], 'Qwen/Qwen3-Reranker-4B')
-            self.assertEqual(models.discover_students('embedding', temporary), {})
-            (folder / 'adapter_model.safetensors').write_bytes(b'other')
-            again = models.discover_students('reranker', temporary)
-            self.assertNotEqual(found['student:reranker-4b']['adapter_sha'],
-                                again['student:reranker-4b']['adapter_sha'])
+class PromptTests(unittest.TestCase):
+    def test_judge_and_student_read_the_same_prompt(self):
+        # The teacher's P(yes) is only a training target for the reranker student while both see
+        # byte-identical strings, so the prompt lives in one place and is asserted here.
+        messages = models.judge_messages('Trẻ sốt xuất huyết uống aspirin được không?', PASSAGE)
+        self.assertEqual(messages[0]['content'], models.JUDGE_SYSTEM)
+        self.assertEqual(messages[1]['content'],
+                         models.qwen_pair_text('Trẻ sốt xuất huyết uống aspirin được không?',
+                                               PASSAGE))
+        self.assertIn(models.JUDGE_SYSTEM, models.QWEN_PREFIX)
+        self.assertTrue(models.QWEN_SUFFIX.startswith('<|im_end|>'))
 
 
 if __name__ == '__main__':

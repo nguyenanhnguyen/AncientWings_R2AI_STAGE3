@@ -17,17 +17,8 @@ across model families without validation. Submission thresholds remain tunable h
 """
 import numpy as np
 
-from ..teach.models import (JUDGE_INSTRUCTION as INSTRUCTION, JUDGE_SYSTEM, discover_students,
-                            load_backbone)
-
-# The Qwen3-Reranker prompt. Reranker students are trained on exactly these strings (teach/train).
-QWEN_PREFIX = f'<|im_start|>system\n{JUDGE_SYSTEM}<|im_end|>\n<|im_start|>user\n'
-QWEN_SUFFIX = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
-
-
-def qwen_pair_text(query, passage):
-    return f'<Instruct>: {INSTRUCTION}\n<Query>: {query}\n<Document>: {passage}'
-
+INSTRUCTION = ('Given a Vietnamese medical question, judge whether the document passage '
+               'contains information that answers it.')
 
 RERANKERS = {
     'bge-reranker-v2-m3': {'hf_id': 'BAAI/bge-reranker-v2-m3', 'kind': 'sequence-classification',
@@ -38,12 +29,8 @@ RERANKERS = {
                             'max_length': 1024},
     'qwen3-reranker-4b': {'hf_id': 'Qwen/Qwen3-Reranker-4B', 'kind': 'causal-yes-no',
                           'max_length': 1024},
-    'qwen3-reranker-8b': {'hf_id': 'Qwen/Qwen3-Reranker-8B', 'kind': 'causal-yes-no',
-                          'max_length': 1024, 'quantize': '4bit'},
     'identity': {'hf_id': None, 'kind': 'identity', 'max_length': 0},
 }
-# Trained students (teach/train) appear as 'student:<folder>' under $VIBIOMIR_STUDENTS.
-RERANKERS.update(discover_students('reranker'))
 
 
 class IdentityReranker:
@@ -72,27 +59,33 @@ class CrossEncoderReranker:
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         dtype = torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32
         self.tokenizer = AutoTokenizer.from_pretrained(self.config['hf_id'], revision=revision)
+        kwargs = dict(torch_dtype=dtype, revision=revision, attn_implementation='sdpa')
         if self.config['kind'] == 'causal-yes-no':
             from transformers import AutoModelForCausalLM
 
             self.tokenizer.padding_side = 'left'
-            self.model = load_backbone(AutoModelForCausalLM, self.config, self.device, dtype,
-                                       revision, attn_implementation='sdpa')
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.config['hf_id'], **kwargs).to(self.device).eval()
             self.yes_id = self.tokenizer.convert_tokens_to_ids('yes')
             self.no_id = self.tokenizer.convert_tokens_to_ids('no')
-            self.prefix_ids = self.tokenizer.encode(QWEN_PREFIX, add_special_tokens=False)
-            self.suffix_ids = self.tokenizer.encode(QWEN_SUFFIX, add_special_tokens=False)
+            self.prefix = ('<|im_start|>system\nJudge whether the Document meets the requirements '
+                           'based on the Query and the Instruct provided. Note that the answer '
+                           'can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n')
+            self.suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+            self.prefix_ids = self.tokenizer.encode(self.prefix, add_special_tokens=False)
+            self.suffix_ids = self.tokenizer.encode(self.suffix, add_special_tokens=False)
         else:
             from transformers import AutoModelForSequenceClassification
 
-            self.model = load_backbone(AutoModelForSequenceClassification, self.config,
-                                       self.device, dtype, revision, attn_implementation='sdpa')
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.config['hf_id'], **kwargs).to(self.device).eval()
         if hasattr(self.model.config, 'use_cache'):
             self.model.config.use_cache = False
 
     def _inputs(self, query, batch):
         if self.config['kind'] == 'causal-yes-no':
-            prompts = [qwen_pair_text(query, passage) for passage in batch]
+            prompts = [f'<Instruct>: {INSTRUCTION}\n<Query>: {query}\n'
+                       f'<Document>: {passage}' for passage in batch]
             inputs = self.tokenizer(prompts, padding=False, truncation=True,
                                     add_special_tokens=False, return_attention_mask=False,
                                     max_length=self.config['max_length'] - len(self.prefix_ids)

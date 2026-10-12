@@ -1,4 +1,4 @@
-"""T5: train a 4B, 8B or 14B student for one pipeline role from the teacher's data.
+﻿"""T5: train a 4B, 8B or 14B student for one pipeline role from the teacher's data.
 
     reranker    Qwen3-Reranker-4B/8B or Qwen3-14B, yes/no head. Listwise distillation of the
                 teacher's P(yes) over each group, plus a pointwise term so scores stay calibrated
@@ -169,7 +169,7 @@ class Student:
             if parameter.requires_grad:
                 parameter.data = parameter.data.float()
         if args.task == 'reranker':
-            from ..retrieval.rerank import QWEN_PREFIX, QWEN_SUFFIX
+            from .models import QWEN_PREFIX, QWEN_SUFFIX
 
             self.prefix = self.tokenizer.encode(QWEN_PREFIX, add_special_tokens=False)
             self.suffix = self.tokenizer.encode(QWEN_SUFFIX, add_special_tokens=False)
@@ -188,7 +188,7 @@ class Student:
         return ids.to(self.device), mask.to(self.device)
 
     def rerank_logits(self, query, passages):
-        from ..retrieval.rerank import qwen_pair_text
+        from .models import qwen_pair_text
 
         room = self.args.max_length - len(self.prefix) - len(self.suffix)
         bodies = self.tokenizer([qwen_pair_text(query, p) for p in passages],
@@ -321,7 +321,7 @@ def _push(folder, repo, path_in_repo):
         api.upload_folder(folder_path=str(folder), path_in_repo=path_in_repo, repo_id=repo,
                           commit_message=f'sync {path_in_repo}')
     except Exception as error:
-        emit(f'Hub upload lỗi: {error}')
+        emit(f'Hub upload lá»—i: {error}')
 
 
 def run(args):
@@ -343,7 +343,7 @@ def run(args):
     if not train:
         raise ValueError('No training examples; run T2-T4 first (or check --teach).')
     emit(f'{args.task}-{args.size}: train {len(train)}, dev {len(dev)}, '
-         f'bỏ {dropped} nhóm teacher không xác nhận positive')
+         f'bá» {dropped} nhÃ³m teacher khÃ´ng xÃ¡c nháº­n positive')
 
     student = Student(args)
     trainable = [p for p in student.model.parameters() if p.requires_grad]
@@ -374,9 +374,9 @@ def run(args):
                 import shutil
 
                 shutil.copytree(pulled, checkpoint, dirs_exist_ok=True)
-                emit('Đã tải checkpoint từ Hub.')
+                emit('ÄÃ£ táº£i checkpoint tá»« Hub.')
         except Exception as error:  # no repo yet means a first run
-            emit(f'Không tải được checkpoint từ Hub ({error}); train từ đầu.')
+            emit(f'KhÃ´ng táº£i Ä‘Æ°á»£c checkpoint tá»« Hub ({error}); train tá»« Ä‘áº§u.')
     if args.resume and (checkpoint / 'trainer_state.pt').exists():
         from peft import set_peft_model_state_dict
         from safetensors.torch import load_file
@@ -386,11 +386,11 @@ def run(args):
         optimizer.load_state_dict(saved.pop('optimizer'))
         scaler.load_state_dict(saved.pop('scaler'))
         state = saved
-        emit(f"Tiếp tục từ update {state['update']}/{total_updates}")
+        emit(f"Tiáº¿p tá»¥c tá»« update {state['update']}/{total_updates}")
 
     metrics = {'before': state.get('before') or evaluate(args.task, student, dev, texts, args)}
     state['before'] = metrics['before']
-    emit(f"Trước khi train: {metrics['before']}")
+    emit(f"TrÆ°á»›c khi train: {metrics['before']}")
     step = make_step(args.task, student, texts, args)
     deadline = Deadline(args.hours)
     rng = random.Random(args.seed + state['update'])
@@ -421,14 +421,14 @@ def run(args):
             rate = (state['update'] - start_update) / max(1e-6, time.monotonic() - started)
             state['history'].append({'update': state['update'], 'loss': round(total, 5)})
             emit(f"update {state['update']}/{total_updates} loss {total:.4f} "
-                 f"lr {lr_at(state['update']):.2e} | {rate * 60:.1f} update/phút")
+                 f"lr {lr_at(state['update']):.2e} | {rate * 60:.1f} update/phÃºt")
         if state['update'] % args.save_every == 0:
             _checkpoint(student, optimizer, scaler, state, checkpoint)
             _push(checkpoint, args.hub_repo, f'students/{out.name}/checkpoint')
         if deadline.passed():
             _checkpoint(student, optimizer, scaler, state, checkpoint)
             _push(checkpoint, args.hub_repo, f'students/{out.name}/checkpoint')
-            emit('Hết thời gian session: đã lưu checkpoint, chạy lại với --resume.')
+            emit('Háº¿t thá»i gian session: Ä‘Ã£ lÆ°u checkpoint, cháº¡y láº¡i vá»›i --resume.')
             break
     else:
         finished = True

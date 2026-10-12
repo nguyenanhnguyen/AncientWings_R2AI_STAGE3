@@ -1,13 +1,10 @@
-"""Teacher and student registries, the prompts the teacher answers, and student loading.
+﻿"""Teacher and student registries, the prompts the teacher answers, and student loading.
 
 Every listed model is open and was published before 2026-08-01. Students are at or under 15B
 parameters (Qwen3-14B has 14.8B). The 14B reranker and embedding students start from the chat
 model, not from a retrieval checkpoint, so they need more training data than 4B/8B to catch up.
 """
-import hashlib
 import json
-import os
-from pathlib import Path
 import re
 
 from ..common.schema import detect_language, normalise_for_match
@@ -36,14 +33,14 @@ STUDENTS = {
 STUDENT_QUANTIZE = {'0.6b': 'none', '4b': 'none', '8b': '4bit', '14b': '4bit'}
 
 STYLES = [
-    'một câu ngắn hỏi về triệu chứng của chính mình',
-    'cha mẹ hỏi về bệnh của con nhỏ, có nêu tuổi của bé',
-    'người lớn tuổi kể bệnh nền rồi hỏi cách xử lý',
-    'hỏi về thuốc: liều dùng, tác dụng phụ hoặc tương tác',
-    'kể một đoạn dài nhiều chi tiết (thời gian, triệu chứng, đã khám gì) rồi mới hỏi',
-    'hỏi về chế độ ăn uống, sinh hoạt hoặc phòng bệnh',
-    'hỏi kết quả xét nghiệm hoặc chỉ số có bình thường không',
-    'hỏi có nên đi khám không và khám chuyên khoa nào',
+    'má»™t cÃ¢u ngáº¯n há»i vá» triá»‡u chá»©ng cá»§a chÃ­nh mÃ¬nh',
+    'cha máº¹ há»i vá» bá»‡nh cá»§a con nhá», cÃ³ nÃªu tuá»•i cá»§a bÃ©',
+    'ngÆ°á»i lá»›n tuá»•i ká»ƒ bá»‡nh ná»n rá»“i há»i cÃ¡ch xá»­ lÃ½',
+    'há»i vá» thuá»‘c: liá»u dÃ¹ng, tÃ¡c dá»¥ng phá»¥ hoáº·c tÆ°Æ¡ng tÃ¡c',
+    'ká»ƒ má»™t Ä‘oáº¡n dÃ i nhiá»u chi tiáº¿t (thá»i gian, triá»‡u chá»©ng, Ä‘Ã£ khÃ¡m gÃ¬) rá»“i má»›i há»i',
+    'há»i vá» cháº¿ Ä‘á»™ Äƒn uá»‘ng, sinh hoáº¡t hoáº·c phÃ²ng bá»‡nh',
+    'há»i káº¿t quáº£ xÃ©t nghiá»‡m hoáº·c chá»‰ sá»‘ cÃ³ bÃ¬nh thÆ°á»ng khÃ´ng',
+    'há»i cÃ³ nÃªn Ä‘i khÃ¡m khÃ´ng vÃ  khÃ¡m chuyÃªn khoa nÃ o',
 ]
 
 GENERATE_SYSTEM = (
@@ -52,7 +49,7 @@ GENERATE_SYSTEM = (
     'realistically type, whose answer is contained in the passage.\n'
     'Rules:\n'
     '- The question is in natural, everyday Vietnamese, written as the patient, never quoting '
-    'the passage and never mentioning "bài viết", "đoạn văn" or the website.\n'
+    'the passage and never mentioning "bÃ i viáº¿t", "Ä‘oáº¡n vÄƒn" or the website.\n'
     '- Use different wording from the passage: lay terms, symptoms described in the patient\'s '
     'own words, typos are fine. Keep every fact the answer depends on.\n'
     '- "evidence" is a short span copied character for character from the passage that answers '
@@ -65,17 +62,26 @@ GENERATE_SYSTEM = (
     '"query_en": "...", "query_zh": "..."}')
 
 GENERATE_EXAMPLES = [
-    'Bé nhà em 18 tháng sốt 39 độ hai hôm nay, uống hạ sốt xong lại sốt, có cần cho bé đi viện '
-    'không ạ?',
-    'Tôi 62 tuổi bị tiểu đường type 2, gần đây hay tê bì chân về đêm, như vậy có phải biến '
-    'chứng không và nên làm gì?',
-    'uống thuốc tránh thai khẩn cấp xong bị ra máu có sao không',
+    'BÃ© nhÃ  em 18 thÃ¡ng sá»‘t 39 Ä‘á»™ hai hÃ´m nay, uá»‘ng háº¡ sá»‘t xong láº¡i sá»‘t, cÃ³ cáº§n cho bÃ© Ä‘i viá»‡n '
+    'khÃ´ng áº¡?',
+    'TÃ´i 62 tuá»•i bá»‹ tiá»ƒu Ä‘Æ°á»ng type 2, gáº§n Ä‘Ã¢y hay tÃª bÃ¬ chÃ¢n vá» Ä‘Ãªm, nhÆ° váº­y cÃ³ pháº£i biáº¿n '
+    'chá»©ng khÃ´ng vÃ  nÃªn lÃ m gÃ¬?',
+    'uá»‘ng thuá»‘c trÃ¡nh thai kháº©n cáº¥p xong bá»‹ ra mÃ¡u cÃ³ sao khÃ´ng',
 ]
 
 JUDGE_SYSTEM = ('Judge whether the Document meets the requirements based on the Query and the '
                 'Instruct provided. Note that the answer can only be "yes" or "no".')
 JUDGE_INSTRUCTION = ('Given a Vietnamese medical question, judge whether the document passage '
                      'contains information that answers it.')
+
+# The Qwen3-Reranker prompt, kept here so block T does not depend on the retrieval package: the
+# teacher's judge and the reranker student must be trained and scored on the very same strings.
+QWEN_PREFIX = f'<|im_start|>system\n{JUDGE_SYSTEM}<|im_end|>\n<|im_start|>user\n'
+QWEN_SUFFIX = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
+
+
+def qwen_pair_text(query, passage):
+    return f'<Instruct>: {JUDGE_INSTRUCTION}\n<Query>: {query}\n<Document>: {passage}'
 
 
 def generate_messages(passage, style):
@@ -129,64 +135,6 @@ def parse_generation(raw, passage):
     return record, None
 
 
-# --- Students inside the pipeline -------------------------------------------------------------
+# --- Where a finished student is written -------------------------------------------------------
 
 STUDENT_FILE = 'vibiomir_student.json'
-
-
-def _adapter_digest(folder):
-    digest = hashlib.sha256()
-    for path in sorted(Path(folder).glob('adapter_*')):
-        digest.update(path.name.encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()[:16]
-
-
-def discover_students(task, root=None):
-    """{'student:<dir name>': config} for finished students of one task under VIBIOMIR_STUDENTS."""
-    root = Path(root or os.environ.get('VIBIOMIR_STUDENTS', 'work/students'))
-    found = {}
-    if not root.is_dir():
-        return found
-    for marker in sorted(root.glob(f'*/{STUDENT_FILE}')):
-        info = json.loads(marker.read_text(encoding='utf-8'))
-        if info.get('task') != task:
-            continue
-        config = dict(info['config'])
-        config.update(hf_id=info['base'], adapter=str(marker.parent),
-                      adapter_sha=_adapter_digest(marker.parent), quantize=info['quantize'])
-        found[f'student:{marker.parent.name}'] = config
-    return found
-
-
-def load_backbone(model_class, config, device, dtype, revision=None, **extra):
-    """Base weights (optionally 4-bit) plus the student's LoRA adapter when the config has one."""
-    import torch
-
-    kwargs = dict(torch_dtype=dtype, revision=revision, **extra)
-    # Prefer safetensors when available, but support official bin-only checkpoints
-    # such as BAAI/bge-m3. Preserve an explicit caller format restriction.
-    kwargs.setdefault('use_safetensors', config.get('use_safetensors'))
-    quantized = config.get('quantize') == '4bit'
-    direct = config.get('load_on_device', False) and str(device).startswith('cuda')
-    if direct:
-        # Load large inference checkpoints onto one GPU shard by shard, avoiding two full
-        # CPU copies when both Kaggle workers load a 4B model concurrently. Requires accelerate.
-        kwargs.update(device_map={'': str(device)}, low_cpu_mem_usage=True)
-    if quantized:
-        from transformers import BitsAndBytesConfig
-
-        kwargs['quantization_config'] = BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16)
-        kwargs['device_map'] = {'': str(device)}
-    model = model_class.from_pretrained(config['hf_id'], **kwargs)
-    if config.get('adapter'):
-        from peft import PeftModel
-
-        model = PeftModel.from_pretrained(model, config['adapter'])
-        if not quantized:
-            model = model.merge_and_unload()
-    if not quantized and not direct:
-        model = model.to(device)
-    return model.eval()
