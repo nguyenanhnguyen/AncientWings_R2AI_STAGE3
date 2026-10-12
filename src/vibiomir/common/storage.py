@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import time
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -30,7 +29,7 @@ def atomic_write_bytes(path, data):
     try:
         with os.fdopen(handle, 'wb') as stream:
             stream.write(data)
-        _replace(temporary, path)
+        os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
@@ -65,14 +64,6 @@ def read_parquet(path, columns=None, filters=None):
     return pq.read_table(path, columns=columns, filters=filters).to_pylist()
 
 
-def parquet_files(path):
-    """The .parquet files of a directory (recursively, sorted), or the path itself."""
-    path = Path(path)
-    if path.is_dir():
-        return sorted(p for p in path.rglob('*.parquet') if p.is_file())
-    return [path]
-
-
 def read_rows(path, wanted=None):
     """Rows of a .parquet, .json (one array) or .jsonl file, whichever the crawler wrote.
 
@@ -92,38 +83,13 @@ def read_rows(path, wanted=None):
 
 def write_parquet(path, rows, schema=None, compression='zstd'):
     """Write rows and verify the file reads back identical before returning."""
-    return write_table(path, pa.Table.from_pylist(rows, schema=schema), compression)
-
-
-def write_table(path, table, compression='zstd'):
-    """Write an Arrow table through a temporary file and compare it back in Arrow form.
-
-    Comparing Arrow tables, not Python lists, keeps the check at roughly the size of the data on a
-    corpus of hundreds of thousands of documents instead of several times it.
-    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + '.tmp')
-    pq.write_table(table, temporary, compression=compression)
-    with pq.ParquetFile(temporary) as reader:
-        same = reader.read().equals(table)
-    if not same:
-        temporary.unlink(missing_ok=True)
+    table = pa.Table.from_pylist(rows, schema=schema)
+    pq.write_table(table, path, compression=compression)
+    if pq.read_table(path).to_pylist() != rows:
         raise ValueError(f'Parquet round-trip mismatch: {path}')
-    _replace(temporary, path)
     return path
-
-
-def _replace(source, target, attempts=20):
-    """os.replace that waits out Windows' brief locks on a just-written file (antivirus, indexer)."""
-    for attempt in range(attempts):
-        try:
-            os.replace(source, target)
-            return
-        except PermissionError:
-            if attempt == attempts - 1:
-                raise
-            time.sleep(0.25)
 
 
 def write_manifest(path, payload, files=()):

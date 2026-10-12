@@ -5,9 +5,9 @@ original wording is always kept as the primary variant, because an encoder train
 language loses signal when the question is reduced to keywords. The `keyword` variant only drops
 politeness and framing phrases and exists for BM25, where those tokens add nothing.
 
-Translations into Chinese/English and HyDE passages come from `translate.py` (an open local LLM)
-and are read from its prepared file through `--translations`; retrieval never generates text.
-They let BM25 and the reranker work within the language of the Chinese majority of the corpus.
+Translating the query into Chinese or English would let BM25 reach the Chinese half of the corpus.
+That needs a translation model that satisfies the rules, so it is left as an explicit hook:
+`--translations` reads a prepared file instead of inventing text at run time.
 """
 import re
 
@@ -50,49 +50,31 @@ def strip_filler(text):
 
 
 def variants(query, use_keyword=False, translations=None):
-    """Map of variant name -> text. `original` is always present and always first.
-
-    `translations` maps a variant name (translated_zh, hyde_vi, ...) to {query id: text}.
-    """
+    """Map of variant name -> text. `original` is always present and always first."""
     result = {'original': query['query']}
     if use_keyword:
         keyword = strip_filler(query['query'])
         if keyword != query['query']:
             result['keyword'] = keyword
-    for name, table in (translations or {}).items():
+    for language, table in (translations or {}).items():
         text = table.get(query['id'])
         if text:
-            result[name] = normalise_source(text)
+            result[f'translated_{language}'] = normalise_source(text)
     return result
 
 
-def variant_language(name):
-    """Language of a variant's text: 'translated_zh' -> 'zh', 'original' -> 'vi'."""
-    if name.startswith(('translated_', 'hyde_')):
-        return name.rsplit('_', 1)[1]
-    return 'vi'
-
-
 def load_translations(path, queries=None):
-    """Prepared query-side text: JSONL rows {"id", "lang", "text", "kind"?}.
-
-    kind "translate" (the default, as in older files) gives variant translated_<lang>; kind "hyde"
-    gives hyde_<lang>. Returns {variant name: {query id: text}}.
-    """
+    """Prepared translations: JSONL rows of {"id": int, "lang": "zh"|"en", "text": str}."""
     table = {}
     originals = {row['id']: row['query'] for row in (queries or [])}
     for row in storage.read_jsonl(path):
-        kind = row.get('kind') or 'translate'
-        allowed = ('en', 'zh') if kind == 'translate' else ('en', 'zh', 'vi')
-        if kind not in ('translate', 'hyde') or row['lang'] not in allowed or not row['text'].strip():
-            raise ValueError('Translation must have kind translate (en/zh) or hyde (en/zh/vi) '
-                             'and nonempty text.')
+        if row['lang'] not in ('en', 'zh') or not row['text'].strip():
+            raise ValueError('Translation must have lang en/zh and nonempty text.')
         if row.get('query_sha256') and originals:
             if int(row['id']) not in originals or storage.sha256_text(
                     originals[int(row['id'])]) != row['query_sha256']:
                 raise ValueError('Translation cache belongs to different query text.')
-        name = f"translated_{row['lang']}" if kind == 'translate' else f"hyde_{row['lang']}"
-        if int(row['id']) in table.get(name, {}):
+        if int(row['id']) in table.get(row['lang'], {}):
             raise ValueError('Duplicate translation id/language.')
-        table.setdefault(name, {})[int(row['id'])] = row['text']
+        table.setdefault(row['lang'], {})[int(row['id'])] = row['text']
     return table

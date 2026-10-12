@@ -10,7 +10,7 @@ import unicodedata
 
 import pyarrow as pa
 
-# Block A output consumed by A4 (`vibiomir.py chunk`, `vibiomir.py cards subset`). Written by the crawler's export step.
+# Block A output consumed by A4 (scripts/chunk.py). Written by the crawler's export step.
 DOCUMENT_FIELDS = ('id', 'url', 'final_url', 'title', 'text', 'domain', 'extractor',
                    'published_at', 'raw_path', 'raw_sha256', 'text_sha256', 'duplicate_doc_ids')
 

@@ -1,20 +1,15 @@
 """One entry point for every stage: python scripts/vibiomir.py <stage> [options].
 
-    pipeline    whole cascade, crawl data -> submission.zip (the usual command)
-    experiments controlled ablations on a completed pipeline snapshot
-    rebuild     full-corpus indexes and progressive retrieval/model experiments
-    ann         build an approximate vector index from existing embeddings
-    fetch       download the team corpus + BTC query/links from Hugging Face (Kaggle)
+    pipeline    crawl data -> submission.zip, one stage per subprocess (the usual command)
     prepare     crawl runs / parquet -> corpus.parquet
-    cards       `build` document cards, `subset` chunk candidate documents
-    chunk       chunk the selected corpus, preserving source offsets
-    index       `bm25`, `dense`, `dense-merge`, `all`
-    translate   query translations (and optional HyDE) with the local LLM
+    chunk       chunk the corpus, preserving source offsets
+    index       `bm25`, `dense`, `all`
+    translate   query translations with the local LLM
     retrieve    retrieval + rerank -> candidates.jsonl
     submit      candidates -> validated submission.zip
-    evaluate    `sheet`, `collect`, `score`, `calibrate`, `pseudo`
+    evaluate    `sheet`, `collect`, `score`, `pseudo`
     benchmark   CUDA preflight and batch throughput measurement
-    teach       block T (teacher -> student), paused
+    teach       block T: 32B teacher -> 4B/8B/14B students
 
 `python scripts/vibiomir.py <stage> --help` shows the options of one stage.
 """
@@ -25,14 +20,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 STAGES = {
-    'passages': 'vibiomir.retrieval.passages',
-    'ann': 'vibiomir.index.ann',
-    'rebuild': 'vibiomir.rebuild',
-    'experiments': 'vibiomir.experiments',
     'pipeline': 'vibiomir.pipeline',
-    'fetch': 'vibiomir.corpus.fetch',
     'prepare': 'vibiomir.corpus.prepare',
-    'cards': 'vibiomir.corpus.cards',
     'chunk': 'vibiomir.corpus.chunk',
     'index': 'vibiomir.index.build',
     'translate': 'vibiomir.retrieval.translate',

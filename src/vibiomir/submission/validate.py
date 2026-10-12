@@ -11,7 +11,6 @@ document id exists in the corpus (and in links_corpus.parquet when it is given),
 an entry, and no chunk is far past the ~1024 token size the organisers advise.
 """
 from ..common import schema, storage
-from ..corpus.chunk import expand_window
 
 TOKEN_ADVICE = 1024
 
@@ -34,23 +33,14 @@ def load_document_texts(paths, text_field=None):
 
 
 def build_rows(chosen, chunk_table, documents, query_ids, doc_id_as_string=False,
-               allowed_doc_ids=None, window_tokens=0):
-    """-> (submission rows, report). Raises ValueError on any provenance failure.
-
-    With `window_tokens` > 0 each verified chunk is widened to a window of whole neighbouring
-    segments up to that many tokens (`expand_window`), still an exact slice of the document. A
-    chunk lying inside a window already submitted for the same document and query is dropped:
-    it would match the same reference passage and only cost precision.
-    """
+               allowed_doc_ids=None):
+    """-> (submission rows, report). Raises ValueError on any provenance failure."""
     rows = []
     report = {'queries': len(query_ids), 'chunks_checked': 0, 'resliced_from_offsets': 0,
-              'warnings': [], 'dropped_chunks': 0, 'dropped_docs': 0,
-              'window_tokens': window_tokens, 'windows_widened': 0, 'chunks_inside_window': 0}
-    window_sizes = []
+              'warnings': [], 'dropped_chunks': 0, 'dropped_docs': 0}
     for query_id in query_ids:
         doc_ids, chunks = chosen.get(query_id, ([], []))
         kept_docs = []
-        windows = {}
         for doc_id in doc_ids:
             if doc_id not in documents:
                 report['dropped_docs'] += 1
@@ -89,18 +79,6 @@ def build_rows(chosen, chunk_table, documents, query_ids, doc_id_as_string=False
                     'corpus; the corpus or the chunk file changed after indexing.')
             report['resliced_from_offsets'] += 1
             report['chunks_checked'] += 1
-            start, end = record['char_start'], record['char_end']
-            taken = windows.setdefault(int(record['doc_id']), [])
-            if any(ws <= start and end <= we for ws, we in taken):
-                report['chunks_inside_window'] += 1
-                continue
-            if window_tokens:
-                start, end = expand_window(text, start, end, window_tokens)
-                if (start, end) != (record['char_start'], record['char_end']):
-                    report['windows_widened'] += 1
-                span = text[start:end]
-            taken.append((start, end))
-            window_sizes.append(schema.count_tokens(span))
             if schema.count_tokens(span) > TOKEN_ADVICE:
                 report['warnings'].append(
                     f"query {query_id}: chunk {chunk['chunk_id']} is over {TOKEN_ADVICE} tokens")
@@ -116,9 +94,6 @@ def build_rows(chosen, chunk_table, documents, query_ids, doc_id_as_string=False
     problems = schema.validate_submission_shape(rows, query_ids)
     if problems:
         raise ValueError('Submission shape invalid: ' + '; '.join(problems))
-    window_sizes.sort()
-    report['chunk_tokens_median'] = window_sizes[len(window_sizes) // 2] if window_sizes else 0
-    report['chunk_tokens_max'] = window_sizes[-1] if window_sizes else 0
     report['empty_doc_lists'] = sum(1 for row in rows if not row['relevant_docs'])
     report['empty_chunk_lists'] = sum(1 for row in rows if not row['relevant_chunks'])
     report['warnings'] = report['warnings'][:50]

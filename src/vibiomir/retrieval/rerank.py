@@ -1,19 +1,19 @@
-"""C3: rerank fused candidates; multiple scorers run sequentially when requested.
+"""C3: rerank the fused candidates with a cross-encoder.
 
-Fusion decides which few dozen chunks per query are worth a careful look; the reranker reads the
-question and one chunk together. The minimal pipeline uses BGE; rebuild also tests Qwen:
+Fusion decides which few hundred chunks are worth a careful look; the reranker reads the query and
+one chunk together and is far better at judging relevance than either channel alone. Only open
+rerankers published before 2026-08-01 and at or under 15B are listed.
 
-    bge-reranker-v2-m3      BAAI/bge-reranker-v2-m3, 568M, 2024-06, open, multilingual. Fits a 4 GB
-                            laptop GPU and a T4, scores a pair directly from a classification head,
-                            and held up well on cross-lingual reranking (research.md, section 7).
+    bge-reranker-v2-m3      BAAI/bge-reranker-v2-m3, 568M, 2024-06. Multilingual, scores a pair
+                            directly from a classification head. Default.
+    bge-reranker-base       BAAI/bge-reranker-base, 278M, 2023-09. Cheaper, weaker on Chinese.
+    qwen3-reranker-0.6b     Qwen/Qwen3-Reranker-0.6B, 0.6B, 2025-06. Scores by comparing the
+                            yes/no token logits of a causal model, so it needs its own prompt.
+    qwen3-reranker-4b       Qwen/Qwen3-Reranker-4B, 4B, 2025-06. Needs a 16GB GPU.
     identity                No model: keeps the fused order. For offline runs and tests.
-    qwen3-reranker-0.6b      Optional rebuild scorer, causal yes/no, no query generation.
 
-Kaggle defaults to Qwen3-Reranker-4B in fp16; local keeps BGE. Qwen computes yes/no logits in
-one forward pass per batch: no generation, thinking loop or teacher stage.
-
-Scores are in [0, 1] but are NOT calibrated relevance probabilities; `submission/calibrate.py`
-fits that map from human labels.
+Scores are in [0, 1] but are NOT calibrated relevance probabilities and are not comparable
+across model families without validation. Submission thresholds remain tunable heuristics.
 """
 import numpy as np
 
@@ -30,13 +30,16 @@ def qwen_pair_text(query, passage):
 
 
 RERANKERS = {
-    'qwen3-reranker-4b': {'hf_id': 'Qwen/Qwen3-Reranker-4B',
-                         'revision': '22e683669bc0f0bd69640a1354a6d0aebcfeede5',
-                         'kind': 'causal-yes-no', 'max_length': 1024, 'load_on_device': True},
-    'qwen3-reranker-0.6b': {'hf_id': 'Qwen/Qwen3-Reranker-0.6B',
-                           'kind': 'causal-yes-no', 'max_length': 1024},
     'bge-reranker-v2-m3': {'hf_id': 'BAAI/bge-reranker-v2-m3', 'kind': 'sequence-classification',
                            'max_length': 1024},
+    'bge-reranker-base': {'hf_id': 'BAAI/bge-reranker-base', 'kind': 'sequence-classification',
+                          'max_length': 512},
+    'qwen3-reranker-0.6b': {'hf_id': 'Qwen/Qwen3-Reranker-0.6B', 'kind': 'causal-yes-no',
+                            'max_length': 1024},
+    'qwen3-reranker-4b': {'hf_id': 'Qwen/Qwen3-Reranker-4B', 'kind': 'causal-yes-no',
+                          'max_length': 1024},
+    'qwen3-reranker-8b': {'hf_id': 'Qwen/Qwen3-Reranker-8B', 'kind': 'causal-yes-no',
+                          'max_length': 1024, 'quantize': '4bit'},
     'identity': {'hf_id': None, 'kind': 'identity', 'max_length': 0},
 }
 # Trained students (teach/train) appear as 'student:<folder>' under $VIBIOMIR_STUDENTS.
@@ -61,7 +64,6 @@ class CrossEncoderReranker:
 
         self.name = name
         self.config = dict(RERANKERS[name])
-        revision = revision or self.config.get('revision')
         if max_length is not None:
             if max_length < 128:
                 raise ValueError('Reranker max_length must be at least 128')
@@ -153,6 +155,20 @@ def load_reranker(name, device=None, fp16=True, max_length=None, revision=None):
         return IdentityReranker()
     return CrossEncoderReranker(name, device=device, fp16=fp16,
                                max_length=max_length, revision=revision)
+
+
+def rerank(query, candidates, reranker, text_of, batch_size=16, limit=None):
+    """Score candidates and return them sorted best first, each with its `ce_score`.
+
+    `candidates` are (row, fused score, channels) triples; `text_of(row)` gives the passage.
+    """
+    subset = candidates[:limit] if limit else candidates
+    scores = reranker.score(query, [text_of(row) for row, _score, _channels in subset],
+                            batch_size=batch_size)
+    order = np.argsort(-scores, kind='stable')
+    ranked = [(*subset[position], float(scores[position])) for position in order]
+    tail = [(*item, None) for item in candidates[len(subset):]]
+    return ranked + tail
 
 
 def adaptive_cutoff(scores, min_k=1, max_k=20, window=15):

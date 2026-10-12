@@ -1,2 +1,0 @@
-# Optional CPU ANN search for `rebuild --suite scale`; leaves torch/CUDA unchanged.
-faiss-cpu>=1.8,<2

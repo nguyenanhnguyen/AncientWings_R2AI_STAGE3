@@ -9,7 +9,7 @@ against. Only three honest options exist, and each is marked in the label file:
             an upper estimate of nothing and precision as the trustworthy half.
     pseudo  The pipeline's own top results are assumed correct. This measures the pipeline against
             itself and will look excellent while proving nothing. It exists so the flow can run
-            end to end offline, and `vibiomir.py evaluate` prints a warning whenever it is used.
+            end to end offline, and `scripts/evaluate.py` prints a warning whenever it is used.
     external  Labels from another source entirely, with provenance recorded in the file.
 
 The leaderboard is the only unbiased signal, and submissions are rate limited, so the point of the
