@@ -1,10 +1,13 @@
 """One entry point for every stage: python scripts/vibiomir.py <stage> [options].
 
     pipeline    whole cascade, crawl data -> submission.zip (the usual command)
+    experiments controlled ablations on a completed pipeline snapshot
+    rebuild     full-corpus indexes and progressive retrieval/model experiments
+    ann         build an approximate vector index from existing embeddings
     fetch       download the team corpus + BTC query/links from Hugging Face (Kaggle)
     prepare     crawl runs / parquet -> corpus.parquet
     cards       `build` document cards, `subset` chunk candidate documents
-    chunk       chunk a whole corpus (standalone; the pipeline chunks candidates only)
+    chunk       chunk the selected corpus, preserving source offsets
     index       `bm25`, `dense`, `dense-merge`, `all`
     translate   query translations (and optional HyDE) with the local LLM
     retrieve    retrieval + rerank -> candidates.jsonl
@@ -22,6 +25,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 STAGES = {
+    'passages': 'vibiomir.retrieval.passages',
+    'ann': 'vibiomir.index.ann',
+    'rebuild': 'vibiomir.rebuild',
+    'experiments': 'vibiomir.experiments',
     'pipeline': 'vibiomir.pipeline',
     'fetch': 'vibiomir.corpus.fetch',
     'prepare': 'vibiomir.corpus.prepare',

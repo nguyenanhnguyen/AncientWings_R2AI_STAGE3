@@ -168,6 +168,11 @@ def load_backbone(model_class, config, device, dtype, revision=None, **extra):
     # such as BAAI/bge-m3. Preserve an explicit caller format restriction.
     kwargs.setdefault('use_safetensors', config.get('use_safetensors'))
     quantized = config.get('quantize') == '4bit'
+    direct = config.get('load_on_device', False) and str(device).startswith('cuda')
+    if direct:
+        # Load large inference checkpoints onto one GPU shard by shard, avoiding two full
+        # CPU copies when both Kaggle workers load a 4B model concurrently. Requires accelerate.
+        kwargs.update(device_map={'': str(device)}, low_cpu_mem_usage=True)
     if quantized:
         from transformers import BitsAndBytesConfig
 
@@ -182,6 +187,6 @@ def load_backbone(model_class, config, device, dtype, revision=None, **extra):
         model = PeftModel.from_pretrained(model, config['adapter'])
         if not quantized:
             model = model.merge_and_unload()
-    if not quantized:
+    if not quantized and not direct:
         model = model.to(device)
     return model.eval()

@@ -6,8 +6,8 @@ so the dense channel carries matches BM25 cannot make. One encoder is used every
     bge-m3      BAAI/bge-m3, 568M, 2024-01, open, multilingual, CLS pooling. Fast enough to encode
                 every document card of a large crawl on a T4 or a 4 GB laptop GPU.
 
-Larger encoders (Qwen3-Embedding-4B/8B) were removed: encoding every card with them costs several
-times more GPU hours, which the pipeline now spends on covering more documents.
+Kaggle uses Qwen3-Embedding-4B in fp16, one replica per GPU. Local still defaults to BGE-M3.
+Qwen uses last-token pooling with left padding and an instruction on queries only.
 
 `hash` is not a model. It is a deterministic feature-hashing encoder used to run the whole flow
 offline, in tests and on a machine with no GPU. It proves the plumbing, never retrieval quality.
@@ -25,6 +25,16 @@ from ..common.runtime import model_info
 from ..teach.models import discover_students, load_backbone
 
 ENCODERS = {
+    'qwen3-embedding-4b': {'hf_id': 'Qwen/Qwen3-Embedding-4B', 'pooling': 'last',
+                          'revision': '5cf2132abc99cad020ac570b19d031efec650f2b',
+                          'max_length': 1024, 'context_limit': 32768, 'dim': 2560,
+                          'query_prefix': 'Instruct: Given a Vietnamese medical question, retrieve '
+                                          'relevant passages that answer it, including passages '
+                                          'in other languages.\nQuery: ',
+                          'doc_prefix': '', 'load_on_device': True},
+    'multilingual-e5-base': {'hf_id': 'intfloat/multilingual-e5-base', 'pooling': 'mean',
+                            'max_length': 512, 'query_prefix': 'query: ',
+                            'doc_prefix': 'passage: ', 'dim': 768, 'context_limit': 512},
     'bge-m3': {'hf_id': 'BAAI/bge-m3', 'pooling': 'cls', 'max_length': 1024,
                'query_prefix': '', 'doc_prefix': '', 'dim': 1024},
     'hash': {'hf_id': None, 'pooling': 'hash', 'max_length': 0,
@@ -65,6 +75,9 @@ class TransformerEncoder:
 
         self.name = name
         self.config = dict(ENCODERS[name])
+        revision = revision or self.config.get('revision')
+        if max_length and max_length > self.config.get('context_limit', max_length):
+            raise ValueError(f'{name} supports at most {self.config["context_limit"]} tokens.')
         if max_length is not None:
             if max_length < 32:
                 raise ValueError('max_length must be at least 32')

@@ -52,12 +52,14 @@ def aggregate_documents(scored, doc_ids, top_chunks_per_doc=3):
     return result
 
 
-def make_dense_search(embeddings_path, faiss_index=None):
+def make_dense_search(embeddings_path, faiss_index=None, nprobe=32):
     """Return a search(vectors, k) -> (rows, scores) closure over the vector index."""
     if faiss_index is not None:
         import faiss
 
         index = faiss.read_index(str(faiss_index))
+        if hasattr(index, 'nprobe'):
+            index.nprobe = min(nprobe, index.nlist)
 
         def search(vectors, k):
             scores, rows = index.search(np.asarray(vectors, dtype=np.float32), k)

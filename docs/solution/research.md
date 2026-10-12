@@ -34,6 +34,26 @@ Bảy quyết định xếp theo tác động dự kiến:
 
 ---
 
+## 0b. Đã triển khai đến đâu (cập nhật 10/10/2026)
+
+Tài liệu này là phần **nghiên cứu và đề xuất**, viết trước khi code được tối giản. Code hiện tại lệch có chủ đích ở vài chỗ, vì ưu tiên xử lý được nhiều dữ liệu hơn thay vì tinh chỉnh từng khâu. Bảng dưới đối chiếu từng đề xuất với code; lệnh và tham số hiện hành ở [run_guide.md](run_guide.md) mục 1, lịch sử các đời thiết kế ở mục 1c.
+
+| Đề xuất trong tài liệu này | Trạng thái trong code |
+|---|---|
+| Crawl theo làn domain, ưu tiên theo truy vấn (mục 3) | **Chưa làm.** Crawl vẫn chia theo khoảng ID |
+| Nộp cửa sổ rộng gần trần 1.024 token, B ≈ 900 (mục 4.2) | **Có**, nhưng mặc định `--window-tokens 768` để chừa biên cho tokenizer của BTC |
+| Ngưỡng cắt tối ưu F2 trên xác suất hiệu chỉnh (mục 4.3) | **Có**: profile `f2` + `vibiomir.py evaluate calibrate` |
+| Một LLM xử lý truy vấn: dịch, HyDE | **Có**: dịch bật mặc định; **HyDE tắt mặc định** (bật bằng `--hyde zh vi`) |
+| Cùng LLM sinh thuật ngữ y khoa và tách ý truy vấn dài (mục 5.2) | **Chưa làm** |
+| Truy xuất thác thẻ → tập con (mục 6) | **Có**, và chặt hơn đề xuất: chỉ chunk tài liệu ứng viên |
+| Encoder: A/B giữa bge-m3 và Qwen3-Embedding-0.6B (mục 6.3) | **Chỉ còn bge-m3**; các encoder khác đã gỡ khỏi registry |
+| Reranker mặc định Qwen3-Reranker-4B, dự phòng bge-reranker-v2-m3 (mục 7.2) | **Đổi ngược lại: chỉ còn bge-reranker-v2-m3** cho cả laptop và Kaggle. Lý do: Qwen3-4B tốn khoảng 7 lần tính toán mỗi cặp và không vừa GPU 4 GB ở fp16. Chưa A/B được vì chưa có nhãn dev |
+| Chấm cùng ngôn ngữ với tài liệu (mục 7.3) | **Có**: `--match-language` |
+| Gom trùng lặp bằng MinHash (mục 7.3, 8.2) | **Chưa làm.** Chỉ gom trùng y hệt theo `text_sha256` |
+| 200–300 tài liệu ứng viên, rerank 80 đoạn (mục 6, 9) | Hạ xuống 100/200 tài liệu và 50/60 đoạn để chạy nhanh hơn; nới được bằng tham số |
+| Bỏ GraphRAG, bỏ RAPTOR, tạm dừng khối T (mục 8) | **Đúng như đề xuất** |
+| Dev do người gán nhãn (mục 10) | Công cụ có (`evaluate sheet`/`collect`), **chưa có nhãn nào** |
+
 ## 1. Những sự thật định hình thiết kế
 
 ### 1.1 Corpus **[dữ liệu]**

@@ -1,34 +1,22 @@
-"""Run the whole cascade, crawl output to submission.zip, in isolated and resumable stages.
+"""Run a frozen corpus through full chunk retrieval to a validated submission.
 
-    fetch        (--source hf, the default) team corpus + BTC query/links from Hugging Face,
-                 at a commit pinned for this run directory
-    prepare      local crawl runs / HF corpus parquet -> corpus.parquet (frozen snapshot)
-    cards        one card per document: title + opening (CPU)
-    translate    1.200 queries -> Chinese (+English) translations (one LLM, batched)
-    cards_*      BM25 + dense index over the cards
-    doc_search   cards retrieval: top documents per query (no reranker)
-    subset       chunk those documents only
-    subset_*     BM25 + dense index over the subset
-    retrieve     chunk retrieval + the "card" channel + ONE reranker, language matched
-    submit       F2-optimal selection, windows widened to the token budget, validated ZIP
+Default on local and Kaggle: prepare -> structure-aware source chunks -> BM25 and
+dense -> keyword/original query RRF -> document diversity -> ONE reranker ->
+source-span validation and ZIP. No teacher, training, query LLM, feedback or ensemble.
+Each query belongs to one GPU shard; a shard scores each uncached pair once.
 
-Each stage runs as its own process and is skipped when its command, input hashes, code and
-environment match a finished run (`stages/<name>.json`). With several GPUs the dense parts and the
-query shards of the reranking run at the same time, one process per card.
-
-Kept minimal on purpose: one encoder, one reranker, one translator, no pilot benchmark (batches
-are fixed and halve themselves on out-of-memory), no HyDE by default, chunking only for candidate
-documents. The time goes into covering more documents rather than polishing each stage.
-
-Profiles set defaults only; every option can still be given:
-    local    the laptop crawl in nguyen/ (batch01 + both shards), 100.000 input rows shared over
-             the runs by size; one 4 GB GPU, Qwen3-4B in 4-bit.
-    kaggle   the team corpus on Hugging Face, all rows; two T4 16 GB, Qwen3-4B in fp16.
-Both use bge-m3 and the one reranker, bge-reranker-v2-m3.
+Local uses BGE and scores 120 candidates/query; Kaggle uses Qwen3 4B and scores 60. Full chunk encoding
+costs more than the legacy card gate, but searches evidence anywhere in the article.
+Optional FAISS IVF speeds dense search with approximate recall; exact is the default.
+Checkpoints, embedding shards and rerank pair caches are reused. --max-hours is a
+wall-clock guard per invocation, not a promise about completion or weekly GPU quota.
+--architecture cascade retains the older document-card path for explicit comparisons.
 """
 import argparse
 from contextlib import contextmanager
+import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -45,16 +33,16 @@ from .corpus import fetch
 ROOT = Path(__file__).resolve().parents[2]
 
 PROFILES = {
-    'local': {'source': ['nguyen'], 'limit': 100000, 'out': 'work/run_local_100k',
+    'local': {'source': ['nguyen'], 'limit': 100000, 'out': 'work/run_quality_local',
               'gpus': 1, 'encoder': 'bge-m3', 'reranker': 'bge-reranker-v2-m3',
               'translation_model': 'qwen3-4b', 'translation_quantize': '4bit',
-              'translate_batch': 8, 'docs_per_query': 100, 'rerank_k': 50,
-              'encoder_batch': 16, 'rerank_batch': 8},
-    'kaggle': {'source': ['hf'], 'limit': 0, 'out': 'work/run_hf',
-               'gpus': 2, 'encoder': 'bge-m3', 'reranker': 'bge-reranker-v2-m3',
+              'translate_batch': 8, 'docs_per_query': 100, 'rerank_k': 120,
+              'encoder_batch': 8, 'rerank_batch': 2, 'max_hours': 0},
+    'kaggle': {'source': ['hf'], 'limit': 100000, 'out': 'work/run_quality_qwen4b_hf',
+               'gpus': 2, 'encoder': 'qwen3-embedding-4b', 'reranker': 'qwen3-reranker-4b',
                'translation_model': 'qwen3-4b', 'translation_quantize': 'none',
                'translate_batch': 32, 'docs_per_query': 200, 'rerank_k': 60,
-               'encoder_batch': 128, 'rerank_batch': 32},
+               'encoder_batch': 16, 'rerank_batch': 8, 'max_hours': 9},
 }
 
 # Original question strongest; the Chinese translation is near equal because most of the corpus
@@ -64,6 +52,9 @@ WEIGHTS = {'bm25:keyword': 0.7, 'bm25:translated_zh': 1.0, 'bm25:translated_en':
            'bm25:hyde_zh': 0.5, 'bm25:hyde_vi': 0.5, 'bm25:hyde_en': 0.5,
            'dense:translated_zh': 0.8, 'dense:translated_en': 0.5,
            'dense:hyde_zh': 0.7, 'dense:hyde_vi': 0.7, 'dense:hyde_en': 0.5, 'card': 1.0}
+FULL_WEIGHTS = {'bm25:original': 1.0, 'dense:original': 1.0, 'bm25:keyword': 0.7,
+                'bm25:translated_zh': 1.0, 'dense:translated_zh': 0.8,
+                'bm25:translated_en': 0.5, 'dense:translated_en': 0.5}
 
 
 @contextmanager
@@ -89,13 +80,26 @@ def run_lock(path):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+class BudgetExceeded(RuntimeError):
+    """Wall-clock budget reached: keep checkpoints, never declare a finished submission."""
+
+
 class Runner:
-    def __init__(self, out, dry_run=False):
+    def __init__(self, out, dry_run=False, max_hours=0):
         self.out, self.dry_run = Path(out), dry_run
+        self.deadline = time.monotonic() + max_hours * 3600 if max_hours else None
         self.code_key = cache_key({str(p.relative_to(ROOT)): storage.sha256_file(p)
                                   for base in ('src', 'scripts') for p in sorted((ROOT/base).rglob('*.py'))})
         self.env = environment()
         self._hashes = {}
+
+    def remaining(self):
+        if self.deadline is None:
+            return None
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise BudgetExceeded('Time budget reached; retain this run directory to resume.')
+        return left
 
     def _sha(self, path):
         """File hashes are reused within one run; a stage never edits a file it reads."""
@@ -169,6 +173,7 @@ class Runner:
         running = []
         try:
             for step, cmd, _state, _key in todo:
+                self.remaining()
                 env = {**os.environ, 'PYTHONIOENCODING': 'utf-8', 'TOKENIZERS_PARALLELISM': 'false'}
                 if step.get('gpu') is not None:
                     env['CUDA_VISIBLE_DEVICES'] = str(step['gpu'])
@@ -182,7 +187,11 @@ class Runner:
                 running.append((step, process, reader))
             failed = []
             for step, process, reader in running:
-                code = process.wait()
+                try:
+                    code = process.wait(timeout=self.remaining())
+                except subprocess.TimeoutExpired as error:
+                    raise BudgetExceeded(f"Time budget reached during {step['name']}; "
+                                         'completed stages and caches are retained.') from error
                 reader.join()
                 if code:
                     failed.append(step['name'])
@@ -196,9 +205,14 @@ class Runner:
             for step, process, _reader in running:
                 if process.poll() is None:
                     process.terminate()
-                    process.wait()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
                 elif process.returncode == 0:
                     self._record(todo, step, started)
+                _reader.join(timeout=10)
             raise
 
     def _record(self, todo, step, started):
@@ -225,6 +239,8 @@ def _pump(process, log_path, prefix):
 
 def _dense_steps(runner, name, chunks, index, encoder, gpus, batch, max_length, extra=()):
     """Encode `chunks` into `index`, split over the GPUs, then publish one embeddings.npy."""
+    from .index.embedding import ENCODERS
+    max_length = min(max_length, ENCODERS[encoder].get('context_limit', max_length))
     parts = max(1, len(gpus))
     devices = gpus or [None]
     common = ['--chunks', chunks, '--out', index, '--encoder', encoder,
@@ -257,11 +273,74 @@ def _fetch(r, args, out):
         except Exception as error:
             raise fetch.explain_auth(error) from error
         fetch.pin(hf_dir, args.hf_repo, revision)
+        fetch.pin_selection(hf_dir, args.id_start, args.id_end)
         emit(f'Corpus HF: {args.hf_repo}@{revision[:12]} (ghim cho run này)')
     paths = fetch.layout(hf_dir, revision)
-    r.step('fetch', ['fetch', '--out', hf_dir, '--repo', args.hf_repo, '--revision', revision],
+    r.step('fetch', ['fetch', '--out', hf_dir, '--repo', args.hf_repo, '--revision', revision,
+                     *_id_options(args)],
            [], [paths['manifest'], paths['queries'], paths['links']])
     return paths['corpus'], paths['queries'], paths['links']
+
+
+def _id_options(args):
+    return [value for flag, bound in (('--id-start', args.id_start), ('--id-end', args.id_end))
+            if bound is not None for value in (flag, bound)]
+
+
+def _run_full(r, args, out, corpus, queries, links, gpus):
+    """One full-corpus retrieval pass and one multilingual reranker, no model ensemble."""
+    device = 'cuda' if gpus else 'cpu'
+    chunks = out/'chunks'/'chunks.parquet'
+    index = out/'index'/'full'
+    r.step('chunk', ['chunk', '--corpus', corpus, '--out', chunks.parent,
+                     '--target-tokens', args.chunk_tokens, '--overlap-tokens', args.overlap_tokens,
+                     '--max-tokens', 768], [corpus], [chunks, chunks.with_name('chunk_manifest.json')])
+    r.step('bm25', ['index', 'bm25', '--chunks', chunks, '--out', index], [chunks],
+           [index/'bm25.npz', index/'bm25_manifest.json'])
+    _dense_steps(r, 'dense', chunks, index, args.encoder, gpus, args.encoder_batch, 1024)
+    ann_options, ann_inputs = [], []
+    if args.ann:
+        r.step('ann', ['ann', '--index', index], [index/'embeddings.npy', index/'dense_manifest.json'],
+               [index/'faiss.index', index/'ann_manifest.json'])
+        ann_options = ['--faiss', '--nprobe', args.nprobe, '--ann-audit', 5]
+        ann_inputs = [index/'faiss.index', index/'ann_manifest.json']
+    translations = Path(args.translations).resolve() if args.translations else None
+    if translations and not translations.is_file():
+        raise FileNotFoundError(f'--translations {translations} does not exist.')
+    # Build once before query shards start, avoiding two writers to the same SQLite sidecar.
+    r.step('passages', ['passages', '--chunks', chunks, '--out', index/'passages.sqlite'],
+           [chunks], [index/'passages.sqlite'])
+    shards = max(1, len(gpus))
+    folders = [out/'retrieval' if shards == 1 else out/'retrieval'/f'part{i}' for i in range(shards)]
+    common = ['retrieve', '--chunks', chunks, '--index', index, '--queries', queries,
+              '--reranker', args.reranker, '--device', device, '--search-device', device,
+              '--keyword-variant', '--disk-text', '--top-k', 300, '--fuse-k', 400,
+              '--rerank-k', args.rerank_k, '--keep', args.rerank_k,
+              '--candidate-per-doc', 3, '--rerank-max-length', 1024,
+              '--batch-size', args.encoder_batch, '--rerank-batch', args.rerank_batch,
+              '--weights', json.dumps(FULL_WEIGHTS), *ann_options]
+    inputs = [chunks, index/'bm25.npz', index/'bm25_manifest.json', index/'embeddings.npy',
+              index/'dense_manifest.json', queries, *ann_inputs]
+    if translations:
+        common += ['--translations', translations, '--match-language']
+        inputs.append(translations)
+    r.parallel([{'name': 'retrieve' if shards == 1 else f'retrieve_{i}',
+                 'gpu': gpus[i] if gpus else None,
+                 'command': [*common, '--out', folder, '--shard', i, '--shards', shards],
+                 'inputs': inputs,
+                 'outputs': [folder/'candidates.jsonl', folder/'retrieval_manifest.json']}
+                for i, folder in enumerate(folders)])
+    candidates = [folder/'candidates.jsonl' for folder in folders]
+    calibration = Path(args.calibration).resolve() if args.calibration else None
+    target = out/'submission'
+    r.step('submit', ['submit', '--candidates', *candidates, '--chunks', chunks,
+                      '--corpus', corpus, '--queries', queries, '--links', links, '--profile', 'f2',
+                      '--window-tokens', args.window_tokens, '--require-complete', '--out', target,
+                      *(['--calibration', calibration] if calibration else [])],
+           [*candidates, chunks, corpus, queries, links, *([calibration] if calibration else [])],
+           [target/'submission.zip', target/'submission.json', target/'submission_manifest.json'])
+    emit(f'Submission: {target / "submission.zip"}')
+    return target/'submission.zip'
 
 
 def run(args):
@@ -270,7 +349,13 @@ def run(args):
     cards = out/'cards'/'cards.parquet'
     gpus = list(range(args.gpus))
     device = 'cuda' if gpus else 'cpu'
-    r = Runner(out, args.dry_run)
+    r = Runner(out, args.dry_run, args.max_hours)
+    for name in ('translations', 'calibration'):
+        value = getattr(args, name)
+        if value and not Path(value).is_file():
+            raise FileNotFoundError(f'--{name} {value} does not exist.')
+    if args.ann and not args.dry_run and importlib.util.find_spec('faiss') is None:
+        raise RuntimeError('--ann requires faiss-cpu. Install requirements/search.txt before running.')
     if args.source == ['hf']:
         corpus_dir, fetched_queries, fetched_links = _fetch(r, args, out)
         source = [str(corpus_dir)]
@@ -285,16 +370,21 @@ def run(args):
         probe = [sys.executable, str(ROOT/'scripts'/'vibiomir.py'), 'benchmark', '--check-only']
         if not args.skip_translation and args.translation_quantize == '4bit':
             probe.append('--quantized')
-        subprocess.run(probe, cwd=ROOT, check=True)
+        try:
+            subprocess.run(probe, cwd=ROOT, check=True, timeout=r.remaining())
+        except subprocess.TimeoutExpired as error:
+            raise BudgetExceeded('Time budget reached during GPU check.') from error
 
-    prepare = ['prepare', '--source', *source, '--out', corpus.parent]
+    prepare = ['prepare', '--source', *source, '--out', corpus.parent, *_id_options(args)]
     if args.limit:
         prepare += ['--limit', args.limit]
     r.step('prepare', prepare, [], [corpus, corpus.with_name('prepare_manifest.json')])
     report = {} if args.dry_run else storage.read_json(corpus.with_name('prepare_manifest.json'))
     if args.limit and report and report['rows_read'] < args.limit:
-        raise ValueError(f"Only {report['rows_read']} input rows were available, requested "
-                         f'{args.limit}. Use a new --out and the actual --limit.')
+        emit(f"prepare: read {report['rows_read']} rows; --limit {args.limit} is an upper bound.")
+
+    if args.architecture == 'full':
+        return _run_full(r, args, out, corpus, queries, links, gpus)
 
     r.step('cards', ['cards', 'build', '--corpus', corpus, '--out', cards.parent,
                      '--lead-tokens', args.lead_tokens],
@@ -405,6 +495,16 @@ def parse_args(argv=None):
     from .retrieval.translate import MODELS
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--profile', choices=sorted(PROFILES), default='local')
+    p.add_argument('--architecture', choices=['full', 'cascade'], default='full',
+                   help='Full corpus chunk search (default); cascade retains the older card gate.')
+    from .corpus.prepare import add_id_arguments, validate_id_range
+    add_id_arguments(p)
+    p.add_argument('--max-hours', type=float, default=None,
+                   help='Wall time per invocation, including downloads; 0 disables. Not GPU quota.')
+    p.add_argument('--ann', action='store_true', help='Use FAISS IVF for full-corpus search; requires faiss-cpu.')
+    p.add_argument('--nprobe', type=int, default=64)
+    p.add_argument('--chunk-tokens', type=int, default=384)
+    p.add_argument('--overlap-tokens', type=int, default=64)
     p.add_argument('--reuse-corpus', action='store_true',
                    help='Compatibility flag: verified frozen corpus reuse is now automatic. '
                         'Source/options and all recorded output hashes must still match.')
@@ -416,10 +516,10 @@ def parse_args(argv=None):
     p.add_argument('--hf-revision', default=None,
                    help='Corpus commit; default: pinned for this --out, else the latest.')
     p.add_argument('--out', default=None,
-                   help='Run directory. Default: work/run_local_100k (local), work/run_hf (kaggle).')
+                   help='New run directory; never change the input population of a frozen run.')
     p.add_argument('--limit', type=int, default=None,
                    help='Input rows before quality filtering, shared over the sources by size; '
-                        '0 reads everything. Default: 100000 (local), 0 (kaggle).')
+                        '0 reads everything in the ID range. Default: 100000 on both profiles.')
     p.add_argument('--queries', default=None,
                    help='Default: BTC query.parquet from HF with --source hf, else data/query.parquet.')
     p.add_argument('--links', default=None,
@@ -432,7 +532,11 @@ def parse_args(argv=None):
     p.add_argument('--translate-batch', type=int, default=None)
     p.add_argument('--hyde', nargs='*', choices=['zh', 'vi', 'en'], default=[],
                    help='Also generate HyDE passages in these languages (slower; off by default).')
-    p.add_argument('--skip-translation', action='store_true')
+    translation = p.add_mutually_exclusive_group()
+    translation.add_argument('--skip-translation', dest='skip_translation', action='store_true')
+    translation.add_argument('--enable-translation', dest='skip_translation', action='store_false',
+                             help='Legacy cascade only; loads a separate generative model.')
+    p.set_defaults(skip_translation=True)
     p.add_argument('--translations', default=None,
                    help='Use this prepared translations.jsonl and skip the translate stage, so no '
                         'translator model is downloaded (e.g. a file generated on Kaggle).')
@@ -441,7 +545,7 @@ def parse_args(argv=None):
     p.add_argument('--lead-tokens', type=int, default=160)
     p.add_argument('--docs-per-query', type=int, default=None)
     p.add_argument('--rerank-k', type=int, default=None)
-    p.add_argument('--window-tokens', type=int, default=768,
+    p.add_argument('--window-tokens', type=int, default=0,
                    help='Submitted chunk window; 0 keeps the indexed chunk.')
     p.add_argument('--calibration', default=None, help='calibration.json for the F2 cut.')
     p.add_argument('--dry-run', action='store_true')
@@ -451,6 +555,20 @@ def parse_args(argv=None):
             setattr(args, key, value)
     if args.limit < 0:
         p.error('--limit must be >= 0 (0 reads everything)')
+    try:
+        validate_id_range(args.id_start, args.id_end)
+    except ValueError as error:
+        p.error(str(error))
+    if args.max_hours < 0 or not math.isfinite(args.max_hours):
+        p.error('--max-hours must be finite and >= 0.')
+    if not 1 <= args.chunk_tokens <= 768 or not 0 <= args.overlap_tokens < args.chunk_tokens:
+        p.error('Require 0 <= overlap < chunk tokens <= 768.')
+    if args.nprobe < 1 or min(args.encoder_batch, args.rerank_batch) < 1:
+        p.error('nprobe and batch sizes must be positive.')
+    if args.architecture == 'full' and (not args.skip_translation or args.hyde):
+        p.error('Full pipeline uses original queries: no LLM/HyDE. Cached --translations are optional.')
+    if args.architecture == 'cascade' and args.ann:
+        p.error('--ann is supported by --architecture full only.')
     if args.gpus < 0 or not 1 <= args.rerank_k <= 400 or not 1 <= args.docs_per_query <= 1000:
         p.error('Require --gpus >= 0, 1 <= --rerank-k <= 400, 1 <= --docs-per-query <= 1000.')
     if not 0 <= args.window_tokens <= 1024:
@@ -467,7 +585,20 @@ def main(argv=None):
     else:
         Path(args.out).mkdir(parents=True, exist_ok=True)
         with run_lock(Path(args.out)/'pipeline.lock'):
-            run(args)
+            status = Path(args.out)/'pipeline_status.json'
+            storage.write_json(Path(args.out)/'pipeline_config.json', vars(args))
+            storage.write_json(status, {'status': 'running', 'config': vars(args)})
+            try:
+                target = run(args)
+            except BudgetExceeded as error:
+                storage.write_json(status, {'status': 'budget_exhausted', 'reason': str(error)})
+                emit(str(error))
+                raise SystemExit(124) from error
+            except BaseException as error:
+                storage.write_json(status, {'status': 'failed', 'reason': str(error)})
+                raise
+            storage.write_json(status, {'status': 'complete', 'submission': str(target),
+                                       'submission_sha256': storage.sha256_file(target)})
 
 
 if __name__ == '__main__':

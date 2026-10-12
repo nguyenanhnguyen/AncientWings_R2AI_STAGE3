@@ -1,16 +1,16 @@
-"""C3: rerank the fused candidates with ONE cross-encoder.
+"""C3: rerank fused candidates; multiple scorers run sequentially when requested.
 
 Fusion decides which few dozen chunks per query are worth a careful look; the reranker reads the
-question and one chunk together. The pipeline keeps a single reranker for every profile:
+question and one chunk together. The minimal pipeline uses BGE; rebuild also tests Qwen:
 
     bge-reranker-v2-m3      BAAI/bge-reranker-v2-m3, 568M, 2024-06, open, multilingual. Fits a 4 GB
                             laptop GPU and a T4, scores a pair directly from a classification head,
                             and held up well on cross-lingual reranking (research.md, section 7).
     identity                No model: keeps the fused order. For offline runs and tests.
+    qwen3-reranker-0.6b      Optional rebuild scorer, causal yes/no, no query generation.
 
-Larger rerankers (Qwen3-Reranker-4B/8B) scored higher on general benchmarks but cost about seven
-times the compute per pair; with the time budget spent on covering more documents instead, they
-were removed. Trained students (teach/) still load through the causal yes/no path below.
+Kaggle defaults to Qwen3-Reranker-4B in fp16; local keeps BGE. Qwen computes yes/no logits in
+one forward pass per batch: no generation, thinking loop or teacher stage.
 
 Scores are in [0, 1] but are NOT calibrated relevance probabilities; `submission/calibrate.py`
 fits that map from human labels.
@@ -30,6 +30,11 @@ def qwen_pair_text(query, passage):
 
 
 RERANKERS = {
+    'qwen3-reranker-4b': {'hf_id': 'Qwen/Qwen3-Reranker-4B',
+                         'revision': '22e683669bc0f0bd69640a1354a6d0aebcfeede5',
+                         'kind': 'causal-yes-no', 'max_length': 1024, 'load_on_device': True},
+    'qwen3-reranker-0.6b': {'hf_id': 'Qwen/Qwen3-Reranker-0.6B',
+                           'kind': 'causal-yes-no', 'max_length': 1024},
     'bge-reranker-v2-m3': {'hf_id': 'BAAI/bge-reranker-v2-m3', 'kind': 'sequence-classification',
                            'max_length': 1024},
     'identity': {'hf_id': None, 'kind': 'identity', 'max_length': 0},
@@ -56,6 +61,7 @@ class CrossEncoderReranker:
 
         self.name = name
         self.config = dict(RERANKERS[name])
+        revision = revision or self.config.get('revision')
         if max_length is not None:
             if max_length < 128:
                 raise ValueError('Reranker max_length must be at least 128')

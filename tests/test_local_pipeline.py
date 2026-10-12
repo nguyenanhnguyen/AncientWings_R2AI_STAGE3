@@ -126,7 +126,7 @@ class ResumableTests(unittest.TestCase):
             self.assertIn('Dùng lại', second.stdout)
             self.assertEqual(digest, storage.sha256_file(out/'submission/submission.zip'))
 
-            args = argparse.Namespace(chunks=str(out/'subset/chunks.parquet'), index=str(out/'index/subset'),
+            args = argparse.Namespace(chunks=str(out/'chunks/chunks.parquet'), index=str(out/'index/full'),
                    queries=str(queries), out=str(out/'ensemble'), translations=None, no_bm25=False,
                    no_dense=False, encoder=None, keyword_variant=True, top_k=10, fuse_k=10,
                    rerank_k=10, keep=10, doc_chunks=3, weights=None, device='cpu', fp32=True,

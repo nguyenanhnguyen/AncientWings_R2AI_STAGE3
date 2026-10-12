@@ -65,9 +65,27 @@ _LANG_HINTS = {'vi_hint': 'vi', 'zh_hint': 'zh', 'vi': 'vi', 'zh': 'zh', 'en': '
 
 # --- Reading each crawler's shape ---
 
-def _run_directory_rows(path, limit=None):
+def in_id_range(value, id_start=None, id_end=None):
+    value = int(value)
+    return (id_start is None or value >= id_start) and (id_end is None or value <= id_end)
+
+
+def add_id_arguments(parser):
+    parser.add_argument('--id-start', type=int, default=None, help='First source ID (inclusive).')
+    parser.add_argument('--id-end', type=int, default=None, help='Last source ID (inclusive).')
+
+
+def validate_id_range(id_start, id_end):
+    if any(x is not None and x < 0 for x in (id_start, id_end)):
+        raise ValueError('ID bounds must be nonnegative.')
+    if id_start is not None and id_end is not None and id_start > id_end:
+        raise ValueError('--id-start must be <= --id-end.')
+
+
+def _run_directory_rows(path, limit=None, id_start=None, id_end=None):
     """The per-id run layout: <run>/records/<id>.json, raw paths relative to <run>."""
-    files = sorted((item for item in (path / 'records').glob('*.json') if item.stem.isdigit()),
+    files = sorted((item for item in (path / 'records').glob('*.json') if item.stem.isdigit()
+                    and in_id_range(item.stem, id_start, id_end)),
                    key=lambda item: int(item.stem))
     if limit:
         files = files[:limit]
@@ -77,6 +95,8 @@ def _run_directory_rows(path, limit=None):
         except (OSError, ValueError) as error:
             yield {'id': int(file.stem), '_unreadable': str(error)[:200]}
             continue
+        if int(row['id']) != int(file.stem):
+            raise ValueError(f'Record ID disagrees with filename: {file}')
         if row.get('raw_path'):
             row['raw_path'] = str((path / row['raw_path']).as_posix())
         yield row
@@ -116,16 +136,30 @@ def discover_sources(path):
     raise ValueError(f'{path} holds no crawl run (a folder with records/) and no .parquet file.')
 
 
-def read_source(path, limit=None):
+def read_source(path, limit=None, id_start=None, id_end=None):
     """Rows from a run directory or an exported file, in increasing id order when known."""
     path = Path(path)
     if path.is_dir():
         if not (path / 'records').is_dir():
             raise ValueError(f'{path} is a directory without records/; pass the run directory '
                              'or an exported .parquet/.json/.jsonl file.')
-        yield from _run_directory_rows(path, limit)
+        yield from _run_directory_rows(path, limit, id_start, id_end)
         return
-    rows = storage.read_rows(path)
+    if path.suffix == '.parquet' and (id_start is not None or id_end is not None):
+        import pyarrow.parquet as pq
+        import pyarrow.compute as pc
+        rows = []
+        for batch in pq.ParquetFile(path).iter_batches(batch_size=4096):
+            ids = pc.cast(batch.column('id'), pa.int64())
+            mask = pa.array([True] * batch.num_rows)
+            if id_start is not None:
+                mask = pc.and_(mask, pc.greater_equal(ids, id_start))
+            if id_end is not None:
+                mask = pc.and_(mask, pc.less_equal(ids, id_end))
+            rows.extend(batch.filter(mask).to_pylist())
+    else:
+        rows = [row for row in storage.read_rows(path)
+                if in_id_range(row['id'], id_start, id_end)]
     rows.sort(key=lambda row: int(row['id']))
     yield from (rows[:limit] if limit else rows)
 
@@ -189,17 +223,23 @@ def normalise_row(row, source, text_field=None):
     }, None
 
 
-def source_size(path):
+def source_size(path, id_start=None, id_end=None):
     """Rows a source can give: record files of a run, Parquet row count, else rows of the file."""
     path = Path(path)
     if path.is_dir():
         with os.scandir(path / 'records') as entries:
             return sum(1 for entry in entries
-                       if entry.name.endswith('.json') and entry.name[:-5].isdigit())
+                       if entry.name.endswith('.json') and entry.name[:-5].isdigit()
+                       and in_id_range(entry.name[:-5], id_start, id_end))
     if path.suffix == '.parquet':
         import pyarrow.parquet as pq
-        return pq.ParquetFile(path).metadata.num_rows
-    return len(storage.read_rows(path))
+        parquet = pq.ParquetFile(path)
+        if id_start is None and id_end is None:
+            return parquet.metadata.num_rows
+        return sum(in_id_range(value, id_start, id_end)
+                   for batch in parquet.iter_batches(columns=['id'])
+                   for value in batch.column('id').to_pylist())
+    return sum(in_id_range(row['id'], id_start, id_end) for row in storage.read_rows(path))
 
 
 def proportional_quotas(sizes, limit):
@@ -220,6 +260,8 @@ def proportional_quotas(sizes, limit):
 
 
 def build(args):
+    id_start, id_end = getattr(args, 'id_start', None), getattr(args, 'id_end', None)
+    validate_id_range(id_start, id_end)
     kept, dropped = {}, []
     seen = set()
     sources = [found for given in args.source for found in discover_sources(given)]
@@ -228,7 +270,7 @@ def build(args):
     split = getattr(args, 'split', 'proportional')
     quotas = None
     if args.limit and split == 'proportional' and len(sources) > 1:
-        sizes = [source_size(source) for source in sources]
+        sizes = [source_size(source, id_start, id_end) for source in sources]
         quotas = proportional_quotas(sizes, args.limit)
         emit('prepare: chia giới hạn theo tỷ lệ: ' + ', '.join(
             f'{Path(s).name}={q}/{n}' for s, q, n in zip(sources, quotas, sizes)))
@@ -236,12 +278,15 @@ def build(args):
     for position, source in enumerate(sources):
         if quotas is not None:
             remaining = quotas[position]
+            if remaining == 0:
+                read_per_source[str(source)] = 0
+                continue
         else:
             remaining = args.limit - len(seen) if args.limit else None
             if args.limit and remaining <= 0:
                 break
         before = len(seen)
-        for row in read_source(source, limit=remaining):
+        for row in read_source(source, limit=remaining, id_start=id_start, id_end=id_end):
             doc_id = int(row['id'])
             if doc_id in seen:
                 # Several shards may carry the same id; the first source given wins.
@@ -294,7 +339,7 @@ def build(args):
         'id_min': rows[0]['id'], 'id_max': rows[-1]['id'],
         'options': {'limit': args.limit, 'split': split, 'max_duplicates': args.max_duplicates,
                     'min_chars': args.min_chars, 'drop_review': args.drop_review,
-                    'text_field': args.text_field},
+                    'text_field': args.text_field, 'id_start': id_start, 'id_end': id_end},
         'sources': [str(source) for source in sources],
         'rows_read_per_source': read_per_source,
         'split': split if quotas is not None else 'sequential',
@@ -313,6 +358,7 @@ def main():
                              'exported .parquet/.json/.jsonl files. Earlier sources win on shared '
                              'ids.')
     parser.add_argument('--out', default='work/corpus')
+    add_id_arguments(parser)
     parser.add_argument('--limit', type=int, default=None,
                         help='Read at most this many source rows, lowest ids first.')
     parser.add_argument('--split', choices=['proportional', 'sequential'], default='proportional',

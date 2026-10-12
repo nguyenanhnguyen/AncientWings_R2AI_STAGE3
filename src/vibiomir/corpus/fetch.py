@@ -19,10 +19,12 @@ Kaggle. huggingface_hub finds either on its own.
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 
 from ..common import storage
 from ..common.console import emit
+from .prepare import add_id_arguments, validate_id_range
 
 CORPUS_REPO = 'AncientWings/AncientWings_R2AI_STAGE3_ds'
 SOURCE_REPO = 'AIGuruTinix/ViBioMIR'
@@ -65,10 +67,43 @@ def pin(out, repo, revision):
         storage.write_json(path, {'repo': repo, 'revision': revision})
 
 
+def select_shards(names, id_start=None, id_end=None):
+    """Prune only canonical, disjoint ranges; unknown names need row-level filtering."""
+    validate_id_range(id_start, id_end)
+    selected = []
+    for name in sorted(names):
+        if not name.startswith('corpus/') or name.count('/') != 1 or not name.endswith('.parquet'):
+            continue
+        match = re.fullmatch(r'corpus/ids_(\d+)_(\d+)_synced\.parquet', name)
+        if match:
+            lo, hi = map(int, match.groups())
+            if lo <= hi and ((id_start is not None and hi < id_start)
+                             or (id_end is not None and lo > id_end)):
+                continue
+        selected.append(name)
+    return selected
+
+
+def pin_selection(out, id_start=None, id_end=None):
+    """Even an interrupted download must not later mix a different ID selection."""
+    validate_id_range(id_start, id_end)
+    path = Path(out) / 'selection.json'
+    selection = {'id_start': id_start, 'id_end': id_end}
+    if path.exists() and storage.read_json(path) != selection:
+        raise ValueError('HF ID range is pinned for this run; use a new --out.')
+    if not path.exists():
+        # A legacy download selected every shard; don't narrow it in place.
+        if (Path(out) / 'fetch_manifest.json').exists() and any(x is not None for x in selection.values()):
+            raise ValueError('Legacy HF snapshot has no ID range; use a new --out.')
+        storage.write_json(path, selection)
+
+
 def fetch(args):
     from huggingface_hub import hf_hub_download, snapshot_download
     import pyarrow.parquet as pq
 
+    id_start, id_end = getattr(args, 'id_start', None), getattr(args, 'id_end', None)
+    pin_selection(args.out, id_start, id_end)
     paths = layout(args.out, args.revision)
     paths['queries'].parent.mkdir(parents=True, exist_ok=True)
     for name in ('query.parquet', 'links_corpus.parquet'):
@@ -78,13 +113,24 @@ def fetch(args):
     if links_sha != LINKS_SHA256:
         raise ValueError(f'links_corpus.parquet SHA-256 {links_sha} differs from the pinned '
                          'BTC release; refusing to build a submission on other ids.')
+    patterns = ['corpus/*.parquet']
+    if id_start is not None or id_end is not None:
+        from huggingface_hub import HfApi
+        names = HfApi().list_repo_files(args.repo, repo_type='dataset', revision=args.revision)
+        patterns = select_shards(names, id_start, id_end)
+        if not patterns:
+            raise ValueError('No HF corpus shard overlaps the requested ID range.')
+        emit(f'fetch: {len(patterns)} shards overlap IDs [{id_start}, {id_end}]; '
+             'prepare will filter exact row IDs before applying --limit.')
     snapshot_download(args.repo, repo_type='dataset', revision=args.revision,
-                      allow_patterns=['corpus/*.parquet'], local_dir=paths['corpus'].parent)
+                      allow_patterns=patterns, local_dir=paths['corpus'].parent)
     files = sorted(paths['corpus'].glob('*.parquet'))
     if not files:
         raise ValueError(f'{args.repo}@{args.revision[:12]} has no corpus/*.parquet.')
     rows = sum(pq.ParquetFile(path).metadata.num_rows for path in files)
     summary = {'corpus_repo': args.repo, 'corpus_revision': args.revision,
+               'id_start': id_start, 'id_end': id_end,
+               'selected_files': [p.name for p in files],
                'corpus_files': len(files), 'corpus_rows': rows, 'corpus_dir': str(paths['corpus']),
                'source_repo': SOURCE_REPO, 'source_revision': SOURCE_REVISION,
                'queries': str(paths['queries']), 'links': str(paths['links']),
@@ -111,6 +157,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--out', default='work/hf')
     parser.add_argument('--repo', default=CORPUS_REPO)
+    add_id_arguments(parser)
     parser.add_argument('--revision', default=None,
                         help='Corpus commit; default: the pinned one, else the latest.')
     args = parser.parse_args()

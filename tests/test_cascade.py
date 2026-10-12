@@ -366,19 +366,22 @@ class PipelineCliTests(unittest.TestCase):
         from vibiomir import pipeline
         local = pipeline.parse_args(['--dry-run'])
         self.assertEqual((local.gpus, local.reranker, local.translation_quantize), (1, 'bge-reranker-v2-m3', '4bit'))
-        self.assertEqual((local.source, local.limit, local.out), (['nguyen'], 100000, 'work/run_local_100k'))
+        self.assertEqual((local.source, local.limit, local.out), (['nguyen'], 100000, 'work/run_quality_local'))
         self.assertEqual(pipeline.parse_args(['--limit', '0']).limit, 0)
         kaggle = pipeline.parse_args(['--profile', 'kaggle', '--reranker', 'bge-reranker-v2-m3'])
         self.assertEqual((kaggle.gpus, kaggle.reranker), (2, 'bge-reranker-v2-m3'))
-        self.assertEqual(local.reranker, pipeline.parse_args(['--profile', 'kaggle']).reranker)
+        strong = pipeline.parse_args(['--profile', 'kaggle'])
+        self.assertEqual((strong.encoder, strong.reranker), ('qwen3-embedding-4b', 'qwen3-reranker-4b'))
         self.assertEqual(local.hyde, [])
-        self.assertEqual((kaggle.source, kaggle.limit), (['hf'], 0))
+        self.assertEqual((kaggle.source, kaggle.limit), (['hf'], 100000))
 
     def test_dry_run_plans_parallel_gpu_stages(self):
         from vibiomir import pipeline
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            pipeline.run(pipeline.parse_args(['--profile', 'kaggle', '--dry-run', '--out',
+            pipeline.run(pipeline.parse_args(['--profile', 'kaggle', '--architecture', 'cascade',
+                                              '--encoder', 'bge-m3', '--reranker', 'bge-reranker-v2-m3',
+                                              '--enable-translation', '--dry-run', '--out',
                                               str(Path(tempfile.gettempdir()) / 'vibiomir-dry')]))
         text = output.getvalue()
         for stage in ('[cards_dense_part1] GPU 1', '[subset_dense_merge]', '[retrieve_0] GPU 0',
