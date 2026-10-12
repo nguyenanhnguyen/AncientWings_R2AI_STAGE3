@@ -241,7 +241,7 @@ def raw_references(value):
             yield from raw_references(item)
 
 
-def make_shard(entries, directory, name, repo, *, archive=True, jsonl=True):
+def make_shard(entries, directory, name, repo, *, archive=False, jsonl=True):
     import pyarrow as pa
     import pyarrow.parquet as pq
     directory.mkdir(parents=True, exist_ok=True)
@@ -386,7 +386,12 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--push', action='store_true', help='Upload; default is preview only.')
     mode.add_argument('--local-only', action='store_true', help='Offline preview; no HF dedup or upload.')
-    parser.add_argument('--no-archive', action='store_true', help='Keep raw local; still verify raw hashes.')
+    archive_mode = parser.add_mutually_exclusive_group()
+    archive_mode.add_argument('--archive', dest='archive', action='store_true',
+                              help='Opt in to packaging and uploading raw/records ZIPs (default: off).')
+    archive_mode.add_argument('--no-archive', dest='archive', action='store_false',
+                              help='Keep raw local; still verify raw hashes (the default).')
+    parser.set_defaults(archive=False)
     parser.add_argument('--no-jsonl', action='store_true')
     args = parser.parse_args(argv)
     if args.batch_size < 1 or args.attempts < 1 or (args.max_new is not None and args.max_new < 1):
@@ -444,7 +449,7 @@ def main(argv=None):
             directory = out / 'staging' / name
             print(f'Prepare shard {part}: {name} ({len(entries):,} records)', flush=True)
             files = make_shard(entries, directory, name, args.repo_id,
-                               archive=not args.no_archive, jsonl=not args.no_jsonl)
+                               archive=args.archive, jsonl=not args.no_jsonl)
             print(f'  {sum(p.stat().st_size for p, _ in files) / 1024**2:.1f} MiB prepared.', flush=True)
             if args.push:
                 parent, url = commit_shard(api, args.repo_id, parent, files, name, args.attempts, operation_add)

@@ -119,7 +119,7 @@ class NotebookUploadTests(unittest.TestCase):
         self.assertEqual(result['status'], 'uploaded')
         self.assertEqual(self.paths(), {
             f'corpus/{run.name}.parquet', f'corpus_jsonl/{run.name}.jsonl',
-            f'archives/{run.name}.zip', f'diagnostics/{run.name}_diagnostics.zip',
+            f'diagnostics/{run.name}_diagnostics.zip',
             f'manifests/{run.name}/notebook_manifest.json',
             f'manifests/{run.name}/upload_manifest.json',
         })
@@ -195,6 +195,7 @@ class NotebookUploadTests(unittest.TestCase):
         self.secret_client.get_secret.assert_not_called()
 
     def test_missing_archive_is_rejected_before_upload(self):
+        self.env['HF_UPLOAD_ARCHIVE'] = True
         (self.work / f'{self.env["RUN_DIR"].name}.zip').unlink()
         with self.assertRaisesRegex(RuntimeError, 'Thiếu output'):
             self.upload()
@@ -206,6 +207,11 @@ class NotebookUploadTests(unittest.TestCase):
         self.upload()
         self.assertEqual(len(self.paths()), 3)
         self.assertFalse(any(p.endswith(('.zip', '.jsonl')) for p in self.paths()))
+
+    def test_default_upload_works_without_local_checkpoint_archive(self):
+        (self.work / f'{self.env["RUN_DIR"].name}.zip').unlink()
+        self.assertEqual(self.upload()['status'], 'uploaded')
+        self.assertFalse(any(path.startswith('archives/') for path in self.paths()))
 
     def test_zero_accepted_never_uploads_stale_corpus(self):
         self.make_run(1, 101, accepted=0)

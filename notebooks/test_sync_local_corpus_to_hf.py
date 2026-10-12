@@ -92,7 +92,7 @@ class SyncTests(unittest.TestCase):
     def test_archive_resolves_corpus_raw_and_preserves_original_record(self):
         row = self.record()
         sync.plan_local(self.db, [self.run], self.root)
-        files = sync.make_shard(self.entries(), self.root / 'stage', 'batch', sync.REPO)
+        files = sync.make_shard(self.entries(), self.root / 'stage', 'batch', sync.REPO, archive=True)
         exported = pq.read_table(self.root / 'stage/corpus.parquet').to_pylist()[0]
         with zipfile.ZipFile(self.root / 'stage/batch.zip') as bundle:
             self.assertEqual(hashlib.sha256(gzip.decompress(bundle.read('batch/' + exported['raw_path']))).hexdigest(),
@@ -104,6 +104,17 @@ class SyncTests(unittest.TestCase):
         for entry in sync.read_json(self.root / 'stage/upload_manifest.json')['files']:
             local = next(p for p, remote in files if remote == entry['path_in_repo'])
             self.assertEqual(sync.sha_file(local), entry['sha256'])
+
+    def test_default_shard_keeps_raw_local_and_omits_archive_from_manifest(self):
+        row = self.record()
+        sync.plan_local(self.db, [self.run], self.root)
+        files = sync.make_shard(self.entries(), self.root / 'stage', 'batch', sync.REPO)
+        self.assertFalse(any(remote.startswith('archives/') for _, remote in files))
+        self.assertFalse((self.root / 'stage/batch.zip').exists())
+        proof = sync.read_json(self.root / 'stage/upload_manifest.json')
+        self.assertFalse(any(item['path_in_repo'].startswith('archives/') for item in proof['files']))
+        with gzip.open(self.run / row['raw_path'], 'rb') as stream:
+            self.assertEqual(sync.sha_stream(stream), row['raw_sha256'])
 
     def test_tampered_raw_rejected_even_without_archive(self):
         self.record()
@@ -163,7 +174,7 @@ class SyncTests(unittest.TestCase):
         sync.plan_local(self.db, [self.run], self.root)
         old = 'local-nguyen_1_1_' + 'a' * 20
         files = dict((remote, local) for local, remote in sync.make_shard(
-            self.entries(), self.root / 'legacy', old, sync.REPO))
+            self.entries(), self.root / 'legacy', old, sync.REPO, archive=True))
         old_parquet_hash = sync.sha_file(files[f'corpus/{old}.parquet'])
         _, new, mapping = naming.rename_plan([old], files)[0]
         changes = naming.prepare_rename(old, new, mapping, files.__getitem__, self.root / 'renamed')
@@ -186,7 +197,7 @@ class SyncTests(unittest.TestCase):
         sync.plan_local(self.db, [self.run], self.root)
         old = 'local-nguyen_1_1_' + 'a' * 20
         files = dict((remote, local) for local, remote in sync.make_shard(
-            self.entries(), self.root / 'legacy', old, sync.REPO))
+            self.entries(), self.root / 'legacy', old, sync.REPO, archive=True))
         path = files[f'manifests/{old}/notebook_manifest.json']
         manifest = sync.read_json(path)
         manifest['accepted'] = 999

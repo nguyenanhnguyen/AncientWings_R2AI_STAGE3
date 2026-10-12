@@ -51,7 +51,9 @@ Model mặc định: `bge-m3` (568M) cho embedding và `bge-reranker-v2-m3` (568
 
 Upload [crawl_corpus_kaggle_hf_upload.ipynb](notebooks/crawl_corpus_kaggle_hf_upload.ipynb) lên Kaggle, bật Internet và chỉnh `ID_FROM` / `ID_TO` trong ô cấu hình. Cả hai đầu đều được tính vào khoảng chọn. Notebook tự chứa code, tải Parquet nguồn, crawl/resume và xuất corpus JSONL/Parquet cùng ZIP chứa raw/checkpoint. Không cần clone repo hoặc GPU.
 
-Mục 10 tự upload output đã hoàn tất vào `AncientWings/AncientWings_R2AI_STAGE3_ds`. Trước Run All, tạo và bật Kaggle Secret `HF_TOKEN` có quyền ghi vào dataset. Đặt `HF_UPLOAD_ENABLED = False` nếu chỉ muốn lưu output trên Kaggle. Corpus, ZIP và diagnostics được phân biệt theo tên run; manifest ghi khoảng ID, số bản ghi và SHA-256. Run còn pending chưa upload; lỗi mạng có thể chạy lại riêng mục 10. Nếu crawl lại cùng khoảng ID với cấu hình khác, dùng `RUN_TAG` mới.
+Mục 10 tự upload output đã hoàn tất vào `AncientWings/AncientWings_R2AI_STAGE3_ds`. Trước Run All, tạo và bật Kaggle Secret `HF_TOKEN` có quyền ghi vào dataset. Đặt `HF_UPLOAD_ENABLED = False` nếu chỉ muốn lưu output trên Kaggle. Mặc định upload corpus, diagnostics và manifest; `HF_UPLOAD_ARCHIVE = False` giữ ZIP raw/checkpoint trong Kaggle Output, không đưa lên HF. Các artifact được phân biệt theo tên run; manifest ghi khoảng ID, số bản ghi và SHA-256. Run còn pending chưa upload; lỗi mạng có thể chạy lại riêng mục 10. Nếu crawl lại cùng khoảng ID với cấu hình khác, dùng `RUN_TAG` mới.
+
+[delete_hf_archives.ipynb](notebooks/delete_hf_archives.ipynb) có một cell dọn `archives/` trên dataset HF, gồm các blob LFS của archive trong lịch sử để thu hồi dung lượng. Cell dùng Kaggle Secret `HF_TOKEN` hoặc token local, không chạy cùng uploader. Xoá blob archive là vĩnh viễn; giữ bản ZIP raw/checkpoint ở Kaggle hoặc local nếu còn cần resume. Cell không super-squash toàn bộ lịch sử repo.
 
 Đặt `MAX_NEW = 10` để thử trước, rồi đổi thành `None` và chạy lại ô crawl. Khi đổi session, giữ output và thêm run đã giải nén vào Kaggle Input để dùng `RESUME_RUN_PATH`.
 

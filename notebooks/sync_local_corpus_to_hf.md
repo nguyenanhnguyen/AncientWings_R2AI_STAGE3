@@ -62,12 +62,13 @@ Mỗi đợt mặc định có tối đa 1.000 record accepted mới:
 ```text
 corpus/ids_<min_id>_<max_id>_synced.parquet
 corpus_jsonl/ids_<min_id>_<max_id>_synced.jsonl
-archives/ids_<min_id>_<max_id>_synced.zip
 manifests/ids_<min_id>_<max_id>_synced/notebook_manifest.json
 manifests/ids_<min_id>_<max_id>_synced/upload_manifest.json
 ```
 
 Hợp nhất ở đây là bổ sung shard vào `corpus/`. Khi đọc toàn bộ `corpus/*.parquet`, dữ liệu mới cùng tồn tại với shard Kaggle cũ; không tạo một file `merged.parquet` hoặc sửa dataset card. Chọn glob `corpus/*.parquet` rõ ràng khi nạp, tránh đọc cả JSONL/manifest vào corpus.
+
+Mặc định không tạo/upload `archives/*.zip`; records/raw vẫn được kiểm tra hash và giữ ở thư mục crawl local. Chỉ thêm ZIP lên HF khi chủ động dùng `--archive`. Notebook Kaggle cũng mặc định `HF_UPLOAD_ARCHIVE = False` nhưng vẫn tạo ZIP checkpoint trong Output.
 
 Mỗi shard được commit cùng các artifact của nó. Script truyền `parent_commit` để phát hiện repo thay đổi trong lúc đồng bộ; khi người khác vừa upload, chạy lại để kiểm tra trùng ID trên phiên bản mới. Cơ chế này bảo vệ lượt upload của script; các uploader khác cũng cần kiểm tra ID để tránh tự thêm trùng sau đó. Tham khảo [HF create_commit](https://huggingface.co/docs/huggingface_hub/en/package_reference/hf_api#huggingface_hub.HfApi.create_commit).
 
@@ -84,7 +85,7 @@ python notebooks\sync_local_corpus_to_hf.py --push --on-conflict keep-remote
 
 Các bản local bị bỏ qua vẫn nằm nguyên trong output crawl; `conflicts.jsonl` ghi `action=keep_remote` để review sau. Không ghi đè corpus HF. Xung đột URL hoặc giữa hai bản local chưa có trên HF vẫn chặn upload. `conflicts_kept_remote` là số bản đã xử lý theo lựa chọn này, không phải số bản đã upload.
 
-ZIP chứa **records và raw liên quan của các record mới trong đợt này**, cùng corpus và manifest. Record nguyên bản được lưu dưới `sources/<namespace>/records/`; các đường dẫn raw trong corpus được thêm namespace tương ứng để phân biệt các run. Giải nén ZIP để truy vết raw theo `raw_path`.
+Khi bật `--archive`, ZIP chứa **records và raw liên quan của các record mới trong đợt này**, cùng corpus và manifest. Record nguyên bản được lưu dưới `sources/<namespace>/records/`; các đường dẫn raw trong corpus được thêm namespace tương ứng để phân biệt các run. Giải nén ZIP để truy vết raw theo `raw_path`.
 
 Đây là archive snapshot accepted, **không đủ để resume toàn bộ crawler** như full ZIP của notebook Kaggle. Manifest ghi rõ `snapshot_scope=new_accepted_records_only`, `full_crawl_resume_supported=false`; `pending=0` chỉ mô tả snapshot, không có nghĩa run local đã crawl xong. Không tạo diagnostics ZIP và không chạy lại audit DOM/review của notebook. Muốn backup/resume toàn run, tiếp tục giữ full output và ZIP của crawler riêng.
 
@@ -97,7 +98,8 @@ Tùy chọn hữu ích:
 | `--max-new 100` | Chỉ lấy tối đa 100 record mới; báo cáo không phải thống kê toàn bộ nguồn |
 | `--batch-size 5000` | Tối đa 5.000 record mỗi shard/commit |
 | `--out D:\hf_sync_work` | Chuyển cache/staging sang ổ khác; đặt ngoài thư mục crawl |
-| `--no-archive` | Chỉ upload corpus/manifest; raw vẫn kiểm tra hash nhưng chỉ giữ local |
+| `--archive` | Chủ động tạo/upload ZIP raw/records lên HF; mặc định tắt |
+| `--no-archive` | Giữ mặc định chỉ upload corpus/manifest; raw vẫn kiểm tra hash local |
 | `--no-jsonl` | Chỉ xuất corpus Parquet, bỏ bản JSONL |
 | `--source-parquet PATH` | Đường dẫn khác tới nguồn gốc đã chốt hash |
 
