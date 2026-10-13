@@ -138,7 +138,7 @@ def commit(api, repo, parent, operations, message, attempts):
             result = api.create_commit(repo_id=repo, repo_type='dataset', revision='main',
                                        parent_commit=parent, commit_message=message,
                                        operations=operations)
-            return result.oid, result.commit_urlp
+            return result.oid, result.commit_url
         except Exception as error:
             status = getattr(getattr(error, 'response', None), 'status_code', None)
             if status in (409, 412):
