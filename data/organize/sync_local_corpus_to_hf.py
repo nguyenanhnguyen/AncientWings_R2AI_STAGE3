@@ -1,7 +1,7 @@
 """Sync accepted local crawl records into the HF notebook's corpus shard layout.
 
-Preview: python notebooks/sync_local_corpus_to_hf.py
-Upload:  python notebooks/sync_local_corpus_to_hf.py --push
+Preview: python data/organize/sync_local_corpus_to_hf.py
+Upload:  python data/organize/sync_local_corpus_to_hf.py --push
 See sync_local_corpus_to_hf.md for setup, conflict policy and archive scope.
 """
 from __future__ import annotations
@@ -21,10 +21,21 @@ import sys
 import time
 import zipfile
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 REPO = 'AncientWings/AncientWings_R2AI_STAGE3_ds'
-SOURCE_REVISION = '0148f6f80ffafed5c005af6d506ccfd9d3fb47a7'
-SOURCE_SHA256 = 'dee1153f5b9d9010dea18e1b7724b4915ff847b711d036bec8b933486802a971'
+SOURCE_REPO = 'AIGuruTinix/ViBioMIR'
+# The organisers replaced links_corpus.parquet (4.394.718 rows) with this vi/en/zh list
+# (1.220.598 rows) on 2026-10-13. Of the old ids, 980.598 are kept with exactly the same URL and
+# 3.414.120 are gone; 240.000 ids are new. Only (id, url) pairs of THIS file may be uploaded,
+# because the rules score nothing outside it.
+SOURCE_FILE = 'links_corpus_vi_en_zh.parquet'
+SOURCE_REVISION = '71be0e1239a19dfd7a717e2bc13e3bec21bd0334'
+SOURCE_SHA256 = '87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7'
+# A crawl run records the list it was planned against. Runs planned against a retired list stay
+# usable: every record is checked against the current list, id and url, before it is uploaded.
+RETIRED_SOURCE_SHA256 = {
+    'dee1153f5b9d9010dea18e1b7724b4915ff847b711d036bec8b933486802a971': 'links_corpus.parquet',
+}
 FIELDS = ('id', 'url', 'final_url', 'title', 'text', 'domain', 'extractor',
           'published_at', 'raw_path', 'raw_sha256', 'text_sha256', 'duplicate_doc_ids')
 
@@ -103,10 +114,47 @@ def new_database(path):
     db.executescript('''
         DROP TABLE IF EXISTS remote;
         DROP TABLE IF EXISTS pending;
+        DROP TABLE IF EXISTS official;
         CREATE TABLE remote (id INTEGER PRIMARY KEY, url TEXT, digest TEXT, origin TEXT);
         CREATE TABLE pending (id INTEGER PRIMARY KEY, url TEXT, digest TEXT, run TEXT, record TEXT);
+        CREATE TABLE official (id INTEGER PRIMARY KEY, url TEXT NOT NULL);
     ''')
     return db
+
+
+def index_official(db, source):
+    """Load the organisers' id/url list into `official`, after checking the file is that list.
+
+    Kept in SQLite rather than a dict: the list has over a million rows, and every later check is
+    a primary-key lookup.
+    """
+    import pyarrow.parquet as pq
+    print(f'Read official ID/URL list: {source}', flush=True)
+    digest = sha_file(source)
+    if digest != SOURCE_SHA256:
+        retired = RETIRED_SOURCE_SHA256.get(digest)
+        detail = f' That file is the retired {retired}.' if retired else ''
+        raise ValueError(f'{source} is not the pinned {SOURCE_FILE} (sha256 {digest}).{detail} '
+                         f'Download {SOURCE_FILE} from {SOURCE_REPO} at {SOURCE_REVISION[:12]}.')
+    parquet = pq.ParquetFile(source)
+    if not {'id', 'url'}.issubset(parquet.schema_arrow.names):
+        raise ValueError(f'{source} must hold id and url columns.')
+    for batch in parquet.iter_batches(batch_size=65536, columns=['id', 'url']):
+        db.executemany('INSERT OR REPLACE INTO official VALUES (?,?)',
+                       zip(batch.column('id').to_pylist(), batch.column('url').to_pylist()))
+    db.commit()
+    total = db.execute('SELECT COUNT(*) FROM official').fetchone()[0]
+    if total != parquet.metadata.num_rows:
+        raise ValueError(f'Official list has duplicate ids: {parquet.metadata.num_rows} rows, '
+                         f'{total} unique ids.')
+    print(f'Official list: {total:,} ids.', flush=True)
+    return total
+
+
+def official_url(db, doc_id):
+    """The organisers' URL for this id, or None when the id is not on their list."""
+    row = db.execute('SELECT url FROM official WHERE id=?', (doc_id,)).fetchone()
+    return row[0] if row else None
 
 
 def index_remote(db, api, repo, revision, cache_dir, download):
@@ -141,11 +189,13 @@ def index_remote(db, api, repo, revision, cache_dir, download):
 def plan_local(db, runs, out, max_new=None, on_conflict='error'):
     counts = Counter()
     with (out / 'conflicts.jsonl').open('w', encoding='utf-8') as conflicts, \
-            (out / 'deferred.jsonl').open('w', encoding='utf-8') as deferred:
+            (out / 'deferred.jsonl').open('w', encoding='utf-8') as deferred, \
+            (out / 'not_official.jsonl').open('w', encoding='utf-8') as unofficial:
         for run in runs:
             manifest = read_json(run / 'manifest.json')
-            if manifest.get('source_sha256') != SOURCE_SHA256:
-                raise ValueError(f'Run uses a different source dataset: {run}')
+            pinned = manifest.get('source_sha256')
+            if pinned != SOURCE_SHA256 and pinned not in RETIRED_SOURCE_SHA256:
+                raise ValueError(f'Run uses an unknown source dataset: {run}')
             print(f'Scan records: {run}', flush=True)
             for path in sorted((run / 'records').glob('*.json')):
                 counts['scanned'] += 1
@@ -168,6 +218,16 @@ def plan_local(db, runs, out, max_new=None, on_conflict='error'):
                 doc_id, url, digest = fingerprint(row)
                 if path.stem != str(doc_id):
                     raise ValueError(f'Record filename/id mismatch: {path}')
+                # Only ids and urls of the organisers' current list can ever be scored, so a
+                # record outside it is dropped here instead of being uploaded.
+                expected = official_url(db, doc_id)
+                if expected is None or expected != url:
+                    reason = 'id_not_in_official_list' if expected is None else 'url_differs'
+                    unofficial.write(json.dumps({'id': doc_id, 'reason': reason, 'local_url': url,
+                                                 'official_url': expected, 'path': str(path)},
+                                                ensure_ascii=False) + '\n')
+                    counts[reason] += 1
+                    continue
                 if not isinstance(row.get('text'), str) or not row['text'].strip():
                     raise ValueError(f'Empty accepted text: {path}')
                 if hashlib.sha256(row['text'].encode('utf-8')).hexdigest() != digest:
@@ -205,18 +265,13 @@ def plan_local(db, runs, out, max_new=None, on_conflict='error'):
     return dict(counts)
 
 
-def verify_source(db, source):
-    import pyarrow.parquet as pq
-    print(f'Check original ID/URL mapping: {source}', flush=True)
-    if sha_file(source) != SOURCE_SHA256:
-        raise ValueError('Source Parquet SHA-256 differs from the pinned notebook dataset.')
-    expected = dict(db.execute('SELECT id,url FROM pending'))
-    if not expected:
-        return
-    table = pq.read_table(source, columns=['id', 'url'], filters=[('id', 'in', list(expected))])
-    actual = {r['id']: r['url'] for r in table.to_pylist()}
-    if table.num_rows != len(expected) or actual != expected:
-        raise ValueError('Local records do not match the official source ID/URL mapping.')
+def verify_source(db):
+    """Last gate before upload: every planned record must be on the official list, id and url."""
+    print('Check planned records against the official ID/URL list.', flush=True)
+    bad = db.execute('''SELECT p.id, p.url, o.url FROM pending p LEFT JOIN official o ON p.id = o.id
+                        WHERE o.url IS NULL OR o.url <> p.url LIMIT 5''').fetchall()
+    if bad:
+        raise ValueError(f'Planned records are not on the official list: {bad}')
 
 
 def evidence_path(run, relative):
@@ -287,6 +342,7 @@ def make_shard(entries, directory, name, repo, *, archive=False, jsonl=True):
         'snapshot_scope': 'new_accepted_records_only', 'full_crawl_resume_supported': False,
         'id_from_inclusive': min(r['id'] for r in rows), 'id_to_inclusive': max(r['id'] for r in rows),
         'dataset_revision': SOURCE_REVISION, 'source_sha256': SOURCE_SHA256,
+        'source_file': SOURCE_FILE, 'official_id_url_verified': True,
         'selected': len(rows), 'completed': len(rows), 'pending': 0, 'accepted': len(rows),
         'complete': True, 'audit_passed': True, 'export_passed': True,
         'audit_scope': 'source ID/URL, text SHA-256, decompressed raw SHA-256, Parquet round trip',
@@ -313,6 +369,7 @@ def make_shard(entries, directory, name, repo, *, archive=False, jsonl=True):
     proof = {'format_version': 1, 'source_notebook': 'crawl_corpus_kaggle_hf_upload.ipynb',
         'generated_by': Path(__file__).name, 'repo_id': repo, 'run_name': name,
         'dataset_revision': SOURCE_REVISION, 'source_sha256': SOURCE_SHA256,
+        'source_file': SOURCE_FILE, 'official_id_url_verified': True,
         'id_from_inclusive': manifest['id_from_inclusive'], 'id_to_inclusive': manifest['id_to_inclusive'],
         'complete': True, 'corpus_policy': 'accepted_only', 'snapshot_scope': manifest['snapshot_scope'],
         'counts': {k: manifest[k] for k in ('selected', 'completed', 'pending', 'accepted')},
@@ -375,7 +432,8 @@ def main(argv=None):
     parser.add_argument('--sources', nargs='+', type=Path,
                         default=[ROOT / 'nguyen/output', ROOT / 'nguyen/shards'])
     parser.add_argument('--repo-id', default=REPO)
-    parser.add_argument('--source-parquet', type=Path, default=ROOT / 'data/links_corpus.parquet')
+    parser.add_argument('--source-parquet', type=Path, default=ROOT / f'data/{SOURCE_FILE}',
+                        help=f'The organisers\' current id/url list (default data/{SOURCE_FILE}).')
     parser.add_argument('--out', type=Path, default=ROOT / 'work/hf_local_sync')
     parser.add_argument('--batch-size', type=int, default=1000, help='Accepted records per HF commit.')
     parser.add_argument('--max-new', type=int, help='Limit new accepted records in this invocation.')
@@ -406,6 +464,7 @@ def main(argv=None):
         raise ValueError('--out must be separate from all crawl run directories.')
     out.mkdir(parents=True, exist_ok=True)
     with workspace_lock(out), new_database(out / 'plan.sqlite') as db:
+        index_official(db, args.source_parquet)
         api, parent, operation_add = None, None, None
         if not args.local_only:
             try:
@@ -424,6 +483,9 @@ def main(argv=None):
         counts = plan_local(db, runs, out, args.max_new, args.on_conflict)
         summary = {'mode': 'push' if args.push else 'local_only' if args.local_only else 'preview',
                    'repo_id': args.repo_id, 'remote_revision': parent, 'counts': counts,
+                   'official_source': {'file': SOURCE_FILE, 'repo': SOURCE_REPO,
+                                       'revision': SOURCE_REVISION, 'sha256': SOURCE_SHA256,
+                                       'path': str(args.source_parquet)},
                    'on_conflict': args.on_conflict,
                    'created_at_utc': datetime.now(timezone.utc).isoformat(), 'commits': []}
         write_json(out / 'sync_result.json', summary)
@@ -433,7 +495,7 @@ def main(argv=None):
         if not counts.get('new'):
             print('No new accepted records to sync.')
             return 0
-        verify_source(db, args.source_parquet)
+        verify_source(db)
         cursor = db.execute('SELECT id,url,digest,run,record FROM pending ORDER BY id')
         part = 0
         while entries := cursor.fetchmany(args.batch_size):
