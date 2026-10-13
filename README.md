@@ -67,6 +67,8 @@ Nguồn crawl mới là `links_corpus_vi_en_zh.parquet` gồm **1.220.598 URL**,
 
 Khi bật Selenium, notebook kiểm tra Chrome trước lượt Requests. Trên Kaggle/Linux dùng apt, notebook tự cài thư viện Chrome còn thiếu (gồm ATK); nếu Chrome không khởi động được thì dừng sớm và lưu lỗi/log. Parser riêng của 120ask lấy câu hỏi/câu trả lời; cnkang lấy thân bài và bỏ menu/bài liên quan.
 
+Parser PubMed xác minh PMID theo URL, lấy tiêu đề và abstract tiếng Anh từ DOM, giữ số liệu/list/superscript và bỏ menu, figures, references. Trang “Cookies must be enabled” được nhận diện là challenge ngay cả với HTTP 2xx và không được chọn làm nội dung cuối. Khi hai engine cùng mức QC, nội dung không bị `short_text` được ưu tiên. Abstract ngắn chỉ được chấp nhận với template PubMed đã xác minh; trang thiếu abstract hoặc PMID không khớp được giữ để review.
+
 Phần chẩn đoán nằm ngay trong notebook, tại mục **8. ZIP chẩn đoán**; không cần file hay ô Python rời. Output tự có `<run>_diagnostics.zip`, cập nhật sau mỗi log tiến độ và khi bước xử lý kết thúc. Có thể chạy lại mục 8 để tạo ZIP từ checkpoint hiện tại mà không tải lại URL.
 
 Giải nén ZIP, mở `overview.html` để xem tiến độ, tốc độ/ETA, lỗi và QC. Gói gồm CSV từng ID/request/redirect/pending, log pip/crawl và traceback notebook, manifest/cấu hình, phiên bản môi trường, snapshot code và bằng chứng robots. Có tối đa 10 mẫu record/raw để debug parser; tổng raw mẫu tối đa 10 MiB, mỗi JSON mẫu tối đa 1 MiB. `sample_manifest.json` ghi mẫu được lấy hoặc bỏ qua. Bản đầy đủ `<run>.zip` tại mục 9 vẫn giữ toàn bộ raw/checkpoint để resume.
