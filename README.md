@@ -63,6 +63,8 @@ Raw rỗng hoặc HTML không parse được được ghi cờ chẩn đoán; sa
 
 Notebook corpus dùng chung engine với `crawl_domain_samples`: User-Agent trình duyệt, timeout 20/45 giây, ngân sách 180 giây/URL và Selenium cho URL Requests lỗi, trang JS hoặc text rỗng/QC lỗi. `RESPECT_ROBOTS` chỉnh ở ô cấu hình. Để nâng cấp run cũ hoặc thử lại lỗi, dùng `RECOVERY_RUN_PATH` và `RUN_TAG` mới. Kết quả cuối chọn engine có QC tốt hơn, giữ Requests khi tương đương; nội dung Selenium qua QC được xuất vào corpus, lỗi Requests vẫn được giữ riêng.
 
+Nguồn crawl mới là `links_corpus_vi_en_zh.parquet` gồm **1.220.598 URL**, ghim revision `71be0e1239a19dfd7a717e2bc13e3bec21bd0334` và cùng SHA-256 với notebook domain samples. ID gốc không liên tục, từ 583 đến 7.466.161; chọn batch bằng `ID_FROM` / `ID_TO`. Run mới mặc định có hậu tố `_synced_vi_en_zh`. Resume chỉ nhận cùng nguồn; dùng recovery để nâng cấp run từ corpus cũ. `POSTPROCESS_ONLY` vẫn dùng snapshot gốc khi manifest của run mang hash nguồn cũ.
+
 Khi bật Selenium, notebook kiểm tra Chrome trước lượt Requests. Trên Kaggle/Linux dùng apt, notebook tự cài thư viện Chrome còn thiếu (gồm ATK); nếu Chrome không khởi động được thì dừng sớm và lưu lỗi/log. Parser riêng của 120ask lấy câu hỏi/câu trả lời; cnkang lấy thân bài và bỏ menu/bài liên quan.
 
 Phần chẩn đoán nằm ngay trong notebook, tại mục **8. ZIP chẩn đoán**; không cần file hay ô Python rời. Output tự có `<run>_diagnostics.zip`, cập nhật sau mỗi log tiến độ và khi bước xử lý kết thúc. Có thể chạy lại mục 8 để tạo ZIP từ checkpoint hiện tại mà không tải lại URL.
@@ -81,9 +83,9 @@ Nếu snapshot ViBioMIR gốc trên HF bị gỡ, notebook vẫn xuất review c
 
 ## Notebook kiểm tra domain
 
-[crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) chứa sẵn 97 URL mẫu của 97 hostname, snapshot crawler và code probe. Chạy các ô từ trên xuống trên Kaggle, Colab hoặc Jupyter có Internet. Notebook tự cài dependencies và lưu phiên bản cùng output.
+[crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) tập trung vào `vov.vn` và `nhathuoclongchau.com.vn`, mỗi domain 20 URL (tổng 40). Mẫu ngẫu nhiên seed 42 được nhúng từ `links_corpus_vi_en_zh.parquet`, giữ nguyên ID/URL và ghi revision/hash nguồn trong manifest. Chạy các ô từ trên xuống trên Kaggle, Colab hoặc Jupyter có Internet. Notebook tự cài dependencies và lưu phiên bản cùng output.
 
-Đặt `MAX_NEW = 10` để chạy thử; dùng `RESUME_RUN_DIR` để tiếp tục output cùng phiên bản code. Dùng `RECOVERY_RUN_DIR` với một run mới để thử lại nhóm lỗi và tái sử dụng raw hợp lệ bằng parser mới. `BROWSER_TEST_MODE` điều khiển bước đối chiếu Selenium cho URL Requests lỗi hoặc trích xuất lỗi/rỗng. Sau khi đổi snapshot, giữ `RESUME_RUN_DIR = None` và tạo run mới.
+Mặc định `MAX_NEW = None`, `WORKERS = 2`, `LOG_EVERY = 5` để thử đủ 20 URL/domain. Dùng `RESUME_RUN_DIR` để tiếp tục output có cùng mẫu và phiên bản code; run 97 hostname cũ phải tạo run mới. Dùng `RECOVERY_RUN_DIR` với một run mới để thử lại nhóm lỗi và tái sử dụng raw hợp lệ bằng parser mới. `BROWSER_TEST_MODE` điều khiển bước đối chiếu Selenium cho URL Requests lỗi hoặc trích xuất lỗi/rỗng. Sau khi đổi snapshot, giữ `RESUME_RUN_DIR = None` và tạo run mới.
 
 Output gồm bảng `ket_qua.csv/html`, kết quả Requests/Selenium, lỗi theo loại, raw, ảnh chụp và snapshot code. `browser_runtime.json` / `browser_preflight.json` cùng log Chrome ghi tình trạng môi trường; `summary.json` tách số URL phục hồi truy cập và cải thiện nội dung nhờ Selenium. Tải ZIP trong Output của Kaggle hoặc qua các liên kết notebook hiển thị.
 
