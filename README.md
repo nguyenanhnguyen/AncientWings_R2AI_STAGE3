@@ -69,6 +69,16 @@ Phần chẩn đoán nằm ngay trong notebook, tại mục **8. ZIP chẩn đo�
 
 Giải nén ZIP, mở `overview.html` để xem tiến độ, tốc độ/ETA, lỗi và QC. Gói gồm CSV từng ID/request/redirect/pending, log pip/crawl và traceback notebook, manifest/cấu hình, phiên bản môi trường, snapshot code và bằng chứng robots. Có tối đa 10 mẫu record/raw để debug parser; tổng raw mẫu tối đa 10 MiB, mỗi JSON mẫu tối đa 1 MiB. `sample_manifest.json` ghi mẫu được lấy hoặc bỏ qua. Bản đầy đủ `<run>.zip` tại mục 9 vẫn giữ toàn bộ raw/checkpoint để resume.
 
+## Notebook review chất lượng dữ liệu HF
+
+[review_hf_data_quality.ipynb](notebooks/review_hf_data_quality.ipynb) kiểm tra corpus `AncientWings/AncientWings_R2AI_STAGE3_ds`, chạy độc lập trên Kaggle/Colab/Jupyter và không cần GPU. Trên Kaggle bật Internet, thêm Secret `HF_TOKEN` có quyền đọc dataset rồi Run All. Đặt `HF_REVISION` theo commit của run train cần review; mặc định notebook ghim commit mới nhất. Dùng `LOCAL_CORPUS_DIR` và `LOCAL_SOURCE_DIR` nếu đã tải dữ liệu local.
+
+Notebook quét Parquet theo batch vào SQLite, kiểm tra lỗi text/hash/status, duplicate và ID xung đột xuyên shard, đối chiếu ID/URL với ViBioMIR gốc, phân bố nguồn/ngôn ngữ và độ phủ link. Output gồm biểu đồ, `REPORT.md`, `summary.json`, phiếu `manual_review.csv`, lexical query probe và ZIP báo cáo. Bật `RUN_TOKENIZER` để đo nguy cơ truncation theo tokenizer/max_length đang train. Các kiểm tra trên mẫu và heuristic được ghi rõ; corpus không có relevance labels nên notebook không tính recall/F2 hay tự kết luận nguyên nhân train kém.
+
+Code helper được nhúng sẵn, không cần clone repo khi chạy notebook. Sau khi sửa [scripts/hf_data_quality.py](scripts/hf_data_quality.py) hoặc nội dung notebook trong builder, chạy `python scripts/build_data_quality_notebook.py` để tạo lại notebook.
+
+Nếu snapshot ViBioMIR gốc trên HF bị gỡ, notebook vẫn xuất review corpus và ghi rõ đối chiếu nguồn chưa đo. Dùng `LOCAL_SOURCE_DIR` trỏ tới hai file gốc `data/links_corpus.parquet` và `data/query.parquet` (đúng SHA-256) để đo đầy đủ; file `links_corpus_vi_en_zh.parquet` hiện tại có số link/hash khác nên không thay thế ngầm. Khi run cũ đã quét xong nhưng lỗi ở bước sau, đặt `RESUME_REVIEW_DIR` tới thư mục output có `config.json` và `features.sqlite`, giữ nguyên cấu hình quét để tiếp tục từ SQLite mà không đọc lại text toàn corpus. Các CSV corpus được lưu ngay sau từng bước phân tích.
+
 ## Notebook kiểm tra domain
 
 [crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) chứa sẵn 97 URL mẫu của 97 hostname, snapshot crawler và code probe. Chạy các ô từ trên xuống trên Kaggle, Colab hoặc Jupyter có Internet. Notebook tự cài dependencies và lưu phiên bản cùng output.
