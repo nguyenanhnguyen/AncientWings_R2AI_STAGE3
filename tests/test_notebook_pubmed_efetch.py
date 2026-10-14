@@ -198,7 +198,8 @@ class PubMedEFetchTests(unittest.TestCase):
     def test_network_failure_keeps_pending_and_resume_retries(self):
         self.make_run(3)
         self.reply = Response(b'Access denied', status=403)
-        with self.assertRaisesRegex(RuntimeError, 'URLs remain pending'): self.execute()
+        summary,_,_,_=self.execute()
+        self.assertEqual(summary['pending'],3)
         self.assertEqual(list((self.out / 'records').glob('*.json')), [])
         self.assertEqual(self.crawler.load_json(self.out / 'quality_report.json')['pending'], 3)
         self.assertTrue(list((self.out / 'pubmed_batch_failures').glob('*.json')))
@@ -221,10 +222,10 @@ class PubMedEFetchTests(unittest.TestCase):
     def test_html_http_200_stays_pending_and_has_saved_raw_evidence(self):
         self.make_run(2)
         self.reply = Response(b'<html><title>Access denied</title></html>')
-        with self.assertRaisesRegex(RuntimeError, 'URLs remain pending'): self.execute()
+        self.execute({'pubmed_efetch':{'attempts':1,'pending_retry_passes':0}})
         self.assertEqual(self.crawler.load_json(self.out / 'quality_report.json')['pending'], 2)
         self.assertEqual(list((self.out / 'pubmed_records').glob('*.json')), [])
-        request = json.loads((self.out / 'pubmed_requests.jsonl').read_text(encoding='utf-8'))
+        request = json.loads((self.out / 'pubmed_requests.jsonl').read_text(encoding='utf-8').splitlines()[-1])
         self.assertEqual(request['http_status'], 200)
         self.assertIn('XML root', request['error'])
         self.assertTrue((self.out / request['raw_path']).is_file())

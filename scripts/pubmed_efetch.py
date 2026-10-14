@@ -1,5 +1,6 @@
 """Sequential PubMed EFetch GET with PMID joins and durable batch checkpoints."""
 import csv
+from collections import deque
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import gzip
@@ -9,6 +10,7 @@ import math
 import os
 from pathlib import Path
 import re
+import random
 import time
 from urllib.parse import quote_plus, urlsplit
 
@@ -116,9 +118,12 @@ def parse_efetch(payload, requested_pmids):
 
 
 VERSION = 'pubmed-efetch-v1'
+TRANSPORT_VERSION = 'pubmed-efetch-transport-v2'  # XML/record contract stays compatible with saved v1 batches.
 ENDPOINT = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi'
-DEFAULTS = {'batch_size': 100, 'workers': 1, 'gap_seconds': .5, 'attempts': 3,
-            'timeout': [10., 60.], 'budget': 180.}
+DEFAULTS = {'batch_size': 100, 'workers': 1, 'gap_seconds': .5, 'attempts': 5,
+            'timeout': [10., 90.], 'budget': 300., 'min_batch_size': 1,
+            'max_split_requests': 50, 'fallback_budget': 900., 'pending_retry_passes': 1,
+            'max_consecutive_failed_batches': 3, 'checkpoint': {'enabled': False}}
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
@@ -136,6 +141,15 @@ def validate_config(config):
     timeout = config['timeout']
     if len(timeout) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in timeout):
         raise ValueError('EFetch timeout needs two finite positive numbers.')
+    for key, minimum in [('min_batch_size', 1), ('max_split_requests', 1),
+                         ('pending_retry_passes', 0), ('max_consecutive_failed_batches', 1)]:
+        if type(config[key]) is not int or config[key] < minimum:
+            raise ValueError(f'Invalid EFetch {key}.')
+    if config['min_batch_size'] > config['batch_size'] or config['pending_retry_passes'] > 3:
+        raise ValueError('Invalid minimum batch size or pending retry passes (0..3).')
+    if not math.isfinite(config['fallback_budget']) or config['fallback_budget'] <= 0:
+        raise ValueError('EFetch fallback_budget must be finite and positive.')
+    config['checkpoint'] = checkpoint_module().validate_config(config['checkpoint'])
     return config
 
 
@@ -167,6 +181,34 @@ def retry_after_seconds(value):
             return 0.
 
 
+def transient_400(payload):
+    """NCBI sometimes wraps its viewer timeout in a 400; invalid request parameters stay permanent."""
+    import html
+    text = re.sub(r'<[^>]*>', ' ', html.unescape(payload.decode('utf-8', 'replace'))).casefold()
+    if re.search(r'\b(?:invalid|unknown|unsupported)\s+(?:\w+\s+){0,2}(?:parameter|uid|id)\b', text):
+        return False
+    return bool(re.search(r'\b(?:timeout|timed\s+out|empty\s+response)\b', text))
+
+
+class BatchFailure(RuntimeError):
+    def __init__(self, evidence):
+        super().__init__('EFetch batch failed; URLs remain pending: ' + evidence['error'])
+        self.evidence = evidence
+        self.retryable = evidence.get('retryable', False)
+        self.split_allowed = evidence.get('split_allowed', False)
+        self.deferred = evidence.get('deferred', False)
+
+
+def checkpoint_module():
+    import importlib.util
+    path = Path(__file__).parent / 'checkpoint_snapshot.py'
+    if not path.exists(): path = Path(__file__).parent / 'corpus_checkpoint.py'
+    spec = importlib.util.spec_from_file_location('efetch_checkpoints', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class EFetchClient:
     def __init__(self, crawler, out, config, session=None):
         self.crawler, self.out, self.config = crawler, Path(out), config
@@ -175,70 +217,109 @@ class EFetchClient:
         self.gate_path = self.out / 'pubmed_request_gate.json'
         self.not_before = (crawler.load_json(self.gate_path).get('not_before', 0.)
                            if self.gate_path.exists() else 0.)
+        self.total_requests = 0
 
     def close(self):
         self.session.close()
 
     def wait_ready(self, deadline):
+        if self.not_before - time.time() >= deadline - time.monotonic():
+            raise TimeoutError('EFetch pacing/Retry-After exceeds batch request budget; resume later.')
         while time.time() < self.not_before:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError('EFetch pacing/Retry-After exceeds batch request budget; resume later.')
             time.sleep(min(1., self.not_before - time.time(), remaining))
 
-    def fetch(self, batch_samples):
+    def failed(self, batch_samples, traces, *, error, retryable=False, split_allowed=False, deferred=False):
+        key = self.crawler.digest(json.dumps(batch_samples, sort_keys=True).encode())
+        evidence = {'samples': batch_samples, 'pmids': list(dict.fromkeys(pmid_from_url(s['url']) for s in batch_samples)),
+            'requests': traces, 'error': redact(error), 'retryable': retryable, 'split_allowed': split_allowed,
+            'deferred': deferred, 'transport_version': TRANSPORT_VERSION, 'urls_pending_at_failure': True,
+            'at': self.crawler.utc(), 'failure_path': f'pubmed_batch_failures/{key}.json'}
+        self.crawler.write_json(self.out / evidence['failure_path'], evidence)
+        with (self.out / 'pubmed_batch_failures/history.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps(evidence, ensure_ascii=False) + '\n')
+        raise BatchFailure(evidence)
+
+    def fetch(self, batch_samples, *, deadline=None, max_requests=None):
         pmids = list(dict.fromkeys(pmid_from_url(s['url']) for s in batch_samples))
         params = {'db': 'pubmed', 'retmode': 'xml', 'id': ','.join(pmids), 'tool': 'AncientWingsPubMedCrawler'}
         for name, parameter in [('NCBI_EMAIL', 'email'), ('NCBI_API_KEY', 'api_key')]:
             if os.environ.get(name):
                 params[parameter] = os.environ[name]
-        deadline = time.monotonic() + self.config['budget']
+        deadline = min(float('inf') if deadline is None else deadline, time.monotonic() + self.config['budget'])
         traces, last = [], {}
+        initial_requests = self.total_requests
+        retryable, split_allowed, deferred = True, True, False
         for attempt in range(1, self.config['attempts'] + 1):
-            self.wait_ready(deadline)
+            if max_requests is not None and self.total_requests - initial_requests >= max_requests:
+                break
+            try:
+                self.wait_ready(deadline)
+            except TimeoutError as exc:
+                cooldown = self.not_before - time.time() >= self.config['budget']
+                return self.failed(batch_samples, traces, error=str(exc), retryable=True,
+                                   split_allowed=not cooldown, deferred=cooldown)
             event = {'method': 'GET', 'url': ENDPOINT, 'attempt': attempt, 'pmids': pmids,
                      'started_at': self.crawler.utc(), 'http_status': None}
             started = time.monotonic()
-            payload, pause, retryable, success = b'', 0., True, False
+            payload, pause, retryable, split_allowed, success = b'', 0., True, True, False
+            chunks, size, response_started, raw_complete = [], 0, False, False
             try:
                 remaining = deadline - started
                 if remaining <= 0:
                     raise TimeoutError('EFetch batch budget exhausted.')
-                timeout = tuple(min(v, remaining) for v in self.config['timeout'])
+                timeout = tuple(min(v, remaining / 2) for v in self.config['timeout'])
                 # Sequential GET; no hidden retries or redirects outside the pacing guard.
+                self.total_requests += 1
                 with self.session.get(ENDPOINT, params=params, timeout=timeout,
                                       allow_redirects=False, stream=True) as response:
                     status = response.status_code
+                    response_started = True
                     event.update(http_status=status, content_type=response.headers.get('Content-Type', ''))
                     pause = retry_after_seconds(response.headers.get('Retry-After'))
-                    chunks, size = [], 0
                     for chunk in response.iter_content(64 * 1024):
                         size += len(chunk)
                         if size > MAX_RESPONSE_BYTES:
                             retryable = False
+                            split_allowed = True
                             raise ValueError('EFetch response exceeds 16 MiB; reduce batch_size.')
                         if time.monotonic() > deadline:
                             raise TimeoutError('EFetch response exceeded batch budget.')
                         chunks.append(chunk)
                     payload = b''.join(chunks)
-                    raw_sha = self.crawler.digest(payload)
-                    raw_path = f'raw/efetch/{raw_sha[:2]}/{raw_sha}.gz'
-                    self.crawler.atomic_bytes(self.out / raw_path, gzip.compress(payload, mtime=0))
-                    event.update(raw_path=raw_path, raw_sha256=raw_sha, raw_bytes=len(payload))
+                    raw_complete = True
                     if status != 200:
-                        retryable = status in {408, 429, 500, 502, 503, 504}
+                        retryable = status in {408, 429} or 500 <= status < 600 or (status == 400 and transient_400(payload))
+                        split_allowed = retryable and status != 429
+                        event['error_kind'] = 'transient_http_400' if status == 400 and retryable else f'http_{status}'
                         raise ValueError(f'HTTP {status}; see saved EFetch response.')
                     records, anomalies = parse_efetch(payload, pmids)
                     success = True
             except (requests.RequestException, ValueError, ET.ParseError, TimeoutError) as exc:
                 event['error'] = redact(f'{type(exc).__name__}: {exc}')
+                if isinstance(exc, requests.exceptions.SSLError):
+                    retryable = split_allowed = False
+                if event.get('http_status') == 200 and payload.lstrip().lower().startswith((b'<html', b'<!doctype html')):
+                    split_allowed = False
             except BaseException as exc:
                 event['error'] = type(exc).__name__
                 raise
             finally:
+                if response_started:
+                    payload = b''.join(chunks)
+                    raw_sha = self.crawler.digest(payload)
+                    raw_path = f'raw/efetch/{raw_sha[:2]}/{raw_sha}.gz'
+                    self.crawler.atomic_bytes(self.out / raw_path, gzip.compress(payload, mtime=0))
+                    event.update(raw_path=raw_path, raw_sha256=raw_sha, raw_bytes=len(payload), raw_complete=raw_complete)
+                event.update(retryable=retryable, split_allowed=split_allowed)
+                backoff = (max(self.config['gap_seconds'], pause, 2 ** (attempt - 1) + random.uniform(0., .5))
+                           if not success and retryable and attempt < self.config['attempts'] else 0.)
+                if backoff: event['retry_wait_seconds'] = round(backoff, 3)
                 event['elapsed_seconds'] = round(time.monotonic() - started, 3)
                 event['finished_at'] = self.crawler.utc()
-                self.not_before = time.time() + max(self.config['gap_seconds'], pause)
+                self.not_before = time.time() + max(self.config['gap_seconds'], pause, backoff)
                 self.crawler.write_json(self.gate_path, {'not_before': self.not_before})
                 with (self.out / 'pubmed_requests.jsonl').open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(event, ensure_ascii=False) + '\n')
@@ -246,22 +327,19 @@ class EFetchClient:
                 last = event
             if success:
                 return {'version': VERSION, 'samples': batch_samples, 'pmids': pmids,
+                        'transport_version': TRANSPORT_VERSION,
                         'raw_path': last['raw_path'], 'raw_sha256': last['raw_sha256'],
                         'requests': traces, 'anomalies': anomalies}
             print(json.dumps({'pubmed_efetch_attempt': attempt, 'http_status': last['http_status'],
                               'error': last.get('error'), 'pmid_count': len(pmids)}, ensure_ascii=False), flush=True)
+            if self.not_before - time.time() >= deadline - time.monotonic():
+                deferred = self.not_before - time.time() >= self.config['budget']
+                if deferred: split_allowed = False
+                break  # Preserve the server cooldown; a later resume respects it too.
             if not retryable or attempt == self.config['attempts']:
                 break
-            backoff = max(self.config['gap_seconds'], pause, 2 ** (attempt - 1))
-            self.not_before = max(self.not_before, time.time() + backoff)
-            self.crawler.write_json(self.gate_path, {'not_before': self.not_before})
-            if self.not_before - time.time() >= deadline - time.monotonic():
-                break  # Preserve the server cooldown; a later resume respects it too.
-        key = self.crawler.digest(json.dumps(batch_samples, sort_keys=True).encode())
-        self.crawler.write_json(self.out / 'pubmed_batch_failures' / f'{key}.json',
-                               {'samples': batch_samples, 'pmids': pmids, 'requests': traces,
-                                'error': last.get('error', 'EFetch request failed'), 'urls_pending_at_failure': True})
-        raise RuntimeError('EFetch batch failed; URLs remain pending. See pubmed_review.csv and pubmed_requests.jsonl; resume to retry.')
+        return self.failed(batch_samples, traces, error=last.get('error', 'Fallback request/time budget exhausted'),
+                           retryable=retryable, split_allowed=split_allowed, deferred=deferred)
 
 
 def read_record(crawler, out, sample):
@@ -362,37 +440,99 @@ def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, 
         raise ValueError('max_new must be a positive integer or None.')
     selected = [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov']
     by_id = {s['id']: s for s in selected}
+    if len(by_id) != len(selected): raise ValueError('Duplicate corpus IDs in EFetch sample.')
     if recovery_source:
         seed_recovery(crawler, out, selected, recovery_source, on_record)
     for path in sorted((out / 'pubmed_batches').glob('*.json')):
         apply_batch(crawler, out, crawler.load_json(path), by_id, on_record)
     pending = [s for s in selected if read_record(crawler, out, s) is None]
+    completed_before = len(selected) - len(pending)
+    print(json.dumps({'engine': 'efetch', 'event': 'resume', 'transport_version': TRANSPORT_VERSION,
+        'selected': len(selected), 'completed': len(selected) - len(pending), 'pending': len(pending)}, ensure_ascii=False), flush=True)
     if max_new is not None:
         pending = pending[:max_new]
     client = EFetchClient(crawler, out, config)
-    completed = 0
-    try:
-        for start in range(0, len(pending), config['batch_size']):
-            group = pending[start:start + config['batch_size']]
-            batch = client.fetch(group)
-            key = crawler.digest(json.dumps(group, sort_keys=True).encode())
+    checkpoint = checkpoint_module().PeriodicCheckpoint(crawler, out, config['checkpoint'])
+    completed, visited, errors = 0, set(), {}
+    stop_reason = None
+
+    def process_root(group, round_number):
+        nonlocal completed
+        queue = deque([group])
+        deadline = time.monotonic() + config['fallback_budget']
+        first_request = client.total_requests
+        before = completed
+        deferred = False
+        while queue:
+            node = [s for s in queue.popleft() if read_record(crawler, out, s) is None]
+            if not node: continue
+            visited.update(s['id'] for s in node)
+            remaining_calls = config['max_split_requests'] - (client.total_requests - first_request)
+            try:
+                if time.monotonic() >= deadline or remaining_calls <= 0:
+                    client.failed(node, [], error='Fallback request/time budget exhausted', retryable=True)
+                batch = client.fetch(node, deadline=deadline, max_requests=remaining_calls)
+            except BatchFailure as exc:
+                for s in node: errors[s['id']] = exc.evidence
+                print(json.dumps({'engine': 'efetch', 'event': 'batch_pending', 'round': round_number,
+                    'url_count': len(node), 'retryable': exc.retryable, 'error': exc.evidence['error'],
+                    'failure_path': exc.evidence['failure_path']}, ensure_ascii=False), flush=True)
+                if exc.deferred:
+                    deferred = True
+                    break  # A server-wide cooldown also applies to the next root batch.
+                pmids = list(dict.fromkeys(pmid_from_url(s['url']) for s in node))
+                if (exc.split_allowed and len(pmids) > config['min_batch_size']
+                        and time.monotonic() < deadline and client.total_requests - first_request < config['max_split_requests']):
+                    left = set(pmids[:len(pmids)//2])
+                    children = [[s for s in node if pmid_from_url(s['url']) in left],
+                                [s for s in node if pmid_from_url(s['url']) not in left]]
+                    queue.extend(children)
+                    print(json.dumps({'engine': 'efetch', 'event': 'batch_split', 'parent_pmids': len(pmids),
+                                      'child_pmids': [len({pmid_from_url(s['url']) for s in g}) for g in children]}), flush=True)
+                continue
+            key = crawler.digest(json.dumps(node, sort_keys=True).encode())
             crawler.write_json(out / 'pubmed_batches' / f'{key}.json', batch)
             apply_batch(crawler, out, batch, by_id, on_record)
-            completed += len(group)
-            if completed % log_every < len(group) or completed == len(pending):
+            completed += len(node)
+            for s in node: errors.pop(s['id'], None)
+            checkpoint.maybe_save(new_completed=len(node))
+        return completed - before, deferred
+
+    try:
+        groups = [pending[start:start + config['batch_size']] for start in range(0, len(pending), config['batch_size'])]
+        for round_number in range(config['pending_retry_passes'] + 1):
+            failed_roots = 0
+            for group in groups:
+                new, deferred = process_root(group, round_number)
+                failed_roots = failed_roots + 1 if new == 0 else 0
                 print(json.dumps({'engine': 'efetch', 'completed_this_invocation': completed,
-                                  'scheduled_this_invocation': len(pending), 'batch_pmids': len(batch['pmids'])}), flush=True)
+                    'scheduled_this_invocation': len(pending), 'attempted_urls_this_invocation': len(visited),
+                    'round': round_number, 'remaining_selected': len(selected) - completed_before - completed}), flush=True)
+                checkpoint.maybe_save()
+                if deferred or failed_roots >= config['max_consecutive_failed_batches']:
+                    stop_reason = 'server_cooldown' if deferred else 'consecutive_failed_batches'
+                    break
+            if stop_reason: break
+            retry = [s for s in pending if read_record(crawler, out, s) is None
+                     and errors.get(s['id'], {}).get('retryable') and not errors[s['id']].get('deferred')]
+            if not retry: break
+            groups = [retry[start:start + config['batch_size']] for start in range(0, len(retry), config['batch_size'])]
     finally:
         client.close()
         write_reports(crawler, out, selected)
-    return completed
+        checkpoint.maybe_save(force=True)
+    if stop_reason:
+        print(json.dumps({'engine': 'efetch', 'event': 'deferred', 'reason': stop_reason,
+                          'complete': False}, ensure_ascii=False), flush=True)
+    # MAX_NEW counts scheduled source URLs, including a failed attempt; retries do not consume it twice.
+    return len(visited)
 
 
 def write_reports(crawler, out, samples):
     out = Path(out)
     failures, anomalies = {}, []
-    for path in (out / 'pubmed_batch_failures').glob('*.json'):
-        failure = crawler.load_json(path)
+    failure_items = [crawler.load_json(path) for path in (out / 'pubmed_batch_failures').glob('*.json')]
+    for failure in sorted(failure_items, key=lambda value: value.get('at', '')):
         for sample in failure['samples']:
             failures[sample['id']] = failure
     for path in (out / 'pubmed_batches').glob('*.json'):
@@ -406,12 +546,14 @@ def write_reports(crawler, out, samples):
             last_request = (failed.get('requests') or [{}])[-1]
             record = dict(sample, pubmed_pmid=pmid_from_url(sample['url']), pubmed_api_status='pending',
                           error=failed.get('error'), batch_failure=bool(failed), quality_status='pending',
+                          retryable=failed.get('retryable'), failure_path=failed.get('failure_path'),
                           http_status=last_request.get('http_status'), raw_path=last_request.get('raw_path'))
         rows.append({k: record.get(k) for k in ('id', 'url', 'pubmed_pmid', 'pubmed_api_status', 'quality_status',
-                                               'quality_flags', 'title', 'text', 'http_status', 'raw_path', 'error', 'batch_failure')})
+                                               'quality_flags', 'title', 'text', 'http_status', 'raw_path', 'error', 'batch_failure', 'retryable', 'failure_path')})
     fields = list(rows[0]) if rows else ['id', 'url', 'pubmed_pmid', 'pubmed_api_status', 'quality_status', 'error']
     for name, items in [('pubmed_results', rows), ('pubmed_missing_pmids', [r for r in rows if r['pubmed_api_status'] == 'missing_pmid']),
                         ('pubmed_no_abstract', [r for r in rows if r['pubmed_api_status'] == 'no_abstract']),
+                        ('pubmed_pending', [r for r in rows if r['pubmed_api_status'] == 'pending']),
                         ('pubmed_review', [r for r in rows if r['quality_status'] != 'accepted'])]:
         buffer = io.StringIO(newline='')
         writer = csv.DictWriter(buffer, fieldnames=fields)
@@ -427,6 +569,8 @@ def write_reports(crawler, out, samples):
             requests_count = sum(1 for line in stream if line.strip())
     crawler.write_json(out / 'pubmed_efetch_summary.json', {
         'selected': len(rows), 'completed': sum(r['pubmed_api_status'] != 'pending' for r in rows),
+        'pending': sum(r['pubmed_api_status'] == 'pending' for r in rows),
+        'complete': not any(r['pubmed_api_status'] == 'pending' for r in rows), 'transport_version': TRANSPORT_VERSION,
         'accepted': sum(r['quality_status'] == 'accepted' for r in rows),
         'statuses': dict(Counter(r['pubmed_api_status'] for r in rows)),
         'get_requests_attempted': requests_count, 'api_anomalies': len(anomalies)})

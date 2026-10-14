@@ -234,6 +234,8 @@ class SeleniumFallbackTests(unittest.TestCase):
                   'probe_sha256': self.crawler.file_hash(self.probe.__file__),
                   'pubmed_efetch_sha256': self.crawler.file_hash(self.root / 'pubmed_efetch_snapshot.py'),
                   'longchau_sha256': self.crawler.file_hash(self.root / 'longchau_snapshot.py')}
+        api=load_module('fallback_resume_api',self.root/'pubmed_efetch_snapshot.py')
+        config['settings']['pubmed_efetch']=api.validate_config(config['settings']['pubmed_efetch'])
         self.crawler.write_json(out / 'corpus_config.json', config)
         with patch.object(self.crawler.Fetcher, 'request_once') as request, \
                 patch.object(self.probe, 'browser_preflight'), \
