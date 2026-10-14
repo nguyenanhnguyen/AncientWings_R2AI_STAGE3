@@ -204,6 +204,16 @@ def seed_successful_requests(crawler, out, samples, source, *, record_dir='recor
     marker = out / 'recovery_manifest.json'
     identity = {'source_run': str(source), 'samples': [[s['id'], s['url']] for s in samples],
                 'record_dir': record_dir}
+    # Recovery changes code/config, not permission to ignore a server's cooldown.
+    # This is deliberately restored even after an interrupted recovery with a marker.
+    if any(crawler.host(s['url']) in ('nhathuoclongchau.com.vn','www.nhathuoclongchau.com.vn') for s in samples):
+        source_gate, target_gate = source/'longchau_request_gate.json', out/'longchau_request_gate.json'
+        if source_gate.exists():
+            not_before = crawler.load_json(source_gate).get('not_before', 0.)
+            if not isinstance(not_before,(int,float)) or not math.isfinite(not_before):
+                raise ValueError('Invalid Long Chau recovery cooldown.')
+            current = crawler.load_json(target_gate).get('not_before',0.) if target_gate.exists() else 0.
+            crawler.write_json(target_gate, {'not_before': max(current,not_before)})
     if marker.exists():
         saved = crawler.load_json(marker)
         if any(saved.get(k) != v for k, v in identity.items()):
@@ -300,6 +310,7 @@ class CrawlProgress:
 
     def _summary(self):
         print(json.dumps({'engine': self.engine, 'completed': self.completed,
+                          'completed_this_invocation': self.completed, 'progress_scope': 'engine',
                           'scheduled': self.scheduled, 'failed': self.failed,
                           'statuses': dict(self.statuses),
                           'quality_statuses': dict(self.quality_statuses),

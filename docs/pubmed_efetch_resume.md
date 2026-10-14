@@ -60,6 +60,9 @@ Giữ runner/core/probe và cấu hình domain khác của run cũ. Đổi parse
 
 Default trong notebook: `CHECKPOINT_ENABLED=True`, `CHECKPOINT_UPLOAD_ENABLED=True`,
 mỗi 10.000 URL mới hoặc 900 giây, và cuối lượt. Kiểm tra cadence ở ranh giới batch, không ghi ZIP giữa lúc ghi record.
+Runner v7 áp dụng checkpoint cho mọi engine, gồm Long Châu/Requests/Selenium, kiểm tra sau khi record
+đã ghi atomic. EFetch dùng chung manager; runner legacy vẫn có manager EFetch riêng tương thích.
+[Bản sửa checkpoint chung và Long Châu v2](longchau_resume_v2.md).
 Kaggle Secret `HF_TOKEN` cần quyền ghi dataset `AncientWings/AncientWings_R2AI_STAGE3_ds`;
 có thể chỉnh repo/secret/cadence hoặc tắt upload trong ô cấu hình. Token không được lưu trong config/log.
 

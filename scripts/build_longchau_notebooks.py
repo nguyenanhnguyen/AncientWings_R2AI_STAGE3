@@ -63,6 +63,9 @@ def main():
         config = config.replace("        default_tag = source_tag if (WORKDIR / 'runs' / source_tag).exists() else f'ids_{ID_FROM}_{ID_TO}_synced'",
             "        default_tag = previous_tag if (WORKDIR / 'runs' / previous_tag).exists() else (source_tag if (WORKDIR / 'runs' / source_tag).exists() else f'ids_{ID_FROM}_{ID_TO}_synced')")
     put(2, config)
+    config = replace_literals(get(2), {'LONGCHAU_DELAY': 5.0})
+    config = config.replace("('_longchau' if LONGCHAU_USE_CURL else '')", "('_longchau_v2' if LONGCHAU_USE_CURL else '')")
+    put(2, config)
     crawl = get(12)
     if "'longchau_use_curl':" not in crawl:
         crawl = crawl.replace("            'pubmed_use_efetch': PUBMED_USE_EFETCH,",
@@ -102,13 +105,35 @@ def main():
         pack['EMBEDDED_FILES'][name] = encode(body)
         pack['EMBEDDED_SHA256'][name] = hashlib.sha256(body).hexdigest()
     put(6, replace_literals(get(6), {k: pack[k] for k in ('EMBEDDED_FILES', 'EMBEDDED_SHA256')}))
-    # Fresh auditor also needs the current parser for offline checks/re-extraction of old runs.
-    put(6, get(6).replace("'diagnostics_snapshot.py', 'postprocess_snapshot.py'}",
-                         "'diagnostics_snapshot.py', 'postprocess_snapshot.py', 'longchau_snapshot.py'}"))
-    note = '\n\nLong Châu mặc định dùng `curl_cffi`/Chrome, 1 worker, delay 1,75 giây; không chạy Selenium cho domain này. '
+    # Preserve saved runtime snapshots. Parser/config changes require recovery in a new run;
+    # postprocess-only uses the fresh auditor/parser to reject unreprocessed legacy text.
+    setup = get(6).replace(", 'longchau_snapshot.py'}", "}")
+    if 'HAS_LONGCHAU_SAMPLE =' not in setup:
+        setup = setup.replace('for name, encoded in EMBEDDED_FILES.items():', '''HAS_LONGCHAU_SAMPLE = False
+if (RUN_DIR / 'sample.jsonl').exists():
+    from urllib.parse import urlsplit
+    with (RUN_DIR / 'sample.jsonl').open(encoding='utf-8') as stream:
+        HAS_LONGCHAU_SAMPLE = any(urlsplit(json.loads(line)['url']).hostname in
+            ('nhathuoclongchau.com.vn', 'www.nhathuoclongchau.com.vn') for line in stream if line.strip())
+if not POSTPROCESS_ONLY and HAS_LONGCHAU_SAMPLE and (RUN_DIR / 'corpus_config.json').exists():
+    saved_runtime = json.loads((RUN_DIR / 'corpus_config.json').read_text(encoding='utf-8'))
+    for name, key in (('longchau_snapshot.py', 'longchau_sha256'),
+                      ('corpus_runner_snapshot.py', 'runner_sha256'), ('priority_probe_snapshot.py', 'probe_sha256')):
+        if saved_runtime.get(key) != EMBEDDED_SHA256[name]:
+            raise ValueError('Run Long Châu cũ cần recovery: dùng ZIP đầy đủ, RECOVERY_RUN_PATH + RUN_TAG mới; '
+                             'không ép RESUME vì parser/runner đã đổi. Raw và records cũ được giữ nguyên.')
+
+for name, encoded in EMBEDDED_FILES.items():''', 1)
+        setup = setup.replace('if name in POSTPROCESS_FILES or (not target.exists() and not POSTPROCESS_ONLY):',
+            "if name in POSTPROCESS_FILES or (name == 'longchau_snapshot.py' and POSTPROCESS_ONLY and HAS_LONGCHAU_SAMPLE) or (not target.exists() and not POSTPROCESS_ONLY):",1)
+    put(6,setup)
+    note = '\n\nLong Châu mặc định dùng `curl_cffi`/Chrome, 1 worker, delay 5 giây; không chạy Selenium cho domain này. '
     note += 'Parser giữ sapo/nội dung chính; `/benh/` lấy đầy đủ các trường HTML y khoa từ JSON đã xác minh slug/canonical. '
-    note += 'Xem `longchau_results.csv`, `longchau_summary.json`; run mới có hậu tố `_longchau`, dùng recovery để tái trích HTML 200 cũ.\n'
+    note += 'Xem `longchau_results.csv`, `longchau_summary.json`; parser v2 loại nhóm liên kết “Xem thêm”. '
+    note += 'Run mới có hậu tố `_longchau_v2`; dùng recovery từ ZIP đầy đủ để tái trích HTML 200 cũ, giữ cooldown. '
+    note += 'Checkpoint thuộc runner chung: lưu theo cadence cho mọi engine và khi dừng/ngắt; log có tiến độ chung theo ID.\n'
     if 'Long Châu mặc định dùng' not in get(11): put(11, get(11).rstrip() + note)
+    # build_corpus rewrites cell 11, so this note is always derived from the current parser.
     write(nb, path)
     update_domain(updates)
     from build_longchau_smoke_notebook import main as build_smoke
@@ -155,6 +180,8 @@ def update_domain(updates):
     if 'LONGCHAU_USE_CURL =' not in config:
         config += "\nLONGCHAU_USE_CURL = True\nLONGCHAU_CONFIG = {'workers': 1, 'delay': 1.75, 'attempts': 3, 'timeout': [10., 45.], 'budget': 180., 'impersonate': 'chrome', 'retry_failed_on_resume': True}\n"
     put(3, config)
+    domain_config = literals(get(3))['LONGCHAU_CONFIG']
+    put(3, replace_literals(get(3), {'LONGCHAU_CONFIG': dict(domain_config,delay=5.0)}))
     deps = get(5)
     if "'curl_cffi'" not in deps: deps = deps.replace("'ipython']", "'ipython', 'curl_cffi']")
     put(5, deps)
@@ -182,10 +209,11 @@ longchau_spec.loader.exec_module(longchau)
                             "        effective_engine = effective.get('engine', effective_engine)\n"
                             "        flags = record.get('quality_flags', [])", 1)
     put(9, rows)
-    note = '\n\nLong Châu dùng `curl_cffi`, 1 worker, delay 1,75 giây, cùng parser với corpus chính. '
+    note = '\n\nLong Châu dùng `curl_cffi`, 1 worker, delay 5 giây, cùng parser v2 với corpus chính. '
     note += 'Mặc định retry checkpoint lỗi Long Châu khi resume; kết quả trích hợp lệ giữ nguyên. '
     note += 'Báo cáo engine ghi `curl_cffi`; IP đo qua Requests/Chrome là phép đo riêng, chưa xác nhận IP curl.\n'
     if 'Long Châu dùng `curl_cffi`' not in get(10): put(10, get(10).rstrip() + note)
+    put(10,get(10).replace('delay 1,75 giây, cùng parser với corpus chính', 'delay 5 giây, cùng parser v2 với corpus chính'))
     put(11, '''import argparse
 import os
 import socket

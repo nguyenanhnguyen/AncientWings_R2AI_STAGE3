@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import sys
 
-VERSION = 'corpus-runner-v6'
+VERSION = 'corpus-runner-v7'
 DEFAULTS = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     'delay': 1., 'attempts': 3, 'timeout': [20., 45.], 'budget': 180.,
@@ -22,7 +22,7 @@ DEFAULTS = {
     'pubmed_efetch': {'batch_size': 100, 'workers': 1, 'gap_seconds': .5, 'attempts': 5,
                       'timeout': [10., 90.], 'budget': 300.},
     'longchau_use_curl': True,
-    'longchau': {'workers': 1, 'delay': 1.75, 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
+    'longchau': {'workers': 1, 'delay': 5., 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
                  'impersonate': 'chrome', 'retry_failed_on_resume': True},
     'browser_load_timeout': 45., 'browser_wait_seconds': 15., 'browser_attempts': 2,
 }
@@ -203,15 +203,61 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         # Repair canonical output after an interruption between the engine checkpoint and publication.
         for sample in samples:
             publish_record(crawler, probe, out, sample)
+        # The checkpoint belongs to the whole invocation, including website/browser work.
+        helper_path = Path(__file__).parent / 'checkpoint_snapshot.py'
+        if not helper_path.exists(): helper_path = Path(__file__).parent / 'corpus_checkpoint.py'
+        backup = load_module('corpus_checkpoint', helper_path)
+        checkpoint = backup.PeriodicCheckpoint(crawler, out,
+            config.get('checkpoint', config['pubmed_efetch'].get('checkpoint', {})))
+        previous = {s['id']: read_record(crawler, out, 'records', s) for s in samples}
+        known = {id_ for id_, record in previous.items() if record is not None}
+        planned = {s['id'] for s in samples if s['id'] not in known}
+        if longchau and config['longchau']['retry_failed_on_resume']:
+            planned.update(s['id'] for s in samples if longchau.is_host(s['url'])
+                           and previous[s['id']] is not None and previous[s['id']].get('status') != 'extracted')
+        browser_pages = [s for s in page_samples if not longchau or not longchau.is_host(s['url'])]
+        browser_records = [previous[s['id']] for s in browser_pages if previous[s['id']] is not None]
+        browser_pending = probe.select_browser_samples(browser_pages, browser_records, config['browser_mode'])
+        planned.update(s['id'] for s in browser_pending if not (out/'browser_records'/f"{s['id']}.json").exists())
+        scheduled = len(planned) if max_new is None else min(len(planned), max_new)
+        attempted, last_printed, deferred = set(), 0, False
+
+        def fingerprint(record):
+            return tuple(record.get(k) for k in ('engine','status','finished_at','raw_sha256','text_sha256')) if record else None
+
+        # Keep only small identities while crawling; cached full texts can be large.
+        previous_fingerprints = {id_: fingerprint(record) for id_,record in previous.items()}
+        del previous, browser_records
+
+        def emit_progress():
+            nonlocal last_printed
+            print(json.dumps({'engine': 'corpus', 'progress_scope': 'invocation',
+                'completed_this_invocation': len(attempted), 'scheduled': max(scheduled,len(attempted)),
+                'remaining_selected': len(samples)-len(known), 'deferred': deferred}, ensure_ascii=False), flush=True)
+            last_printed = len(attempted)
+
         def publish_request(record):
-            publish_record(crawler, probe, out, record)
+            nonlocal deferred
+            canonical = publish_record(crawler, probe, out, record)
+            if canonical is None: return
+            id_ = canonical['id']
+            if fingerprint(canonical) == previous_fingerprints.get(id_): return  # Resume replay is not new work.
+            is_new = id_ not in known
+            known.add(id_)
+            attempted.add(id_)
+            previous_fingerprints[id_] = fingerprint(canonical)
+            deferred |= bool(canonical.get('retry_deferred')) or canonical.get('status') == 'response_deadline'
+            if len(attempted)-last_printed >= log_every: emit_progress()
+            # Each engine/record is durable before publication and backup. Duplicate engine
+            # results for one source ID do not increment the checkpoint URL cadence twice.
+            checkpoint.maybe_save(new_completed=int(is_new))
 
         try:
             api_new = 0
             if efetch:
                 api_new = efetch.crawl(crawler, out, samples, config['pubmed_efetch'], max_new=max_new,
                                        recovery_source=recovery_source,
-                                       on_record=lambda r: publish_record(crawler, probe, out, r), log_every=log_every)
+                                       on_record=publish_request, log_every=log_every, checkpoint=checkpoint)
             remaining_limit = None if max_new is None else max_new - api_new
             if longchau:
                 longchau_samples = [s for s in page_samples if longchau.is_host(s['url'])]
@@ -219,7 +265,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     longchau_new = longchau.crawl(crawler, probe, out, longchau_samples, config['longchau'],
                         user_agent=config['user_agent'], respect_robots=config['respect_robots'],
                         robots_options=config['robots_options'], max_new=remaining_limit,
-                        on_record=lambda r: publish_record(crawler, probe, out, r), log_every=log_every)
+                        on_record=publish_request, log_every=log_every)
                     if remaining_limit is not None: remaining_limit -= longchau_new
                 page_samples = [s for s in page_samples if not longchau.is_host(s['url'])]
             if page_samples and config['browser_mode'] != 'off':
@@ -241,7 +287,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     crawler, out, primary, user_agent=config['browser_user_agent'],
                     chrome_binary=config['chrome_binary'], load_timeout=config['browser_load_timeout'],
                     wait_seconds=config['browser_wait_seconds'], attempts=config['browser_attempts'],
-                    delay=config['delay'], on_record=lambda r: publish_record(crawler, probe, out, r),
+                    delay=config['delay'], on_record=publish_request,
                     log_every=log_every)
                 if any(not (out / 'browser_records' / f"{s['id']}.json").exists() for s in primary):
                     raise RuntimeError('PubMed Selenium pass incomplete; inspect browser_setup_error.json and resume.')
@@ -275,17 +321,21 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     crawler, out, browser_samples, user_agent=config['browser_user_agent'],
                     chrome_binary=config['chrome_binary'], load_timeout=config['browser_load_timeout'],
                     wait_seconds=config['browser_wait_seconds'], attempts=config['browser_attempts'],
-                    delay=config['delay'], on_record=lambda r: publish_record(crawler, probe, out, r),
+                    delay=config['delay'], on_record=publish_request,
                     log_every=log_every)
         finally:
-            for sample in samples:
-                publish_record(crawler, probe, out, sample)
-            if efetch:
-                efetch.write_reports(crawler, out, [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov'])
-            if longchau:
-                longchau.write_reports(crawler, out, [s for s in samples if longchau.is_host(s['url'])], 'records')
-            crawler.report(argparse.Namespace(out=out))
-            summary = write_access_report(crawler, probe, out, samples)
+            try:
+                for sample in samples:
+                    publish_record(crawler, probe, out, sample)
+                if efetch:
+                    efetch.write_reports(crawler, out, [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov'])
+                if longchau:
+                    longchau.write_reports(crawler, out, [s for s in samples if longchau.is_host(s['url'])], 'records')
+                crawler.report(argparse.Namespace(out=out))
+                summary = write_access_report(crawler, probe, out, samples)
+            finally:
+                emit_progress()
+                checkpoint.maybe_save(force=True)
         print(json.dumps(summary, ensure_ascii=False), flush=True)
         return summary
 

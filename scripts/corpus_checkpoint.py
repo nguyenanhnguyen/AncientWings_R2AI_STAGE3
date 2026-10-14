@@ -125,7 +125,8 @@ class PeriodicCheckpoint:
         retry_upload = (self.config['upload'] and self.state.get('upload_status')=='failed'
                         and now-self.last_attempt >= self.config['failure_retry_seconds'])
         if not (force or due or retry_upload): return None
-        if not force and now-self.last_attempt < self.config['failure_retry_seconds']: return None
+        failed_backup = self.state.get('local_status')=='failed' or self.state.get('upload_status')=='failed'
+        if not force and failed_backup and now-self.last_attempt < self.config['failure_retry_seconds']: return None
         self.last_attempt = now
         try:
             archive, proof = self.build()

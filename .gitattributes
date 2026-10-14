@@ -4,3 +4,5 @@
 /scripts/pubmed_efetch.py text eol=lf
 /scripts/pubmed_resume.py text eol=lf
 /scripts/corpus_checkpoint.py text eol=lf
+/scripts/corpus_runner.py text eol=lf
+/scripts/corpus_diagnostics.py text eol=lf

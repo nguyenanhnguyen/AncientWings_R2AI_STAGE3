@@ -1,5 +1,10 @@
 # Crawl Long Châu — triển khai và kết quả 14/10/2026
 
+**Cập nhật 15/10:** parser v2 sửa nhóm link paragraph, default delay 5 giây; runner v7 lưu checkpoint cho
+mọi engine và sửa progress. Run cũ cần recovery để tái trích raw đã lưu, giữ cooldown.
+[Hướng dẫn v2 và phục hồi run Kaggle 204274–205274](longchau_resume_v2.md).
+Các số liệu/config dưới đây là kết quả trước v2 ngày 14/10.
+
 Đã tích hợp vào [notebook corpus chính](../notebooks/crawl_corpus_kaggle_hf_upload.ipynb) và
 [domain samples](../notebooks/crawl_domain_samples.ipynb). Notebook riêng
 `check_longchau_50.ipynb` thử mẫu phân tầng, không upload HF. File này nằm ngoài Git;

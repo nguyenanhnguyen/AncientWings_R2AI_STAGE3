@@ -17,11 +17,11 @@ from urllib.parse import urlsplit
 
 from lxml import html
 
-VERSION = 'longchau-v1'
+VERSION = 'longchau-v2'
 HOSTS = {'nhathuoclongchau.com.vn', 'www.nhathuoclongchau.com.vn'}
 ARTICLE_SELECTOR = '[data-theme-element="article"][data-scale-font]'
 DISEASE_FIELDS = ('description', 'symptom', 'aetiologies', 'risk', 'diagnoseAndTreaty', 'livingAndPreventive')
-DEFAULTS = {'workers': 1, 'delay': 1.75, 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
+DEFAULTS = {'workers': 1, 'delay': 5., 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
             'impersonate': 'chrome', 'retry_failed_on_resume': True}
 BLOCK_TAGS = {'p', 'div', 'section', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'blockquote', 'figcaption', 'dt', 'dd'}
 
@@ -104,16 +104,24 @@ def clean_region(root, metadata):
             node.drop_tree()
     labels = ('Xem thêm', 'Tìm hiểu thêm', 'Xem thêm thông tin', 'Tham khảo thêm')
     for node in list(root.xpath('.//p')):
+        if node.getparent() is None: continue
         text = ' '.join(node.text_content().split())
         if anchor_only(node, labels):
             removed.append({'reason': 'related_links', 'text': text})
             node.drop_tree()
         elif text.rstrip(': ').casefold() in {s.casefold() for s in labels}:
             next_node = node.getnext()
-            if next_node is not None and next_node.tag in ('ul', 'ol') and anchor_only(next_node):
-                removed.extend([{'reason': 'related_links', 'text': text},
-                                {'reason': 'related_links', 'text': normalize(next_node.text_content())}])
-                next_node.drop_tree()
+            linked = []
+            # CMS also renders recommendations as sibling <p><a>...</a></p>,
+            # not just a list. Only remove anchor-only blocks after an explicit label.
+            while next_node is not None and next_node.tag in ('p', 'ul', 'ol') and anchor_only(next_node):
+                linked.append(next_node)
+                next_node = next_node.getnext()
+            if linked:
+                removed.append({'reason': 'related_links', 'text': text})
+                for link_block in linked:
+                    removed.append({'reason': 'related_links', 'text': normalize(link_block.text_content())})
+                    link_block.drop_tree()
                 node.drop_tree()
     # Legacy CMS signature: a right-aligned author followed by a right-aligned source note.
     # Right-aligned medical instructions/dates are preserved unless this metadata pair is present.

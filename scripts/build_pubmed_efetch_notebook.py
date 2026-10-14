@@ -175,7 +175,7 @@ run còn pending không upload corpus như hoàn tất. Có thể tắt upload, 
         ('audit_snapshot.py', 'corpus_audit.py'), ('pubmed_resume_snapshot.py', 'pubmed_resume.py'),
         ('checkpoint_snapshot.py','corpus_checkpoint.py')]}
     updates['crawler_snapshot.py'] = upgrade_core(zlib.decompress(base64.b85decode(files['crawler_snapshot.py'])))
-    diagnostics = zlib.decompress(base64.b85decode(files['diagnostics_snapshot.py'])).decode('utf-8')
+    diagnostics = (ROOT / 'scripts/corpus_diagnostics.py').read_text(encoding='utf-8')
     diagnostics = diagnostics.replace("'corpus_runner_snapshot.py', 'postprocess_snapshot.py'):",
                                       "'corpus_runner_snapshot.py', 'postprocess_snapshot.py', 'pubmed_efetch_snapshot.py'):")
     diagnostics = diagnostics.replace("'export_manifest.json', 'postprocess_status.json'):",

@@ -433,7 +433,8 @@ def seed_recovery(crawler, out, samples, previous, on_record=None):
         apply_batch(crawler, out, batch, {s['id']: s for s in samples}, on_record)
 
 
-def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, on_record=None, log_every=300):
+def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, on_record=None, log_every=300,
+          checkpoint=None):
     out = Path(out)
     config = validate_config(config)
     if max_new is not None and (type(max_new) is not int or max_new < 1):
@@ -452,7 +453,8 @@ def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, 
     if max_new is not None:
         pending = pending[:max_new]
     client = EFetchClient(crawler, out, config)
-    checkpoint = checkpoint_module().PeriodicCheckpoint(crawler, out, config['checkpoint'])
+    owns_checkpoint = checkpoint is None
+    checkpoint = checkpoint if checkpoint is not None else checkpoint_module().PeriodicCheckpoint(crawler, out, config['checkpoint'])
     completed, visited, errors = 0, set(), {}
     stop_reason = None
 
@@ -495,7 +497,9 @@ def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, 
             apply_batch(crawler, out, batch, by_id, on_record)
             completed += len(node)
             for s in node: errors.pop(s['id'], None)
-            checkpoint.maybe_save(new_completed=len(node))
+            # The runner observes canonical publication for every engine. Standalone/legacy
+            # callers still own their checkpoint manager and count the entire batch here.
+            checkpoint.maybe_save(new_completed=len(node) if owns_checkpoint else 0)
         return completed - before, deferred
 
     try:
@@ -520,7 +524,7 @@ def crawl(crawler, out, samples, config, *, max_new=None, recovery_source=None, 
     finally:
         client.close()
         write_reports(crawler, out, selected)
-        checkpoint.maybe_save(force=True)
+        if owns_checkpoint: checkpoint.maybe_save(force=True)
     if stop_reason:
         print(json.dumps({'engine': 'efetch', 'event': 'deferred', 'reason': stop_reason,
                           'complete': False}, ensure_ascii=False), flush=True)

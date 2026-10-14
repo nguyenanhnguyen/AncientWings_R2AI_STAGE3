@@ -101,7 +101,7 @@ def load(name, path):
 
 
 def run(source, notebook, out, *, limit=50, seed=20261014, id_from=None, id_to=None, max_new=None,
-        delay=1.75, attempts=3, timeout=(10.,45.), budget=180., respect_robots=False, recovery_source=None):
+        delay=5., attempts=3, timeout=(10.,45.), budget=180., respect_robots=False, recovery_source=None):
     source, out = Path(source).resolve(), Path(out).resolve()
     samples, selection = select(source, limit, seed, id_from, id_to)
     out.mkdir(parents=True, exist_ok=True)
@@ -158,7 +158,7 @@ def main():
     parser.add_argument('--id-from', type=int)
     parser.add_argument('--id-to', type=int)
     parser.add_argument('--max-new', type=int)
-    parser.add_argument('--delay', type=float, default=1.75)
+    parser.add_argument('--delay', type=float, default=5.)
     parser.add_argument('--attempts', type=int, default=3)
     parser.add_argument('--connect-timeout', type=float, default=10.)
     parser.add_argument('--read-timeout', type=float, default=45.)
