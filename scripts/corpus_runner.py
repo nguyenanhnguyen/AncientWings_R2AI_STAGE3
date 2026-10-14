@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import sys
 
-VERSION = 'corpus-runner-v5'
+VERSION = 'corpus-runner-v6'
 DEFAULTS = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     'delay': 1., 'attempts': 3, 'timeout': [20., 45.], 'budget': 180.,
@@ -21,6 +21,9 @@ DEFAULTS = {
     'pubmed_use_efetch': True,
     'pubmed_efetch': {'batch_size': 100, 'workers': 1, 'gap_seconds': .5, 'attempts': 3,
                       'timeout': [10., 60.], 'budget': 180.},
+    'longchau_use_curl': True,
+    'longchau': {'workers': 1, 'delay': 1.75, 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
+                 'impersonate': 'chrome', 'retry_failed_on_resume': True},
     'browser_load_timeout': 45., 'browser_wait_seconds': 15., 'browser_attempts': 2,
 }
 
@@ -92,7 +95,7 @@ def write_access_report(crawler, probe, out, samples):
             'quality_status', 'quality_flags', 'error', 'error_kind', 'browser_route', 'requests_status',
             'requests_http_status', 'requests_error_kind', 'requests_error',
             'browser_status', 'browser_http_status', 'browser_error', 'pubmed_route', 'pubmed_api_status', 'pubmed_pmid')}
-        if row['engine'] != 'efetch' and not row['browser_status'] and row['access_status'] != 'VAO_DUOC' and setup:
+        if row['engine'] not in ('efetch', 'curl_cffi') and not row['browser_status'] and row['access_status'] != 'VAO_DUOC' and setup:
             row.update(browser_status='browser_setup_error', browser_error=setup['error'])
         row['dataset_url_count'] = populations.get(sample['domain'], 0)
         rows.append(row)
@@ -111,6 +114,7 @@ def write_access_report(crawler, probe, out, samples):
                'browser_primary': sum(r['engine'] == 'selenium' and r['access_status'] == 'VAO_DUOC'
                                       and r.get('browser_route') == 'selenium_first' for r in rows),
                'pubmed_efetch': sum(r['engine'] == 'efetch' for r in rows),
+               'longchau_curl': sum(r['engine'] == 'curl_cffi' for r in rows),
                'failed': sum(len(group) for group in errors.values()), 'failed_domains': len(priorities)}
     crawler.write_json(out / 'access_summary.json', summary)
     crawler.write_json(out / 'uu_tien_fix_domain.json', priorities)
@@ -149,6 +153,15 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         raise ValueError('pubmed_selenium_first must be bool.')
     if type(config['pubmed_use_efetch']) is not bool:
         raise ValueError('pubmed_use_efetch must be bool.')
+    if type(config['longchau_use_curl']) is not bool:
+        raise ValueError('longchau_use_curl must be bool.')
+    longchau = None
+    if config['longchau_use_curl']:
+        root = Path(__file__).parent
+        module_path = root / 'longchau_snapshot.py'
+        if not module_path.exists(): module_path = root / 'longchau.py'
+        longchau = load_module('corpus_longchau', module_path)
+        config['longchau'] = longchau.validate_config(config['longchau'])
     efetch = None
     if config['pubmed_use_efetch']:
         root = Path(__file__).parent
@@ -169,6 +182,8 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                 'probe_sha256': crawler.file_hash(probe.__file__)}
     if efetch:
         identity['pubmed_efetch_sha256'] = crawler.file_hash(efetch.__file__)
+    if longchau:
+        identity['longchau_sha256'] = crawler.file_hash(longchau.__file__)
     with crawler.run_lock(out):
         config_path = out / 'corpus_config.json'
         if config_path.exists():
@@ -198,13 +213,22 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                                        recovery_source=recovery_source,
                                        on_record=lambda r: publish_record(crawler, probe, out, r), log_every=log_every)
             remaining_limit = None if max_new is None else max_new - api_new
+            if longchau:
+                longchau_samples = [s for s in page_samples if longchau.is_host(s['url'])]
+                if longchau_samples and remaining_limit != 0:
+                    longchau_new = longchau.crawl(crawler, probe, out, longchau_samples, config['longchau'],
+                        user_agent=config['user_agent'], respect_robots=config['respect_robots'],
+                        robots_options=config['robots_options'], max_new=remaining_limit,
+                        on_record=lambda r: publish_record(crawler, probe, out, r), log_every=log_every)
+                    if remaining_limit is not None: remaining_limit -= longchau_new
+                page_samples = [s for s in page_samples if not longchau.is_host(s['url'])]
             if page_samples and config['browser_mode'] != 'off':
                 probe.browser_preflight(crawler, out, user_agent=config['browser_user_agent'],
                                         chrome_binary=config['chrome_binary'],
                                         load_timeout=config['browser_load_timeout'])
             primary_enabled = not efetch and config['pubmed_selenium_first'] and config['browser_mode'] != 'off'
             primary, primary_new = [], 0
-            if not efetch:
+            if not efetch and remaining_limit != 0:
                 primary, primary_new = probe.prepare_pubmed_selenium(
                     crawler, out, page_samples, enabled=primary_enabled, max_new=remaining_limit,
                     respect_robots=config['respect_robots'], robots_options=config['robots_options'],
@@ -258,6 +282,8 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                 publish_record(crawler, probe, out, sample)
             if efetch:
                 efetch.write_reports(crawler, out, [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov'])
+            if longchau:
+                longchau.write_reports(crawler, out, [s for s in samples if longchau.is_host(s['url'])], 'records')
             crawler.report(argparse.Namespace(out=out))
             summary = write_access_report(crawler, probe, out, samples)
         print(json.dumps(summary, ensure_ascii=False), flush=True)

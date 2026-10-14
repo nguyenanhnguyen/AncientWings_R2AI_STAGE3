@@ -179,6 +179,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
         self.assertTrue(config['PUBMED_SELENIUM_FIRST'])
         (self.out / 'network_check.json').write_text('{}')
         namespace = dict(config, RUN_DIR=self.out, crawler=self.crawler, priority_probe=self.probe,
+                         longchau=self.crawler.longchau_module(),
                          IP_CHECK_ENABLED=False,
                          DIRECT_PUBLIC_PROBE=True, SAMPLES=samples, NETWORK_CHECK_DOMAINS=[],
                          save_outputs=lambda: ([], {}, self.out / 'test.zip'))

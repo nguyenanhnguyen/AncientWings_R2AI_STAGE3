@@ -4,6 +4,7 @@ from collections import Counter
 import gzip
 import hashlib
 import html as html_escape
+import importlib.util
 import json
 from pathlib import Path
 import random
@@ -117,6 +118,44 @@ def audit_pubmed_xml(record, body):
                          'pubmed_has_abstract': has_abstract}
 
 
+def load_longchau(out):
+    path = Path(out) / 'longchau_snapshot.py'
+    if not path.exists():
+        path = Path(__file__).parent / 'longchau.py'
+    spec = importlib.util.spec_from_file_location('audit_longchau', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def audit_longchau(record, body, parser):
+    """Re-extract verified raw with explicit current-page boundaries, then compare full text."""
+    if record.get('status') != 'extracted':
+        return '', {'longchau_http_evidence_only': True}
+    if record.get('longchau_parser_version') != parser.VERSION or record.get('extractor') not in (
+            'longchau_article_dom_v1', 'longchau_disease_dom_v1', 'longchau_unsupported_dom_v1'):
+        if record.get('quality_status') == 'accepted':
+            raise ValueError(f"Legacy Long Chau extraction: {record['id']}; use a new run and recovery to re-extract raw.")
+        return '', {'longchau_legacy_extraction': True}
+    doc = parser.extract(body, record.get('final_url') or record['url'])
+    if doc['text'] != record.get('text') or doc['title'] != record.get('title'):
+        raise ValueError(f"Long Chau full text/raw mismatch: {record['id']}; re-extract in a new recovery run.")
+    for field in ('source_block_count', 'kept_block_count', 'source_heading_count', 'kept_heading_count',
+                  'missing_blocks', 'source_blocks_sha256', 'longchau_section_keys',
+                  'longchau_review_reasons', 'longchau_boilerplate_signals', 'author', 'reviewed_by', 'published_at', 'updated_at'):
+        if doc.get(field) != record.get(field):
+            raise ValueError(f"Long Chau raw metadata mismatch ({field}): {record['id']}")
+    if record.get('quality_status') == 'accepted' and doc['longchau_review_reasons']:
+        raise ValueError(f"Long Chau accepted despite parser review: {record['id']}")
+    return doc['text'], {'longchau_raw_reextraction_verified': True,
+        'longchau_medical_blocks_verified': doc.get('kept_block_count', 0),
+        'longchau_medical_headings_verified': doc.get('kept_heading_count', 0),
+        'longchau_missing_blocks': doc.get('missing_blocks', 0),
+        'source_intro_chars': len(doc.get('longchau_sapo', '')),
+        'intro_preserved': doc['longchau_sapo'] in record['text'] if doc.get('longchau_sapo') else None,
+        'source_table_count': doc.get('source_table_count', 0)}
+
+
 def main():
     raw_evidence.cache_clear()
     pubmed_xml_records.cache_clear()
@@ -151,6 +190,7 @@ def main():
         raise ValueError('Run incomplete or contains unexpected IDs; wait for all checkpoints')
     cases = []
     source_views = {}
+    longchau_parser = None
     for r in records:
         case = {'id': r['id'], 'url': r['url'], 'quality_status': r.get('quality_status'), 'flags': []}
         if 'text' in r and sha(r['text'].encode()) != r['text_sha256']:
@@ -163,6 +203,12 @@ def main():
                 raise ValueError(f"Raw hash mismatch: {r['id']}")
             if r.get('engine') == 'efetch':
                 source_views[r['id']], details = audit_pubmed_xml(r, body)
+                case.update(details)
+            elif (urlsplit(r['url']).hostname or '').lower() in (
+                    'nhathuoclongchau.com.vn', 'www.nhathuoclongchau.com.vn'):
+                if longchau_parser is None:
+                    longchau_parser = load_longchau(out)
+                source_views[r['id']], details = audit_longchau(r, body, longchau_parser)
                 case.update(details)
             elif not body.startswith(b'%PDF-'):
                 enc = r.get('declared_encoding') or 'utf-8'
@@ -208,6 +254,9 @@ def main():
                'documents_with_source_tables': sum(c.get('source_table_count', 0) > 0 for c in cases),
                'pubmed_xml_records_verified': sum(c.get('pubmed_xml_verified', False) for c in cases),
                'pubmed_abstract_sections_verified': sum(c.get('pubmed_abstract_sections', 0) for c in cases),
+               'longchau_raw_records_verified': sum(c.get('longchau_raw_reextraction_verified', False) for c in cases),
+               'longchau_medical_blocks_verified': sum(c.get('longchau_medical_blocks_verified', 0) for c in cases),
+               'longchau_medical_headings_verified': sum(c.get('longchau_medical_headings_verified', 0) for c in cases),
                'scope': 'Automated raw/DOM diagnostics; not expert gold extraction quality.',
                'human_review_completed': 0}
     (out / 'audit_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -222,7 +271,7 @@ def main():
         sheet.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in items), encoding='utf-8')
     page = ['<!doctype html><html lang="vi"><meta charset="utf-8"><title>Audit corpus</title>',
             '<style>body{font:16px system-ui;margin:24px;line-height:1.6}details{border:1px solid #ccc;padding:12px;margin:12px 0}.pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px system-ui}.flag{color:#963}</style>',
-            '<h1>Phiếu kiểm tra 100 tài liệu accepted</h1><p>Mẫu ngẫu nhiên seed 42. Cột trái là text từ DOM thân bài raw, cột phải là corpus. Đây chưa phải kết quả chấm của người đánh giá.</p>']
+            '<h1>Phiếu kiểm tra tài liệu accepted</h1><p>Mẫu ngẫu nhiên seed 42. Cột trái là tham chiếu từ raw: DOM/JSON đúng bài hoặc XML PubMed; cột phải là corpus. Long Châu dùng cùng quy tắc biên nội dung với parser, không phải gold độc lập. Đây chưa phải kết quả chấm của người đánh giá.</p>']
     for r in review_rows:
         esc = html_escape.escape
         page.append(f"<details><summary>{r['id']} — {esc(r.get('title', ''))}</summary><p>{esc(r['url'])}</p><div class='pair'><section><h3>DOM nguồn (thân bài, chưa gồm excerpt)</h3><pre>{esc(source_views.get(r['id'], 'Xem raw gốc'))}</pre></section><section><h3>Corpus (excerpt + thân bài)</h3><pre>{esc(r.get('text', ''))}</pre></section></div></details>")
