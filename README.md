@@ -89,11 +89,15 @@ Nếu snapshot ViBioMIR gốc trên HF bị gỡ, notebook vẫn xuất review c
 
 ## Notebook kiểm tra domain
 
-[crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) tập trung vào `vov.vn` và `nhathuoclongchau.com.vn`, mỗi domain 20 URL (tổng 40). Mẫu ngẫu nhiên seed 42 được nhúng từ `links_corpus_vi_en_zh.parquet`, giữ nguyên ID/URL và ghi revision/hash nguồn trong manifest. Chạy các ô từ trên xuống trên Kaggle, Colab hoặc Jupyter có Internet. Notebook tự cài dependencies và lưu phiên bản cùng output.
+[crawl_domain_samples.ipynb](notebooks/crawl_domain_samples.ipynb) thử **94 hostname của corpus mới**, tối đa 20 URL mới không trùng nhau/hostname, tổng **1.764 URL**. 87 hostname đủ 20 mẫu; 7 hostname chỉ có 1–11 URL nguồn nên lấy toàn bộ và ghi số thiếu. Mẫu seed 20261014 loại các mẫu VOV/Long Châu và URL PubMed đã kiểm tra, giữ ID/URL gốc cùng revision/hash của `links_corpus_vi_en_zh.parquet`. `TARGET_DOMAINS = None` chọn tất cả; có thể đặt tuple hostname để thử một phần. Không cần tải Parquet hoặc clone repo trên Kaggle.
 
-Mặc định `MAX_NEW = None`, `WORKERS = 2`, `LOG_EVERY = 5` để thử đủ 20 URL/domain. Dùng `RESUME_RUN_DIR` để tiếp tục output có cùng mẫu và phiên bản code; run 97 hostname cũ phải tạo run mới. Dùng `RECOVERY_RUN_DIR` với một run mới để thử lại nhóm lỗi và tái sử dụng raw hợp lệ bằng parser mới. `BROWSER_TEST_MODE` điều khiển bước đối chiếu Selenium cho URL Requests lỗi hoặc trích xuất lỗi/rỗng. Sau khi đổi snapshot, giữ `RESUME_RUN_DIR = None` và tạo run mới.
+Mặc định `MAX_NEW = None`, `WORKERS = 2`, `LOG_EVERY = 5` để thử toàn bộ mẫu. Bật Internet rồi Run All, không cần GPU; toàn bộ lượt thử có thể mất nhiều giờ. PubMed mặc định đi Selenium trực tiếp; domain khác dùng Requests rồi Selenium khi HTTP/mạng/trích xuất/QC lỗi. Dùng `RESUME_RUN_DIR` để tiếp tục cùng mẫu/code; nâng cấp từ notebook 40 URL hoặc thử lại checkpoint lỗi cần run mới. `RECOVERY_RUN_DIR` tái sử dụng raw hợp lệ cho ID/URL trùng mẫu.
 
-Output gồm bảng `ket_qua.csv/html`, kết quả Requests/Selenium, lỗi theo loại, raw, ảnh chụp và snapshot code. `browser_runtime.json` / `browser_preflight.json` cùng log Chrome ghi tình trạng môi trường; `summary.json` tách số URL phục hồi truy cập và cải thiện nội dung nhờ Selenium. Tải ZIP trong Output của Kaggle hoặc qua các liên kết notebook hiển thị.
+`IP_CHECK_ENABLED = True` đo IP đầu ra của Requests và Chrome qua [ipify](https://www.ipify.org/), ghi DNS và một lượt homepage đối chứng/hostname với timeout/ngân sách hữu hạn. `IP_RECHECK_ON_RESUME = True` đo lại khi resume, giữ lịch sử trong `network_history/`. Có thể tắt riêng homepage hoặc phép đo IP Chrome. Lỗi dịch vụ đo IP được ghi lại và không ngăn crawl trang mẫu; chỉ ghi sự có mặt của biến proxy, không ghi giá trị proxy.
+
+Mở `ip_block_report.html` hoặc CSV để xem kết luận theo hostname, IP từng engine, số 403/429 và homepage đối chứng. `ip_url_evidence.csv` giữ đoạn thông báo và đường dẫn raw/screenshot của từng ID/engine. `IP_BLOCK_MESSAGE` là trang thông báo rõ chặn IP; `ACCESS_BLOCK_SUSPECTED` chỉ nghi ngờ chặn truy cập/anti-bot, **403 không tự chứng minh chặn IP**. Chạy cùng notebook ở Kaggle/local để đối chiếu môi trường; IP đo qua dịch vụ bên ngoài có thể khác theo proxy hoặc đích truy cập.
+
+Output gồm bảng kết quả, báo cáo IP, `network_check.json`, `network_controls/`, raw, ảnh chụp và snapshot code. Báo cáo/ZIP được tạo trước khi crawl và cập nhật cả khi ngắt cell; ô cuối có thể tạo lại từ checkpoint mà không gọi mạng. Tải ZIP trong Output của Kaggle hoặc qua các liên kết notebook. Sửa helper rồi chạy `python scripts/build_domain_samples_notebook.py` để nhúng lại code và mẫu từ Parquet local đúng hash; builder giữ danh sách loại trừ và chọn mẫu có thể tái lập.
 
 ## Môi trường RAG
 
