@@ -217,7 +217,8 @@ class PubMedParserTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=rendered), \
                 redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out,
-                                      {'attempts': 1, 'delay': 0, 'pubmed_selenium_first': False}, workers=1)
+                                      {'attempts': 1, 'delay': 0, 'pubmed_selenium_first': False,
+                                       'pubmed_use_efetch': False}, workers=1)
         self.assertEqual(summary['browser_recovered'], 1)
         canonical = self.crawler.load_json(self.out / 'records/6331460.json')
         self.assertEqual(canonical['requests_error_kind'], 'http_203_challenge')

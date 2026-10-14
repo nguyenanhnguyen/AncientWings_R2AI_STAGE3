@@ -90,6 +90,16 @@ class SourceSnapshotTests(unittest.TestCase):
         self.assertNotEqual(env['RUN_DIR'], previous)
         self.assertEqual((previous / 'manifest.json').read_bytes(), original)
 
+    def test_selenium_run_upgrade_is_rejected_before_copy_for_efetch_resume(self):
+        current_sha = literals(self.config_source)['SOURCE_SHA256']
+        previous = self.work / 'input/selenium_run'
+        self.checkpoint(previous, current_sha)
+        (previous / 'corpus_config.json').write_text(json.dumps({
+            'settings': {'pubmed_selenium_first': True}}), encoding='utf-8')
+        with patch('shutil.copytree') as copy, self.assertRaisesRegex(ValueError, 'RECOVERY_RUN_PATH'):
+            self.configure(resume=previous)
+        copy.assert_not_called()
+
     def test_postprocess_keeps_legacy_source_and_selects_new_run_when_present(self):
         legacy = literals(self.config_source)['LEGACY_SOURCE']
         old = self.work / 'runs/ids_583_1582_synced'

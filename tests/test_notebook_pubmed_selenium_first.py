@@ -1,4 +1,4 @@
-"""Default PubMed browser routing, mixed batches, limits and durable resume."""
+"""Explicit legacy PubMed browser routing, mixed batches, limits and durable resume."""
 from contextlib import redirect_stdout
 import gzip
 import io
@@ -65,7 +65,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=self.render) as browser, \
                 redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out,
-                                      {'attempts': 1, 'delay': 0, **(config or {})}, workers=1, max_new=max_new)
+                                      {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False, **(config or {})}, workers=1, max_new=max_new)
         return summary, transport, browser
 
     def test_mixed_batch_uses_pubmed_selenium_before_other_domain_requests(self):
@@ -107,7 +107,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=KeyboardInterrupt), \
                 redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
-                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
         transport.assert_not_called()
         self.assertEqual(self.crawler.load_json(self.out / 'quality_report.json')['pending'], 2)
         self.assertEqual(list((self.out / 'records').glob('*.json')), [])
@@ -136,7 +136,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
                 patch.object(self.probe, 'create_browser', side_effect=RuntimeError('Chrome crashed')), \
                 redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(RuntimeError, 'Selenium pass incomplete'):
-                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
         transport.assert_not_called()
         self.assertEqual(self.crawler.load_json(self.out / 'quality_report.json')['pending'], 2)
         self.assertEqual(list((self.out / 'records').glob('*.json')), [])

@@ -231,7 +231,8 @@ class SeleniumFallbackTests(unittest.TestCase):
         config = {'version': self.runner.VERSION, 'settings': dict(self.runner.DEFAULTS, attempts=1, delay=0),
                   'runner_sha256': self.crawler.file_hash(self.runner.__file__),
                   'crawler_sha256': self.crawler.file_hash(self.crawler.__file__),
-                  'probe_sha256': self.crawler.file_hash(self.probe.__file__)}
+                  'probe_sha256': self.crawler.file_hash(self.probe.__file__),
+                  'pubmed_efetch_sha256': self.crawler.file_hash(self.root / 'pubmed_efetch_snapshot.py')}
         self.crawler.write_json(out / 'corpus_config.json', config)
         with patch.object(self.crawler.Fetcher, 'request_once') as request, \
                 patch.object(self.probe, 'browser_preflight'), \

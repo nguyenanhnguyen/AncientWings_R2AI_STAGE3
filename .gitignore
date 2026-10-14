@@ -20,6 +20,7 @@ __pycache__/
 # Generated crawl outputs, pipeline working data and local scratch files
 /runs/
 /notebooks/runs/
+/notebooks/check_pubmed_efetch_100.ipynb
 /work/
 /tmp/
 

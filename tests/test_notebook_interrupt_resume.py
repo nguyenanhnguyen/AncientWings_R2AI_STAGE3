@@ -108,7 +108,8 @@ class InterruptResumeTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=render), \
                 redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
-                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+                self.runner.run(self.crawler, self.probe, self.out,
+                                {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
         driver.quit.assert_called_once()
         self.assertEqual(attempted, [1, 2])
         checkpoint = (self.out / 'browser_records/1.json').read_bytes()
@@ -119,7 +120,8 @@ class InterruptResumeTests(unittest.TestCase):
                 patch.object(self.probe, 'create_browser'), \
                 patch.object(self.probe, 'browser_attempt', side_effect=self.rendered) as render, \
                 redirect_stdout(io.StringIO()):
-            summary = self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+            summary = self.runner.run(self.crawler, self.probe, self.out,
+                                      {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
         transport.assert_not_called()
         self.assertEqual(render.call_count, 1)
         self.assertEqual(render.call_args.args[2]['id'], 2)
@@ -139,7 +141,8 @@ class InterruptResumeTests(unittest.TestCase):
         with patch.object(self.crawler.Fetcher, 'request_once') as transport, \
                 patch.object(self.probe, 'browser_preflight'), \
                 patch.object(self.probe, 'create_browser') as driver, redirect_stdout(io.StringIO()):
-            summary = self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+            summary = self.runner.run(self.crawler, self.probe, self.out,
+                                      {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
         transport.assert_not_called()
         driver.assert_not_called()
         self.assertEqual(summary['accessible'], 1)
