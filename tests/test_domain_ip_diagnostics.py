@@ -102,6 +102,16 @@ class DomainIpTests(unittest.TestCase):
             self.ip.build_report(self.crawler, self.out, [sample], {'host_counts': {'example.org': 20}})
             self.assertEqual(self.crawler.load_json(self.out / 'ip_block_report.json')['hosts'][0]['ip_block_messages'], 0)
 
+    def test_curl_article_engine_is_not_mislabelled_as_requests(self):
+        sample = self.make_evidence(200, 'Real article')
+        path = self.out / 'records/1.json'
+        record = self.crawler.load_json(path)
+        self.crawler.write_json(path, dict(record, engine='curl_cffi'))
+        self.ip.build_report(self.crawler, self.out, [sample], {'host_counts': {'example.org': 20}})
+        host = self.crawler.load_json(self.out / 'ip_block_report.json')['hosts'][0]
+        self.assertEqual(host['curl_cffi_attempted'], 1)
+        self.assertEqual(host['requests_attempted'], 0)
+
     def test_ip_provider_and_browser_setup_failures_do_not_stop_host_diagnostics(self):
         with patch.object(self.crawler.Fetcher, 'request_once', side_effect=OSError('network unavailable')), \
                 patch.object(self.probe, 'create_browser', side_effect=RuntimeError('Chrome unavailable')), \

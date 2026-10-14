@@ -1,0 +1,57 @@
+[
+  {
+    "name": "dyslexia",
+    "url": "https://nhathuoclongchau.com.vn/bai-viet/dyslexia-la-gi-trieu-chung-va-nguyen-nhan-gay-ra-tinh-trang-nay.html",
+    "final_url": "https://nhathuoclongchau.com.vn/bai-viet/dyslexia-la-gi-trieu-chung-va-nguyen-nhan-gay-ra-tinh-trang-nay.html",
+    "http_status": 200,
+    "title": "Dyslexia là gì? Triệu chứng và nguyên nhân gây ra tình trạng này - Nhà thuốc FPT Long Châu",
+    "bytes": 287496,
+    "sha256": "2c8ade844630f849afbdb19e92d4bacd1594843f3c7633076c01db0c9357168a",
+    "file": "dyslexia.html.gz",
+    "elapsed_seconds": 1.042
+  },
+  {
+    "name": "sot_xuat_huyet",
+    "url": "https://nhathuoclongchau.com.vn/bai-viet/cach-so-cuu-sot-xuat-huyet-hieu-qua-an-toan-58740.html",
+    "final_url": "https://nhathuoclongchau.com.vn/bai-viet/cach-so-cuu-sot-xuat-huyet-hieu-qua-an-toan-58740.html",
+    "http_status": 200,
+    "title": "Cách sơ cứu sốt xuất huyết an toàn và vài điều cần lưu ý",
+    "bytes": 293844,
+    "sha256": "be3be8d8019b7959e4c7236d17ae41772776a5032a3ae1526a2ea6d963f2afa6",
+    "file": "sot_xuat_huyet.html.gz",
+    "elapsed_seconds": 0.704
+  },
+  {
+    "name": "thieu_mau_cap",
+    "url": "https://nhathuoclongchau.com.vn/bai-viet/thieu-mau-cap-la-gi-nguyen-nhan-nao-gay-ra-thieu-mau-cap.html",
+    "final_url": "https://nhathuoclongchau.com.vn/bai-viet/thieu-mau-cap-la-gi-nguyen-nhan-nao-gay-ra-thieu-mau-cap.html",
+    "http_status": 200,
+    "title": "Thiếu máu cấp là gì? Nguyên nhân nào gây ra thiếu máu cấp?",
+    "bytes": 292414,
+    "sha256": "cdc1f5dc767acf36ed9e1c7183624185f2fe7c41855dcdb5ecdd6f7dbd2b3486",
+    "file": "thieu_mau_cap.html.gz",
+    "elapsed_seconds": 0.74
+  },
+  {
+    "name": "benh_a_vay_nen",
+    "url": "https://nhathuoclongchau.com.vn/benh/a-vay-nen.html",
+    "final_url": "https://nhathuoclongchau.com.vn/benh/a-vay-nen.html",
+    "http_status": 200,
+    "title": "Á vảy nến là gì? Nguyên nhân, triệu chứng và cách điều trị",
+    "bytes": 346450,
+    "sha256": "cf593897f0b624fad274e5ff87db44767e3342aeb857eb58b73afc3f059df071",
+    "file": "benh_a_vay_nen.html.gz",
+    "elapsed_seconds": 0.546
+  },
+  {
+    "name": "benh_alzheimer",
+    "url": "https://nhathuoclongchau.com.vn/benh/alzheimer-5.html",
+    "final_url": "https://nhathuoclongchau.com.vn/benh/alzheimer-5.html",
+    "http_status": 200,
+    "title": "Bệnh Alzheimer: Triệu chứng, nguyên nhân và cách điều trị",
+    "bytes": 383529,
+    "sha256": "bda110bacb04efac6a8a6fb544d1982b19a12dd229e3d86b6ce9639999a54758",
+    "file": "benh_alzheimer.html.gz",
+    "elapsed_seconds": 0.861
+  }
+]

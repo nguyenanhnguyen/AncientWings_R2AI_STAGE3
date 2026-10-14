@@ -311,6 +311,10 @@ Kaggle: tải ZIP trong Output rồi gửi lại để đối chiếu; có thể
             compile(''.join(cell['source']), '<domain-notebook>', 'exec')
             cell['execution_count'], cell['outputs'] = None, []
     NOTEBOOK.write_text(json.dumps(notebook, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    # Keep the production Long Chau route when rebuilding the embedded sample inventory.
+    from build_longchau_notebooks import update_domain
+    update_domain({'longchau_snapshot.py': (ROOT / 'scripts/longchau.py').read_bytes(),
+                   'priority_probe_snapshot.py': (ROOT / 'scripts/priority_probe.py').read_bytes()})
     print(json.dumps({'selected': len(samples), 'hosts': len(profile['host_counts']),
                       'shortages': {h: n for h, n in profile['sample_host_counts'].items() if n < QUOTA},
                       'ip_helper_sha256': hashlib.sha256(helper).hexdigest()}))

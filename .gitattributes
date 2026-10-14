@@ -1,0 +1,3 @@
+# Keep the canonical Long Chau/probe snapshots identical across platforms.
+/scripts/longchau.py text eol=lf
+/scripts/priority_probe.py text eol=lf

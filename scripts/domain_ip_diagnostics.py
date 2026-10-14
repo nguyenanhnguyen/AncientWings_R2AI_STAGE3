@@ -278,7 +278,7 @@ def build_report(crawler, out, samples, profile):
             except (OSError, ValueError) as exc:
                 observation = {'category': 'RAW_EVIDENCE_INVALID', 'ip_block_message': False, 'snippet': str(exc)}
             evidence.append(dict(observation, hostname=sample['domain'], id=sample['id'], url=sample['url'],
-                                 engine=engine, http_status=record.get('http_status'),
+                                 engine=record.get('engine', engine), http_status=record.get('http_status'),
                                  quality_status=record.get('quality_status'), raw_path=record.get('raw_path'),
                                  screenshot_path=record.get('screenshot_path')))
     for domain in sorted({s['domain'] for s in samples}):
@@ -298,6 +298,7 @@ def build_report(crawler, out, samples, profile):
                       'selected_urls': selected, 'shortfall_to_20': max(0, 20 - selected),
                       'urls_with_any_attempt': len({r['id'] for r in tested}),
                       'requests_attempted': sum(r['engine'] == 'requests' for r in tested),
+                      'curl_cffi_attempted': sum(r['engine'] == 'curl_cffi' for r in tested),
                       'selenium_attempted': sum(r['engine'] == 'selenium' for r in tested),
                       'http_403': sum(r['http_status'] == 403 for r in tested),
                       'http_429': sum(r['http_status'] == 429 for r in tested),
