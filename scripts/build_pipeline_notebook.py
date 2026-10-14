@@ -130,14 +130,13 @@ def run_stage(name, arguments, outputs, gpu=None, key_extra=None):
 '''),
     markdown('''## 1. Chốt corpus HF và dữ liệu BTC
 
-Đọc tất cả shard `corpus/*.parquet` của repo nhóm tại **một commit**, giữ đúng ID và URL ở danh sách BTC, chọn 500k tài liệu tiếng Việt và lưu Parquet local. Không dùng `archives/`, `diagnostics/`, `teach/`. Cache tải shard tạm được xóa sau khi snapshot hoàn tất.
+Đọc Parquet của các shard `corpus/` qua range request tại **một commit**, giữ đúng ID và URL ở danh sách BTC, chọn 500k tài liệu tiếng Việt và lưu Parquet local. Không dùng `archives/`, `diagnostics/`, `teach/`; không lưu toàn bộ shard HF xuống đĩa.
 '''),
     code('''source = OUT / 'source'
 run_stage('hf_snapshot', ['hf-snapshot', '--repo', HF_REPO, '--revision', HF_REVISION,
                           '--limit', LIMIT, '--seed', SEED, '--out', source],
           [source/'source_manifest.json', source/'input_vi.parquet',
            source/'links_corpus_vi_en_zh.parquet', source/'query.parquet'])
-shutil.rmtree(source/'hf_cache', ignore_errors=True)
 print('Source:', json.loads((source/'source_manifest.json').read_text())['counts'])
 '''),
     markdown('''## 2. Chuẩn hóa, QC, chia chunk

@@ -95,7 +95,8 @@ def run(args):
         recorded = manifest.get('model', {})
         encoder = dense.load_encoder(manifest['encoder'], device=args.device, fp16=not args.fp32,
                                      max_length=recorded.get('max_length'),
-                                     revision=recorded.get('revision'))
+                                     revision=recorded.get('revision'),
+                                     quantize=recorded.get('config', {}).get('quantize', 'none'))
         dense_models.append(model_info(encoder))
         started = time.monotonic()
         vectors = encoder.encode(variant_rows, kind='query', batch_size=args.batch_size)
@@ -156,7 +157,8 @@ def run(args):
             scorer = load_reranker(name, device=args.device, fp16=not args.fp32,
                                    max_length=getattr(args, 'rerank_max_length', None),
                                    revision=(getattr(args, 'reranker_revision', None)
-                                             if name == args.reranker else None))
+                                             if name == args.reranker else None),
+                                   quantize=getattr(args, 'reranker_quantize', 'none'))
             info = model_info(scorer)
             reranker_models.append(info)
             progress = Progress(f'rerank {name}')
@@ -264,6 +266,7 @@ def main():
     parser.add_argument('--reranker', default='bge-reranker-v2-m3')
     parser.add_argument('--reranker-revision', default=None,
                         help='Pinned Hugging Face commit for the primary reranker.')
+    parser.add_argument('--reranker-quantize', choices=['none', '4bit'], default='none')
     parser.add_argument('--weights', default=None,
                         help='JSON of RRF weights, by channel or family, e.g. \'{"bm25":0.7}\'')
     parser.add_argument('--keyword-variant', action='store_true',

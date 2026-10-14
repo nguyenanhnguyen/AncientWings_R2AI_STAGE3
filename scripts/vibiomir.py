@@ -1,8 +1,8 @@
 """One entry point for every stage: python scripts/vibiomir.py <stage> [options].
 
-    pipeline    crawl data -> submission.zip, one stage per subprocess (the usual command)
+    pipeline    team HF snapshot or local data -> submission.zip, one stage per subprocess
     prepare     crawl runs / parquet -> corpus.parquet
-    hf-snapshot select a pinned Vietnamese corpus subset from the team HF dataset
+    hf-snapshot select a pinned Vietnamese corpus subset via ranged HF reads
     chunk       chunk the corpus, preserving source offsets
     index       `bm25`, `dense`, `all`
     translate   query translations with the local LLM

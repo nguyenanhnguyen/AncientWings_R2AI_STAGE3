@@ -10,8 +10,8 @@ which is what the rules allow. Sizes are the published parameter counts.
     multilingual-e5-large   intfloat/multilingual-e5-large, 560M, 2024-02, needs query:/passage:.
     gte-multilingual-base   Alibaba-NLP/gte-multilingual-base, 305M, 2024-07, cheapest option.
     qwen3-embedding-0.6b    Qwen/Qwen3-Embedding-0.6B, 0.6B, 2025-06, last-token pooling.
-    qwen3-embedding-4b      Qwen/Qwen3-Embedding-4B, 4B, 2025-06. Top of the MTEB multilingual
-                            board in its family; needs a 16GB GPU for comfortable encoding.
+    qwen3-embedding-4b      Qwen/Qwen3-Embedding-4B, 4B, 2025-06. Local 4 GB runs use NF4,
+                            max_length 512 and batch 1/2; the pilot must check real VRAM.
 
 `hash` is not a model. It is a deterministic feature-hashing encoder used to run the whole flow
 offline, in tests and on a machine with no GPU. It proves the plumbing, never retrieval quality.
@@ -72,7 +72,8 @@ class HashEncoder:
 class TransformerEncoder:
     """Hugging Face encoder with the pooling and prefixes each model family expects."""
 
-    def __init__(self, name, device=None, fp16=True, max_length=None, revision=None):
+    def __init__(self, name, device=None, fp16=True, max_length=None, revision=None,
+                 quantize='none'):
         if name not in ENCODERS:
             raise ValueError(f'Unknown encoder {name!r}; choose from {sorted(ENCODERS)}')
         import torch
@@ -86,6 +87,9 @@ class TransformerEncoder:
             self.config['max_length'] = max_length
         self.torch = torch
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        if quantize not in ('none', '4bit') or (quantize == '4bit' and not str(self.device).startswith('cuda')):
+            raise ValueError('4-bit embedding requires CUDA; quantize must be none or 4bit')
+        self.config['quantize'] = quantize
         kwargs = {'revision': revision}
         if self.config.get('trust_remote_code'):
             kwargs['trust_remote_code'] = True
@@ -98,10 +102,19 @@ class TransformerEncoder:
             self.tokenizer.padding_side = 'left'
         # torch_dtype is accepted by every transformers release this project allows; the newer
         # `dtype` name is silently ignored by older ones, which would load fp32 at twice the VRAM.
+        if quantize == '4bit':
+            from transformers import BitsAndBytesConfig
+            kwargs.update(quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type='nf4',
+                bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.float16),
+                device_map={'': self.device})
         self.model = AutoModel.from_pretrained(
             self.config['hf_id'],
             torch_dtype=torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32,
-            **kwargs).to(self.device).eval()
+            **kwargs)
+        if quantize == 'none':
+            self.model.to(self.device)
+        self.model.eval()
         if hasattr(self.model.config, 'use_cache'):
             self.model.config.use_cache = False
         self.dim = int(getattr(self.model.config, 'hidden_size', self.config['dim']))
@@ -157,10 +170,12 @@ class TransformerEncoder:
         return result
 
 
-def load_encoder(name, device=None, fp16=True, max_length=None, revision=None):
+def load_encoder(name, device=None, fp16=True, max_length=None, revision=None,
+                 quantize='none'):
     if name == 'hash':
         return HashEncoder(ENCODERS['hash']['dim'])
-    return TransformerEncoder(name, device=device, fp16=fp16, max_length=max_length, revision=revision)
+    return TransformerEncoder(name, device=device, fp16=fp16, max_length=max_length,
+                              revision=revision, quantize=quantize)
 
 
 def encode_to_memmap(encoder, texts, path, batch_size=16, shard=20000, progress=None,

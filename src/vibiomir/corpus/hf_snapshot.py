@@ -1,4 +1,8 @@
-"""Freeze a Vietnamese corpus snapshot from the team's HF dataset for Kaggle."""
+"""Freeze a pinned Vietnamese corpus subset from the team's HF dataset.
+
+Parquet shards are read through the Hub filesystem with seekable ranged reads. Only the selected
+rows and, when missing locally, the two official files are materialised in the output directory.
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +11,7 @@ import heapq
 import json
 import os
 from pathlib import Path
+import shutil
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -32,6 +37,46 @@ def _rows(path):
         yield from batch.to_pylist()
 
 
+def _remote_rows(fs, repo, revision, filename):
+    path = f'hf://datasets/{repo}@{revision}/{filename}'
+    with fs.open(path, 'rb', block_size=4 * 1024 * 1024) as stream:
+        for batch in pq.ParquetFile(stream).iter_batches(batch_size=2048):
+            yield from batch.to_pylist()
+
+
+def _spread_files(files, seed):
+    """Visit shards across ID ranges instead of taking the lowest IDs first."""
+    return sorted(files, key=lambda name: (_rank(name, seed), name))
+
+
+def _official_file(out, name, digest, cache, token):
+    local = out / name
+    if local.exists():
+        if storage.sha256_file(local) != digest:
+            raise ValueError(f'Official file failed checksum: {local}')
+        return local
+    project_file = Path(__file__).resolve().parents[3] / 'data' / name
+    if project_file.exists() and storage.sha256_file(project_file) == digest:
+        shutil.copyfile(project_file, local)
+    else:
+        from huggingface_hub import hf_hub_download
+        downloaded = hf_hub_download(repo_id=OFFICIAL_REPO, repo_type='dataset',
+                                     filename=name, revision=OFFICIAL_REVISION,
+                                     token=token, cache_dir=str(cache))
+        shutil.copyfile(downloaded, local)
+    if storage.sha256_file(local) != digest:
+        local.unlink(missing_ok=True)
+        raise ValueError(f'Official file failed checksum: {name}')
+    return local
+
+
+def _discard_download_cache(cache, out):
+    if cache.exists():
+        if cache.resolve().parent != out.resolve():
+            raise RuntimeError('Refusing to remove a cache outside the snapshot directory')
+        shutil.rmtree(cache)
+
+
 def _valid(row, official):
     try:
         doc_id = int(row['id'])
@@ -46,14 +91,14 @@ def _valid(row, official):
 
 
 def build(args):
-    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub import HfApi, HfFileSystem, get_token
 
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     cache = out / 'hf_cache'
-    token = os.environ.get('HF_TOKEN')
+    token = os.environ.get('HF_TOKEN') or get_token()
     if not token:
-        raise RuntimeError('HF_TOKEN is required to read the private team dataset.')
+        raise RuntimeError('Authenticate with `hf auth login` or set HF_TOKEN to read the private dataset.')
     api = HfApi(token=token)
     manifest_path = out / 'source_manifest.json'
     previous = storage.read_json(manifest_path) if manifest_path.exists() else None
@@ -61,6 +106,8 @@ def build(args):
                  else args.revision)
     pinned = api.dataset_info(args.repo, revision=requested).sha
     config = {'repo': args.repo, 'revision': pinned, 'limit': args.limit, 'seed': args.seed,
+              'sample_mode': args.sample_mode, 'reader': 'hf_filesystem_ranges_v1',
+              'max_shards': getattr(args, 'max_shards', 0),
               'official_revision': OFFICIAL_REVISION,
               'official_links_sha256': LINKS_SHA256, 'official_queries_sha256': QUERIES_SHA256}
     target = out / 'input_vi.parquet'
@@ -71,39 +118,73 @@ def build(args):
         if target.exists() and storage.sha256_file(target) == old['input_sha256']:
             for name, digest in ((LINKS_NAME, LINKS_SHA256),
                                  (QUERIES_NAME, QUERIES_SHA256)):
-                local = out / name
-                if not local.exists() or storage.sha256_file(local) != digest:
-                    import shutil
-                    downloaded = hf_hub_download(repo_id=OFFICIAL_REPO, repo_type='dataset',
-                                                 filename=name, revision=OFFICIAL_REVISION,
-                                                 token=token, cache_dir=str(cache))
-                    shutil.copyfile(downloaded, local)
-                    if storage.sha256_file(local) != digest:
-                        raise ValueError(f'Official file failed checksum: {name}')
+                _official_file(out, name, digest, cache, token)
+            _discard_download_cache(cache, out)
             return old
         raise ValueError('HF snapshot is incomplete or changed. Choose a new output directory.')
-
-    def download(repo, filename, revision):
-        return hf_hub_download(repo_id=repo, repo_type='dataset', filename=filename,
-                               revision=revision, token=token, cache_dir=str(cache))
-
-    links = Path(download(OFFICIAL_REPO, LINKS_NAME, OFFICIAL_REVISION))
-    queries = Path(download(OFFICIAL_REPO, QUERIES_NAME, OFFICIAL_REVISION))
-    if storage.sha256_file(links) != LINKS_SHA256 or storage.sha256_file(queries) != QUERIES_SHA256:
-        raise ValueError('Official links/query checksum differs from the pinned competition files.')
+    links = _official_file(out, LINKS_NAME, LINKS_SHA256, cache, token)
+    queries = _official_file(out, QUERIES_NAME, QUERIES_SHA256, cache, token)
     official = {int(row['id']): row['url'] for row in _rows(links)}
-    files = sorted(f for f in api.list_repo_files(repo_id=args.repo, repo_type='dataset',
-                                                   revision=pinned)
-                   if f.startswith('corpus/') and f.endswith('.parquet'))
+    files = _spread_files([f for f in api.list_repo_files(repo_id=args.repo,
+                           repo_type='dataset', revision=pinned)
+                           if f.startswith('corpus/') and f.endswith('.parquet')], args.seed)
     if not files:
         raise ValueError('The team dataset contains no corpus/*.parquet shards.')
+    fs = HfFileSystem(token=token)
+
+    temporary = target.with_suffix('.partial.parquet')
+    if args.sample_mode == 'bounded':
+        shard_limit = getattr(args, 'max_shards', 0)
+        selected_files = files[:shard_limit] if shard_limit else files
+        seen = set()
+        counts = {'files_available': len(files), 'files_read': 0,
+                  'rows_scanned': 0, 'vi_valid_unique': 0}
+        try:
+            with pq.ParquetWriter(temporary, CORPUS_SCHEMA, compression='zstd') as writer:
+                batch = []
+                for remote in selected_files:
+                    counts['files_read'] += 1
+                    for row in _remote_rows(fs, args.repo, pinned, remote):
+                        counts['rows_scanned'] += 1
+                        record = _valid(row, official)
+                        if record is None or record['id'] in seen:
+                            continue
+                        seen.add(record['id'])
+                        record['raw_path'] = ''
+                        batch.append(record)
+                        counts['vi_valid_unique'] += 1
+                        if len(batch) == 1024:
+                            writer.write_table(pa.Table.from_pylist(batch, schema=CORPUS_SCHEMA))
+                            batch.clear()
+                        if counts['vi_valid_unique'] == args.limit:
+                            break
+                    print(f'Scan HF {counts["files_read"]}/{len(selected_files)}: {remote}; '
+                          f'valid vi={counts["vi_valid_unique"]:,}', flush=True)
+                    if counts['vi_valid_unique'] == args.limit:
+                        break
+                if batch:
+                    writer.write_table(pa.Table.from_pylist(batch, schema=CORPUS_SCHEMA))
+            if counts['vi_valid_unique'] < args.limit:
+                raise ValueError(f'Only {counts["vi_valid_unique"]:,} valid Vietnamese documents '
+                                 f'in {len(selected_files)} scanned shards; requested {args.limit:,}. '
+                                 'Increase --max-shards or lower --limit.')
+            os.replace(temporary, target)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        report = {'config': config, 'counts': counts, 'selected': args.limit,
+                  'input_sha256': storage.sha256_file(target), 'input': str(target),
+                  'links': str(links), 'queries': str(queries)}
+        storage.write_json(manifest_path, report)
+        _discard_download_cache(cache, out)
+        print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+        return report
 
     # A stable hash sample spreads 500k IDs across all shards and does not favor low ID ranges.
     heap, seen = [], set()
     counts = {'files': len(files), 'rows_scanned': 0, 'vi_valid_unique': 0}
     for position, remote in enumerate(files):
-        path = download(args.repo, remote, pinned)
-        for row in _rows(path):
+        for row in _remote_rows(fs, args.repo, pinned, remote):
             counts['rows_scanned'] += 1
             record = _valid(row, official)
             if record is None or record['id'] in seen:
@@ -127,42 +208,43 @@ def build(args):
     for doc_id, position in selected.items():
         by_file.setdefault(position, set()).add(doc_id)
 
-    temporary = target.with_suffix('.partial.parquet')
     written = set()
-    with pq.ParquetWriter(temporary, CORPUS_SCHEMA, compression='zstd') as writer:
-        for position in sorted(by_file):
-            remote = files[position]
-            path = download(args.repo, remote, pinned)
-            wanted = by_file[position]
-            batch = []
-            for row in _rows(path):
-                doc_id = row.get('id')
-                if doc_id not in wanted or doc_id in written:
-                    continue
-                record = _valid(row, official)
-                if record is None:
-                    raise ValueError(f'ID {doc_id} changed between HF passes at pinned revision.')
-                record['raw_path'] = ''  # HF corpus has no local raw checkpoint.
-                batch.append(record)
-                written.add(doc_id)
-                if len(batch) == 1024:
+    try:
+        with pq.ParquetWriter(temporary, CORPUS_SCHEMA, compression='zstd') as writer:
+            for position in sorted(by_file):
+                remote = files[position]
+                wanted = by_file[position]
+                batch = []
+                for row in _remote_rows(fs, args.repo, pinned, remote):
+                    try:
+                        doc_id = int(row.get('id'))
+                    except (TypeError, ValueError):
+                        continue
+                    if doc_id not in wanted or doc_id in written:
+                        continue
+                    record = _valid(row, official)
+                    if record is None:
+                        raise ValueError(f'ID {doc_id} changed between HF passes at pinned revision.')
+                    record['raw_path'] = ''  # HF corpus has no local raw checkpoint.
+                    batch.append(record)
+                    written.add(doc_id)
+                    if len(batch) == 1024:
+                        writer.write_table(pa.Table.from_pylist(batch, schema=CORPUS_SCHEMA))
+                        batch.clear()
+                if batch:
                     writer.write_table(pa.Table.from_pylist(batch, schema=CORPUS_SCHEMA))
-                    batch.clear()
-            if batch:
-                writer.write_table(pa.Table.from_pylist(batch, schema=CORPUS_SCHEMA))
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
     if len(written) != args.limit:
         temporary.unlink(missing_ok=True)
         raise ValueError(f'Only {len(written):,}/{args.limit:,} selected documents were written.')
     os.replace(temporary, target)
-    # Keep exact official files next to the frozen input for submit validation.
-    for source, destination in ((links, out / LINKS_NAME), (queries, out / QUERIES_NAME)):
-        if not destination.exists():
-            import shutil
-            shutil.copyfile(source, destination)
     report = {'config': config, 'counts': counts, 'selected': len(written),
               'input_sha256': storage.sha256_file(target), 'input': str(target),
               'links': str(out / LINKS_NAME), 'queries': str(out / QUERIES_NAME)}
     storage.write_json(manifest_path, report)
+    _discard_download_cache(cache, out)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
     return report
 
@@ -173,10 +255,16 @@ def main():
     parser.add_argument('--revision', default='main')
     parser.add_argument('--limit', type=int, default=500000)
     parser.add_argument('--seed', type=int, default=13)
+    parser.add_argument('--sample-mode', choices=['hash', 'bounded'], default='hash',
+                        help='hash scans all shards twice; bounded stops after enough valid rows.')
+    parser.add_argument('--max-shards', type=int, default=0,
+                        help='Bounded mode cap on remote corpus shards; 0 allows all.')
     parser.add_argument('--out', required=True)
     args = parser.parse_args()
     if args.limit < 1:
         parser.error('--limit must be positive')
+    if args.max_shards < 0:
+        parser.error('--max-shards must be nonnegative')
     build(args)
 
 

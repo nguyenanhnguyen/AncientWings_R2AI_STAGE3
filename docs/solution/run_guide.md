@@ -1,8 +1,8 @@
-# Chạy 60.000 bản ghi crawl trên RTX 2050 4GB đến `submission.zip`
+# Chạy pipeline local Qwen3-4B NF4 trên RTX 2050 4 GB
 
-Chạy PowerShell từ thư mục gốc dự án. Cấu hình này dùng **model thật**, dành cho một GPU RTX 2050 4GB. Lệnh điều phối chạy các khâu, lưu log và tiếp tục được khi bị ngắt. Crawl tiếp tục ghi dữ liệu vào run hiện tại; pipeline đọc một snapshot rồi chỉ dùng corpus đã đóng băng.
+Chạy PowerShell từ thư mục gốc dự án. Cấu hình này dùng **model thật**, dành cho một GPU RTX 2050 4GB. Lệnh điều phối đọc snapshot chốt từ HF, lưu log và tiếp tục được khi bị ngắt.
 
-**Trạng thái xác minh:** máy nhận RTX 2050 4096 MiB qua `nvidia-smi`, nhưng môi trường `env` được kiểm tra đang có `torch 2.14.1+cpu`, `torch.cuda.is_available() == False`. Chưa chạy encode/rerank model thật trên GPU và chưa có điểm thi cho cấu hình mới. Tốc độ của lượt `hash`/`identity` 30k cũ không dùng để dự báo lượt này. Pilot đo tốc độ và VRAM tại máy trước khi chạy dài.
+**Trạng thái xác minh:** CLI và kiểm tra tĩnh đã chạy; chưa đo trực tiếp Qwen3-Embedding-4B/Reranker-4B NF4 trên RTX 2050 4 GB. Pilot của run mới tải model và đo bộ nhớ trước khi xây index dài. Nếu batch 1 vẫn OOM thì profile này không vừa GPU; xem lựa chọn nhẹ hơn bên dưới. Không dùng lại `--out` của run cũ vì snapshot và khóa code đã đổi.
 
 ## 1. Cấu hình local
 
@@ -10,16 +10,18 @@ Chạy PowerShell từ thư mục gốc dự án. Cấu hình này dùng **model
 |---|---|
 | A2–A3 | Đọc 60.000 bản ghi theo ID, lọc lỗi tải/trang chủ/template, giữ bài `review`, bảo toàn ID và nguồn |
 | A4 | Chunk đích 320 token, overlap 80, trần 768 theo bộ đếm repo; giữ offset nguồn |
-| B0 | Pilot mẫu phân tầng theo độ dài, gồm đoạn dài nhất; đo batch 2/4/8/16 cho từng model |
+| B0 | Pilot 8 đoạn phân tầng theo độ dài, đo batch 1/2 và VRAM cho từng model 4B NF4 |
 | B1 | BM25 với token Việt/Anh và unigram + bigram CJK |
-| B2 | **BGE-M3 + Qwen3-Embedding-0.6B**, fp16, SDPA, hai index riêng, chạy lần lượt |
+| B2 | **Qwen3-Embedding-4B NF4**, một index; encode theo shard, có checkpoint/resume |
 | C1 | Query gốc, biến thể bỏ lời xã giao cho BM25; **Qwen3-4B NF4** dịch Anh/Trung khi corpus có ngôn ngữ đó |
 | C2 | Top 300/kênh, weighted RRF, giữ tối đa 600 rồi chọn tối đa 200 để rerank, tối đa 4 chunk/document |
-| C3 | **BGE-reranker-v2-m3 + Qwen3-Reranker-0.6B**, chạy lần lượt, trung bình hai điểm; lưu điểm riêng |
+| C3 | **Qwen3-Reranker-4B NF4**, chấm một lượt; điểm lưu trong SQLite theo model, query và chunk |
 | D | Giữ 100 ứng viên/query; xuất `recall` và `balanced`, kiểm tra đủ query, ID chính thức, cắt lại chunk từ nguồn |
 | E | Công cụ gán nhãn người và đánh giá; chỉ tính F2 khi có nhãn phù hợp |
 
-Model embedding/reranker 4B fp16 cần riêng khoảng 8GB trọng số nên không thuộc profile 4GB. Hai model nhỏ chạy nối tiếp cung cấp các kênh bổ sung; **chưa có bằng chứng đây là tổ hợp đạt điểm cao nhất**. Điểm sigmoid/yes-no và trung bình ensemble chưa được hiệu chỉnh thành xác suất liên quan. Ngưỡng bài nộp, trọng số dịch 0,5 và giới hạn ứng viên là điểm xuất phát để đo.
+Hai model 4B chạy **lần lượt**, lượng tử NF4; không chạy đồng thời. NF4 giảm bộ nhớ trọng số nhưng GPU vẫn cần bộ nhớ cho activation và prompt. Độ chính xác sau lượng tử và điểm thi chưa được đo. Điểm yes/no chưa được hiệu chỉnh thành xác suất liên quan. `--weights` cho phép thử trọng số RRF trên tập dev gán nhãn; `--adaptive-submit` bật chọn bằng chứng theo điểm, chỉ dùng sau khi so sánh F2 trên dev.
+
+Lựa chọn model dựa trên [Qwen3-Embedding-4B](https://huggingface.co/Qwen/Qwen3-Embedding-4B), [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B) và [hướng dẫn lượng tử bitsandbytes](https://huggingface.co/docs/transformers/quantization/bitsandbytes). Model 4B lớn hơn không tự bảo đảm điểm cao hơn trên tập thi; nếu cần so công bằng, giữ cùng snapshot và tạo `--out` mới cho từng cấu hình.
 
 Qwen3-4B NF4 cần thử trên máy vì activation/KV cache còn dùng VRAM ngoài trọng số. Nếu không vừa, dùng lựa chọn nhỏ hơn ở mục 7. Dịch chỉ thêm kênh tìm kiếm; `chunk_text` luôn lấy từ corpus. Bản dịch đổi chữ số, rỗng, thiếu dấu hiệu ngôn ngữ đích hoặc hết ngân sách sinh bị loại và ghi `rejected.jsonl`. Kiểm tra này không bảo đảm đúng ngữ nghĩa, cần xem một số mẫu.
 
@@ -55,19 +57,27 @@ Kết quả cuối phải có `gpu` là RTX 2050, `cuda` khác `null` và `nf4_g
 
 ## 3. Chạy từ đầu đến bài nộp
 
-Xem kế hoạch, chưa tải model/chạy pipeline:
+Mặc định đọc dataset riêng của nhóm trên HF, chọn 60.000 tài liệu tiếng Việt có đúng ID/URL BTC. Đăng nhập một lần bằng `hf auth login` hoặc đặt `HF_TOKEN` có quyền đọc repo. Pipeline chốt commit HF, duyệt tối đa 48 shard theo thứ tự phân tán cố định và **dừng khi đủ 60.000 mẫu**; Parquet được đọc theo range từ xa, không tải nguyên bộ shard xuống đĩa. Nếu chưa đủ mẫu trong 48 shard, tăng `--hf-max-shards` hoặc giảm `--limit` và dùng output mới. Lượt thử này là mẫu có kiểm soát, không phải mẫu ngẫu nhiên đều trên toàn corpus.
+
+Xem kế hoạch, chưa tải model hoặc dữ liệu:
 
 ```powershell
-.\env\Scripts\python.exe scripts/vibiomir.py pipeline --source nguyen/output/runs/batch01_nguyen --limit 60000 --out work/rtx2050_60k --dry-run
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline --source hf --limit 60000 --dry-run
 ```
 
 Chạy thật:
 
 ```powershell
-.\env\Scripts\python.exe scripts/vibiomir.py pipeline --source nguyen/output/runs/batch01_nguyen --limit 60000 --out work/rtx2050_60k
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline --source hf --limit 60000
 ```
 
-`--limit 60000` là **60.000 bản ghi đầu vào**, gồm cả bản ghi lỗi; số tài liệu dùng được thường thấp hơn sau lọc. Đây không phải khoảng ID `1..60000`, vì ID có thể khuyết. Chưa đủ 60k thì pipeline báo số thực tế và dừng; dùng output mới với số lượng thực tế hoặc chờ crawl đủ. Nhiều nguồn: `--source <run1> <run2>`; nguồn trước thắng khi trùng ID.
+Nếu cần mẫu hash trải đều hơn trên **mọi** shard, thêm `--hf-sample-mode hash` và `--out` mới. Chế độ này đọc mọi shard từ xa hai lượt nên tốn mạng và thời gian hơn, nhưng vẫn không lưu bản sao tất cả shard trên đĩa.
+
+```powershell
+.\env\Scripts\python.exe scripts/vibiomir.py pipeline --source hf --limit 60000 --hf-sample-mode hash --out nguyen/pipeline_runs/rtx2050_4b_hash_60k
+```
+
+`--limit 60000` trong nguồn HF là **60.000 bản ghi hợp lệ**, sau bước đối chiếu ID/URL và ngôn ngữ. `prepare` có thể loại thêm template trùng lặp. Đây không phải khoảng ID `1..60000`. Nếu HF chưa có đủ mẫu hợp lệ, snapshot báo số thực tế rồi dừng. Vẫn có thể dùng file local bằng `--source <run hoặc parquet>`; nguồn trước thắng khi trùng ID.
 
 Nếu snapshot chỉ có tiếng Việt, pipeline bỏ dịch Anh/Trung vì chưa có tài liệu đích để tìm. Khi crawl mở rộng sang ngôn ngữ khác, tạo run mới.
 
@@ -90,13 +100,12 @@ Khi snapshot chủ yếu là tài liệu tiếng Trung, ba tham số sau thay đ
 Pilot chọn batch có thông lượng cao nhất trong những batch đã thử trên mẫu; lô dài hơn gây OOM thì encoder/reranker giảm batch và nhớ mức đó. Mỗi lúc chỉ có một model trên GPU. Query encoder được giải phóng trước khi tìm vector trên GPU và nạp reranker. Qwen reranker giữ suffix sau khi cắt input và chỉ tính logits vị trí cuối để giảm bộ nhớ.
 
 ```text
-work/rtx2050_60k/
+nguyen/pipeline_runs/rtx2050_4b_60k/
   corpus/                 snapshot, dropped.jsonl, prepare_manifest.json
   chunks/                 chunks.parquet, chunk_manifest.json
   pilot.json              throughput, batch chọn, peak VRAM, mẫu có nguy cơ bị cắt
   translations/           bản dịch, bản bị loại, SQLite cache, manifest (nếu có)
-  index/bge-m3/           BM25, embedding, checkpoint, manifest
-  index/qwen3-embedding-0.6b/  embedding, checkpoint, manifest
+  index/qwen3-embedding-4b/ BM25, embedding, checkpoint, manifest
   retrieval/              candidates.jsonl, điểm từng model, SQLite cache
   submission/             submission.json, submission.zip, manifest — recall
   submission_balanced/    cùng định dạng — balanced
@@ -104,7 +113,7 @@ work/rtx2050_60k/
   logs/                   log từng bước, ghi nối tiếp khi chạy lại
 ```
 
-**File đem đánh giá lần đầu:** `work/rtx2050_60k/submission/submission.zip`. Bản `submission_balanced/submission.zip` dùng để so sánh; không tự động nộp cả hai. ZIP chứa đúng một JSON ở gốc.
+**File đem đánh giá lần đầu:** `nguyen/pipeline_runs/rtx2050_4b_60k/submission/submission.zip`. Bản `submission_balanced/submission.zip` dùng để so sánh; không tự động nộp cả hai. ZIP chứa đúng một JSON ở gốc. Khi dùng HF, pipeline lấy đúng `query.parquet` và `links_corpus_vi_en_zh.parquet` đã chốt cùng snapshot.
 
 ## 4. Resume và giữ artifact
 
@@ -115,13 +124,13 @@ Chạy lại **đúng lệnh mục 3** khi bị ngắt. Bước hoàn thành ch�
 - Dịch cache từng query/ngôn ngữ với model revision và prompt; bản không qua kiểm tra cũng được lưu để xem lại.
 - Nếu thay nguồn/config/code làm snapshot cũ không còn tương ứng, dùng `--out` mới. Không xóa corpus để ép run cũ đọc lại crawl đang tăng.
 
-Giữ corpus, chunks, index/checkpoint, cache và manifest cùng nhau. Mỗi ma trận embedding khoảng `số_chunk × 1024 × 2 byte`; có hai ma trận, cộng BM25, corpus, cache model và file tạm. Cache Hugging Face mặc định nằm ngoài `work/`; có thể đặt `$env:HF_HOME` sang ổ đủ chỗ trước lần tải đầu tiên. Lần đầu tải nhiều model cần dung lượng và thời gian mạng đáng kể.
+Giữ corpus, chunks, index/checkpoint, cache và manifest cùng nhau. Ma trận embedding 4B có chiều 2560: khoảng `số_chunk × 2560 × 2 byte`, cộng BM25, corpus và file tạm. Với `--source hf`, snapshot và các file BTC nằm trong `nguyen/hf_pipeline/snapshots/`, cache model trong `nguyen/hf_pipeline/hf_home/hub/`, còn các artifact chạy trong `nguyen/pipeline_runs/`. Toàn bộ `nguyen/` đã được `.gitignore` bỏ qua. Lần đầu tải model 4B vẫn cần nhiều GB; đọc Parquet theo range chỉ giảm bản sao dữ liệu corpus.
 
 ## 5. Kiểm tra trước khi nộp
 
 Trong `prepare_manifest.json`: `rows_read = 60000`; xem số giữ lại, lý do loại, domain/ngôn ngữ. Corpus 60k chỉ phủ một phần nguồn BTC; tài liệu đúng chưa crawl sẽ không thể được retrieve.
 
-Trong `pilot.json`: xem tốc độ, VRAM và mẫu vượt `max_length`. Bộ đếm chunk repo khác tokenizer model và tokenizer BTC. Model cắt ở 1024 token gồm cả tiêu đề/prompt/query, nên có thể bỏ đuôi đoạn dài. Nếu bị cắt nhiều, giảm chunk size hoặc tăng max_length sau khi đo lại VRAM; đổi chunk cần index mới.
+Trong `pilot.json`: xem tốc độ, VRAM và mẫu vượt `max_length`. Bộ đếm chunk repo khác tokenizer model và tokenizer BTC. Profile 4B mặc định cắt ở 512 token gồm cả tiêu đề/prompt/query, nên có thể bỏ đuôi đoạn dài. Nếu bị cắt nhiều, giảm chunk size hoặc tăng `--model-max-length` sau khi đo lại VRAM; đổi chunk cần index mới.
 
 Trong `submission/submission_manifest.json`:
 
@@ -135,10 +144,10 @@ Code chặn candidates lệch hash chunk/query, thiếu query khi `--require-com
 ## 6. Đánh giá và chỉnh ngưỡng không chạy lại GPU
 
 ```powershell
-.\env\Scripts\python.exe scripts/vibiomir.py evaluate sheet --candidates work/rtx2050_60k/retrieval/candidates.jsonl --chunks work/rtx2050_60k/chunks/chunks.parquet --out work/rtx2050_60k/eval --limit 50 --per-query 30
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate sheet --candidates nguyen/pipeline_runs/rtx2050_4b_60k/retrieval/candidates.jsonl --chunks nguyen/pipeline_runs/rtx2050_4b_60k/chunks/chunks.parquet --out nguyen/pipeline_runs/rtx2050_4b_60k/eval --limit 50 --per-query 30
 # Đọc label_sheet.html, điền relevant trong label_sheet.jsonl.
-.\env\Scripts\python.exe scripts/vibiomir.py evaluate collect --sheet work/rtx2050_60k/eval/label_sheet.jsonl --out work/rtx2050_60k/eval
-.\env\Scripts\python.exe scripts/vibiomir.py evaluate score --labels work/rtx2050_60k/eval/labels.jsonl --submission work/rtx2050_60k/submission/submission.json --candidates work/rtx2050_60k/retrieval/candidates.jsonl --corpus work/rtx2050_60k/corpus/corpus.parquet --out work/rtx2050_60k/eval/recall
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate collect --sheet nguyen/pipeline_runs/rtx2050_4b_60k/eval/label_sheet.jsonl --out nguyen/pipeline_runs/rtx2050_4b_60k/eval
+.\env\Scripts\python.exe scripts/vibiomir.py evaluate score --labels nguyen/pipeline_runs/rtx2050_4b_60k/eval/labels.jsonl --submission nguyen/pipeline_runs/rtx2050_4b_60k/submission/submission.json --candidates nguyen/pipeline_runs/rtx2050_4b_60k/retrieval/candidates.jsonl --corpus nguyen/pipeline_runs/rtx2050_4b_60k/corpus/corpus.parquet --out nguyen/pipeline_runs/rtx2050_4b_60k/eval/recall
 ```
 
 So sánh bằng cách chạy `score` với `submission_balanced/submission.json` và `--out .../eval/balanced`. Nhãn trong tập ứng viên có thể thiếu tài liệu đúng chưa tìm ra, nên Recall/F2 local chỉ phản ánh nhãn đã có. Không dùng `pseudo` làm bằng chứng chất lượng. Tokenizer LCS local là giả định được ghi trong `schema.py`, điểm chunk có thể khác BTC.
@@ -146,10 +155,10 @@ So sánh bằng cách chạy `score` với `submission_balanced/submission.json`
 Ví dụ tạo bài adaptive từ cùng ứng viên:
 
 ```powershell
-.\env\Scripts\python.exe scripts/vibiomir.py submit --candidates work/rtx2050_60k/retrieval/candidates.jsonl --chunks work/rtx2050_60k/chunks/chunks.parquet --corpus work/rtx2050_60k/corpus/corpus.parquet --queries data/query.parquet --links data/links_corpus.parquet --require-complete --profile recall --adaptive --out work/rtx2050_60k/submission_adaptive
+.\env\Scripts\python.exe scripts/vibiomir.py submit --candidates nguyen/pipeline_runs/rtx2050_4b_60k/retrieval/candidates.jsonl --chunks nguyen/pipeline_runs/rtx2050_4b_60k/chunks/chunks.parquet --corpus nguyen/pipeline_runs/rtx2050_4b_60k/corpus/corpus.parquet --queries data/query.parquet --links data/links_corpus_vi_en_zh.parquet --require-complete --profile recall --adaptive --out nguyen/pipeline_runs/rtx2050_4b_60k/submission_adaptive
 ```
 
-Adaptive có thể cắt mất bằng chứng nên chưa bật mặc định. `model_scores` lưu điểm riêng để phân tích. Muốn so một reranker, chạy `retrieve.py` cùng output và chọn riêng model đó; điểm đã chấm lấy từ SQLite. Sao lưu candidates/manifest trước nếu muốn giữ cả hai cấu hình.
+Adaptive có thể cắt mất bằng chứng nên chưa bật mặc định. `model_scores` lưu điểm riêng để phân tích. Muốn so một reranker, chạy `scripts/vibiomir.py retrieve` vào output riêng và chọn model đó; điểm đã chấm lấy từ SQLite nếu khóa model/query/chunk khớp.
 
 ## 7. Lệnh riêng và sự cố
 
@@ -159,10 +168,10 @@ Adaptive có thể cắt mất bằng chứng nên chưa bật mặc định. `m
 |---|---|
 | CUDA unavailable / CPU-only torch | Làm mục 2 và chạy preflight; không tự chuyển toàn lượt sang CPU |
 | OOM dịch Qwen3-4B batch 1 | Chạy lại pipeline thêm `--translation-model qwen3-1.7b`, vẫn NF4. Nếu lỗi thư viện, sửa bitsandbytes hoặc thử `--translation-model qwen3-0.6b --translation-quantize none`, rồi kiểm tra chất lượng bản dịch |
-| OOM encode/rerank batch >1 | Code tự giảm batch. Nếu batch 1 vẫn lỗi, giải phóng VRAM; giảm max_length/chunk size và đo lại |
-| Đã đo pilot, muốn bỏ qua | `--skip-pilot` dùng batch dự phòng 8 encoder, 4 reranker; không phải batch đã benchmark |
-| Rerank quá lâu | `--rerank-k 100 --keep 100` giảm tối đa 480.000 xuống 240.000 cặp với hai reranker/1.200 query, có thể giảm Recall |
-| Baseline một model | Output mới, thêm `--encoders bge-m3 --rerankers bge-reranker-v2-m3`, có thể thêm `--skip-translation` |
+| OOM encode/rerank batch >1 | Code tự giảm batch. Nếu batch 1 vẫn lỗi, profile 4B không vừa GPU hiện tại; dùng output mới với `--encoders bge-m3 --rerankers bge-reranker-v2-m3 --quantize none` |
+| Đã đo pilot, muốn bỏ qua | `--skip-pilot` dùng batch dự phòng 1 cho model NF4; không có số đo thông lượng/VRAM |
+| Rerank quá lâu | `--rerank-k 100 --keep 100` giảm tối đa 240.000 xuống 120.000 cặp với một reranker/1.200 query, có thể giảm Recall |
+| Baseline model nhỏ | Output mới, thêm `--encoders bge-m3 --rerankers bge-reranker-v2-m3 --quantize none`, có thể thêm `--skip-translation` |
 | Dịch có `rejected` | Xem `translations/rejected.jsonl`; pipeline dùng phần hợp lệ và giữ query gốc |
 | Embedding checkpoint differs | Dùng index/output mới; không ghép model hoặc chunk khác vào checkpoint |
 | Frozen corpus/config changed | Dùng `--out` mới để snapshot mới, giữ run cũ |
@@ -173,7 +182,6 @@ Kiểm thử offline, không tải model:
 
 ```powershell
 .\env\Scripts\python.exe -m unittest discover -s tests -v
-.\env\Scripts\python.exe scripts/test_local_pipeline.py
 ```
 
 Bộ bổ sung kiểm tra resume embedding, tìm vector theo block, suffix Qwen, bản dịch cũ/đổi chữ số, ID ngoài corpus, ngưỡng sau giới hạn chunk/document, CLI đến ZIP và cache/snapshot. Các test này không chứng minh chất lượng model hay thông lượng RTX 2050; pilot và lượt nộp thật cung cấp số đo đó.
