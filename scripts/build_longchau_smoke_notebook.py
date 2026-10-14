@@ -1,5 +1,6 @@
 """Generate a self-contained Kaggle smoke notebook from the main production snapshots."""
 import base64
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ from build_pubmed_efetch_notebook import literals
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
+def main(output=None):
     main_nb = json.loads((ROOT / 'notebooks/crawl_corpus_kaggle_hf_upload.ipynb').read_text(encoding='utf-8'))
     pack = literals(''.join(main_nb['cells'][6]['source']))
     minimal = {'cells': [{'source': []} for _ in range(7)]}
@@ -134,7 +135,12 @@ trước audit/export. PASS tự động chưa phải đánh giá chuyên gia ha
     for cell in cells:
         if cell.cell_type=='code': compile(cell.source,'check_longchau_50.ipynb','exec')
     for index,cell in enumerate(cells): cell.id=f'longchau-smoke-{index}'
-    nbf.write(nb,ROOT/'notebooks/check_longchau_50.ipynb')
+    output = Path(output) if output is not None else ROOT/'notebooks/check_longchau_50.ipynb'
+    output.parent.mkdir(parents=True, exist_ok=True)
+    nbf.write(nb,output)
 
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out', type=Path, help='Output notebook; default is ignored notebooks/check_longchau_50.ipynb')
+    main(parser.parse_args().out)

@@ -21,6 +21,7 @@ __pycache__/
 /runs/
 /notebooks/runs/
 /notebooks/check_pubmed_efetch_100.ipynb
+/notebooks/check_longchau_50.ipynb
 /work/
 /tmp/
 

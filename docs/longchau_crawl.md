@@ -2,7 +2,9 @@
 
 Đã tích hợp vào [notebook corpus chính](../notebooks/crawl_corpus_kaggle_hf_upload.ipynb) và
 [domain samples](../notebooks/crawl_domain_samples.ipynb). Notebook riêng
-[check_longchau_50.ipynb](../notebooks/check_longchau_50.ipynb) thử mẫu phân tầng, không upload HF.
+`check_longchau_50.ipynb` thử mẫu phân tầng, không upload HF. File này nằm ngoài Git;
+tạo local bằng `python scripts/build_longchau_smoke_notebook.py`
+([builder](../scripts/build_longchau_smoke_notebook.py)).
 
 ## Client, parser và checkpoint
 

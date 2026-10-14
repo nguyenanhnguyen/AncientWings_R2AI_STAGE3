@@ -8,6 +8,8 @@ import io
 import json
 from pathlib import Path
 import re
+import subprocess
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -419,7 +421,10 @@ class LongChauTests(unittest.TestCase):
         self.assertEqual(len(session.calls),1)
 
     def test_smoke_kaggle_notebook_runs_self_contained_with_local_source_offline(self):
-        notebook=json.loads((ROOT/'notebooks/check_longchau_50.ipynb').read_text(encoding='utf-8'))
+        notebook_path=self.out/'check_longchau_50.ipynb'
+        subprocess.run([sys.executable,str(ROOT/'scripts/build_longchau_smoke_notebook.py'),
+                        '--out',str(notebook_path)],check=True)
+        notebook=json.loads(notebook_path.read_text(encoding='utf-8'))
         source=self.out/'source.parquet'
         pq.write_table(pa.Table.from_pylist([{'id':777,'url':URL}]),source)
         self.transport([(200,{'Content-Type':'text/html'},article())])
