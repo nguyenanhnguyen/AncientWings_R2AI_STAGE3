@@ -154,7 +154,9 @@ def run(args):
     with Cache(out / 'scores.sqlite') as cache:
         for name in names:
             scorer = load_reranker(name, device=args.device, fp16=not args.fp32,
-                                   max_length=getattr(args, 'rerank_max_length', None))
+                                   max_length=getattr(args, 'rerank_max_length', None),
+                                   revision=(getattr(args, 'reranker_revision', None)
+                                             if name == args.reranker else None))
             info = model_info(scorer)
             reranker_models.append(info)
             progress = Progress(f'rerank {name}')
@@ -260,6 +262,8 @@ def main():
                         help='Chunks summed into a document score.')
     parser.add_argument('--encoder', default=None, help='Default: the one recorded in the index.')
     parser.add_argument('--reranker', default='bge-reranker-v2-m3')
+    parser.add_argument('--reranker-revision', default=None,
+                        help='Pinned Hugging Face commit for the primary reranker.')
     parser.add_argument('--weights', default=None,
                         help='JSON of RRF weights, by channel or family, e.g. \'{"bm25":0.7}\'')
     parser.add_argument('--keyword-variant', action='store_true',

@@ -2,6 +2,7 @@
 
     pipeline    crawl data -> submission.zip, one stage per subprocess (the usual command)
     prepare     crawl runs / parquet -> corpus.parquet
+    hf-snapshot select a pinned Vietnamese corpus subset from the team HF dataset
     chunk       chunk the corpus, preserving source offsets
     index       `bm25`, `dense`, `all`
     translate   query translations with the local LLM
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 STAGES = {
     'pipeline': 'vibiomir.pipeline',
     'prepare': 'vibiomir.corpus.prepare',
+    'hf-snapshot': 'vibiomir.corpus.hf_snapshot',
     'chunk': 'vibiomir.corpus.chunk',
     'index': 'vibiomir.index.build',
     'translate': 'vibiomir.retrieval.translate',
