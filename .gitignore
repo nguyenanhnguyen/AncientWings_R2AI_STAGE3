@@ -6,6 +6,7 @@
 # Codex / project memory
 *_MEMORY.md
 !/docs/references/LEGALQA_CORPUS_MEMORY.md
+/docs/hf_upload_notes.md
 
 # Python environments and generated caches
 .venv/
@@ -22,6 +23,7 @@ __pycache__/
 /notebooks/runs/
 /notebooks/check_pubmed_efetch_100.ipynb
 /notebooks/check_longchau_50.ipynb
+/scripts/check_120ask.py
 /work/
 /tmp/
 
