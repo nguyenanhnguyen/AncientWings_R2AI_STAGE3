@@ -11,6 +11,9 @@ Các số liệu/config dưới đây là kết quả trước v2 ngày 14/10.
 tạo local bằng `python scripts/build_longchau_smoke_notebook.py`
 ([builder](../scripts/build_longchau_smoke_notebook.py)).
 
+Notebook hiện có thêm cell đo 3 nhịp 10 → 7,5 → 5 giây/request, 20 URL/nhịp,
+dừng khi gặp chặn và giữ cooldown. [Cấu hình, báo cáo và giới hạn của phép đo](longchau_rate_check.md).
+
 ## Client, parser và checkpoint
 
 [scripts/longchau.py](../scripts/longchau.py) dùng `curl_cffi.requests.Session(impersonate='chrome')`,
