@@ -128,6 +128,16 @@ def load_longchau(out):
     return module
 
 
+def load_ask120(out):
+    path = Path(out) / 'ask120_snapshot.py'
+    if not path.exists():
+        path = Path(__file__).parent / 'ask120.py'
+    spec = importlib.util.spec_from_file_location('audit_ask120', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def audit_longchau(record, body, parser):
     """Re-extract verified raw with explicit current-page boundaries, then compare full text."""
     if record.get('status') != 'extracted':
@@ -191,6 +201,7 @@ def main():
     cases = []
     source_views = {}
     longchau_parser = None
+    ask120_parser = None
     for r in records:
         case = {'id': r['id'], 'url': r['url'], 'quality_status': r.get('quality_status'), 'flags': []}
         if 'text' in r and sha(r['text'].encode()) != r['text_sha256']:
@@ -203,6 +214,20 @@ def main():
                 raise ValueError(f"Raw hash mismatch: {r['id']}")
             if r.get('engine') == 'efetch':
                 source_views[r['id']], details = audit_pubmed_xml(r, body)
+                case.update(details)
+            elif (urlsplit(r['url']).hostname or '').lower() in ('120ask.com', 'www.120ask.com') \
+                    and re.fullmatch(r'/question/[0-9]+\.htm', urlsplit(r['url']).path):
+                if ask120_parser is None:
+                    ask120_parser = load_ask120(out)
+                if r.get('extractor') != ask120_parser.EXTRACTOR:
+                    if r.get('quality_status') == 'accepted':
+                        raise ValueError(f"Legacy 120ask extraction: {r['id']}; use a new run and recovery.")
+                    source_views[r['id']] = '(Legacy 120ask record; re-extract raw in a recovery run.)'
+                    details = {'ask120_legacy_extraction': True}
+                else:
+                    details = ask120_parser.audit(
+                        body, r.get('final_url') or r['url'], r, r.get('content_type') or '')
+                    source_views[r['id']] = r.get('ask120_text_raw', '')
                 case.update(details)
             elif (urlsplit(r['url']).hostname or '').lower() in (
                     'nhathuoclongchau.com.vn', 'www.nhathuoclongchau.com.vn'):
@@ -257,6 +282,11 @@ def main():
                'longchau_raw_records_verified': sum(c.get('longchau_raw_reextraction_verified', False) for c in cases),
                'longchau_medical_blocks_verified': sum(c.get('longchau_medical_blocks_verified', 0) for c in cases),
                'longchau_medical_headings_verified': sum(c.get('longchau_medical_headings_verified', 0) for c in cases),
+               'ask120_raw_records_verified': sum(c.get('ask120_raw_reextraction_verified', False) for c in cases),
+               'ask120_main_answers_verified': sum(c.get('ask120_main_answers_verified', 0) for c in cases),
+               'ask120_followups_verified': sum(c.get('ask120_followups_verified', 0) for c in cases),
+               'ask120_orphan_followups': sum(c.get('ask120_orphan_followups', 0) for c in cases),
+               'ask120_unknown_followup_roles': sum(c.get('ask120_unknown_followup_roles', 0) for c in cases),
                'scope': 'Automated raw/DOM diagnostics; not expert gold extraction quality.',
                'human_review_completed': 0}
     (out / 'audit_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')

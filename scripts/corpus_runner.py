@@ -8,10 +8,12 @@ import json
 import math
 from pathlib import Path
 import sys
+from urllib.parse import urlsplit
 
 VERSION = 'corpus-runner-v8'
 DEFAULTS = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    'requests_trust_env': True,
     'delay': 1., 'attempts': 3, 'timeout': [20., 45.], 'budget': 180.,
     'respect_robots': False,
     'robots_options': {'robots_attempts': 3, 'robots_connect_timeout': 15.,
@@ -151,6 +153,8 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         raise ValueError('Unknown browser_mode.')
     if type(config['respect_robots']) is not bool:
         raise ValueError('respect_robots must be bool.')
+    if type(config['requests_trust_env']) is not bool:
+        raise ValueError('requests_trust_env must be bool.')
     if type(config['pubmed_selenium_first']) is not bool:
         raise ValueError('pubmed_selenium_first must be bool.')
     if type(config['pubmed_use_efetch']) is not bool:
@@ -183,6 +187,18 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                 'runner_sha256': crawler.file_hash(__file__),
                 'crawler_sha256': crawler.file_hash(crawler.__file__),
                 'probe_sha256': crawler.file_hash(probe.__file__)}
+    has_ask120 = any(
+        (urlsplit(sample['url']).hostname or '').lower() in ('120ask.com', 'www.120ask.com')
+        and urlsplit(sample['url']).path.startswith('/question/')
+        and urlsplit(sample['url']).path.endswith('.htm')
+        and urlsplit(sample['url']).path[len('/question/'):-len('.htm')].isdigit()
+        for sample in samples
+    )
+    if has_ask120:
+        ask120_path = Path(crawler.__file__).parent / 'ask120_snapshot.py'
+        if not ask120_path.exists():
+            raise ValueError('Missing 120ask parser snapshot.')
+        identity['ask120_sha256'] = crawler.file_hash(ask120_path)
     if efetch:
         identity['pubmed_efetch_sha256'] = crawler.file_hash(efetch.__file__)
     if longchau:
@@ -197,6 +213,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         crawler.write_json(config_path, identity)
         crawler.UA = config['user_agent']
         crawler.ROBOT_AGENT = config['user_agent'].split('/', 1)[0]
+        crawler.TRUST_ENV = config['requests_trust_env']
         page_samples = [s for s in samples if not efetch or crawler.host(s['url']) != 'pubmed.ncbi.nlm.nih.gov']
         if recovery_source:
             probe.seed_successful_requests(crawler, out, page_samples, recovery_source, record_dir='requests_records')
