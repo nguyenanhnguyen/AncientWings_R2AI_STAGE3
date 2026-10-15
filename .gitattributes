@@ -6,3 +6,4 @@
 /scripts/corpus_checkpoint.py text eol=lf
 /scripts/corpus_runner.py text eol=lf
 /scripts/corpus_diagnostics.py text eol=lf
+/scripts/longchau_rate_check.py text eol=lf

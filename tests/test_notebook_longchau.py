@@ -429,10 +429,11 @@ class LongChauTests(unittest.TestCase):
         pq.write_table(pa.Table.from_pylist([{'id':777,'url':URL}]),source)
         self.transport([(200,{'Content-Type':'text/html'},article())])
         env={}
-        # Execute the real notebook, skipping pip only; the transport is a documented offline mock.
+        # Execute the smoke cells; pip/rate check are covered separately. Transport is an offline mock.
         exec(compile(''.join(notebook['cells'][1]['source']),'<smoke-config>','exec'),env)
         env.update(WORKDIR=self.out,RUN_DIR=self.out/'smoke',SOURCE_PARQUET=str(source),LIMIT=1)
-        for index in (3,4,5):
+        main_index=next(i for i,c in enumerate(notebook['cells']) if 'smoke.run(SOURCE_PATH' in ''.join(c['source']))
+        for index in (3,4,main_index):
             exec(compile(''.join(notebook['cells'][index]['source']),f'<smoke-{index}>','exec'),env)
         exported=pq.read_table(env['RUN_DIR']/'corpus.parquet').to_pylist()
         self.assertEqual(exported[0]['id'],777)
