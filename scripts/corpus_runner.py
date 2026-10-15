@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 import sys
 
-VERSION = 'corpus-runner-v7'
+VERSION = 'corpus-runner-v8'
 DEFAULTS = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     'delay': 1., 'attempts': 3, 'timeout': [20., 45.], 'budget': 180.,
@@ -22,6 +22,7 @@ DEFAULTS = {
     'pubmed_efetch': {'batch_size': 100, 'workers': 1, 'gap_seconds': .5, 'attempts': 5,
                       'timeout': [10., 90.], 'budget': 300.},
     'longchau_use_curl': True,
+    'vov_use_curl': True,
     'longchau': {'workers': 1, 'delay': 5., 'attempts': 3, 'timeout': [10., 45.], 'budget': 180.,
                  'impersonate': 'chrome', 'retry_failed_on_resume': True},
     'browser_load_timeout': 45., 'browser_wait_seconds': 15., 'browser_attempts': 2,
@@ -114,7 +115,8 @@ def write_access_report(crawler, probe, out, samples):
                'browser_primary': sum(r['engine'] == 'selenium' and r['access_status'] == 'VAO_DUOC'
                                       and r.get('browser_route') == 'selenium_first' for r in rows),
                'pubmed_efetch': sum(r['engine'] == 'efetch' for r in rows),
-               'longchau_curl': sum(r['engine'] == 'curl_cffi' for r in rows),
+               'longchau_curl': sum(r['engine'] == 'curl_cffi' and r['domain'] in ('nhathuoclongchau.com.vn','www.nhathuoclongchau.com.vn') for r in rows),
+               'vov_curl': sum(r['engine'] == 'curl_cffi' and probe.is_vov(r['url']) for r in rows),
                'failed': sum(len(group) for group in errors.values()), 'failed_domains': len(priorities)}
     crawler.write_json(out / 'access_summary.json', summary)
     crawler.write_json(out / 'uu_tien_fix_domain.json', priorities)
@@ -155,6 +157,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         raise ValueError('pubmed_use_efetch must be bool.')
     if type(config['longchau_use_curl']) is not bool:
         raise ValueError('longchau_use_curl must be bool.')
+    if type(config['vov_use_curl']) is not bool: raise ValueError('vov_use_curl must be bool.')
     longchau = None
     if config['longchau_use_curl']:
         root = Path(__file__).parent
@@ -215,7 +218,11 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         if longchau and config['longchau']['retry_failed_on_resume']:
             planned.update(s['id'] for s in samples if longchau.is_host(s['url'])
                            and previous[s['id']] is not None and previous[s['id']].get('status') != 'extracted')
-        browser_pages = [s for s in page_samples if not longchau or not longchau.is_host(s['url'])]
+        if config['vov_use_curl']:
+            planned.update(s['id'] for s in samples if probe.is_vov(s['url'])
+                           and previous[s['id']] is not None and previous[s['id']].get('status') != 'extracted')
+        browser_pages = [s for s in page_samples if (not longchau or not longchau.is_host(s['url']))
+                         and (not config['vov_use_curl'] or not probe.is_vov(s['url']))]
         browser_records = [previous[s['id']] for s in browser_pages if previous[s['id']] is not None]
         browser_pending = probe.select_browser_samples(browser_pages, browser_records, config['browser_mode'])
         planned.update(s['id'] for s in browser_pending if not (out/'browser_records'/f"{s['id']}.json").exists())
@@ -268,7 +275,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                         on_record=publish_request, log_every=log_every)
                     if remaining_limit is not None: remaining_limit -= longchau_new
                 page_samples = [s for s in page_samples if not longchau.is_host(s['url'])]
-            if page_samples and config['browser_mode'] != 'off':
+            if any(not config['vov_use_curl'] or not probe.is_vov(s['url']) for s in page_samples) and config['browser_mode'] != 'off':
                 probe.browser_preflight(crawler, out, user_agent=config['browser_user_agent'],
                                         chrome_binary=config['chrome_binary'],
                                         load_timeout=config['browser_load_timeout'])
@@ -299,10 +306,12 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     crawler, out, request_samples, workers=workers, delay=config['delay'], attempts=config['attempts'],
                     user_agent=config['user_agent'], timeout=config['timeout'], budget=config['budget'],
                     max_new=request_limit, respect_robots=config['respect_robots'], robots_options=config['robots_options'],
-                    record_dir='requests_records', on_record=publish_request, lock_run=False, log_every=log_every)
+                    record_dir='requests_records', on_record=publish_request, lock_run=False, log_every=log_every,
+                    vov_use_curl=config['vov_use_curl'])
             records = [read_record(crawler, out, 'requests_records', s) for s in request_samples]
             records = [r for r in records if r is not None]
             browser_samples = probe.select_browser_samples(request_samples, records, config['browser_mode'])
+            if config['vov_use_curl']: browser_samples = [s for s in browser_samples if not probe.is_vov(s['url'])]
             if config['respect_robots']:
                 allowed = {r['id'] for r in records if not r.get('status', '').startswith('robots_')
                            and r.get('status') not in ('invalid_url', 'unsafe_address')}

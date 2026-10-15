@@ -65,7 +65,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=self.render) as browser, \
                 redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out,
-                                      {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False, **(config or {})}, workers=1, max_new=max_new)
+                                      {'attempts': 1, 'delay': 0, 'vov_use_curl': False, 'pubmed_use_efetch': False, **(config or {})}, workers=1, max_new=max_new)
         return summary, transport, browser
 
     def test_mixed_batch_uses_pubmed_selenium_before_other_domain_requests(self):
@@ -107,7 +107,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_attempt', side_effect=KeyboardInterrupt), \
                 redirect_stdout(io.StringIO()):
             with self.assertRaises(KeyboardInterrupt):
-                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False}, workers=1)
+                self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0, 'vov_use_curl': False, 'pubmed_use_efetch': False}, workers=1)
         transport.assert_not_called()
         self.assertEqual(self.crawler.load_json(self.out / 'quality_report.json')['pending'], 2)
         self.assertEqual(list((self.out / 'records').glob('*.json')), [])
@@ -180,7 +180,7 @@ class PubMedSeleniumFirstTests(unittest.TestCase):
         (self.out / 'network_check.json').write_text('{}')
         namespace = dict(config, RUN_DIR=self.out, crawler=self.crawler, priority_probe=self.probe,
                          longchau=self.crawler.longchau_module(),
-                         IP_CHECK_ENABLED=False,
+                         IP_CHECK_ENABLED=False, VOV_USE_CURL=False,
                          DIRECT_PUBLIC_PROBE=True, SAMPLES=samples, NETWORK_CHECK_DOMAINS=[],
                          save_outputs=lambda: ([], {}, self.out / 'test.zip'))
         with patch.object(self.crawler.Fetcher, 'request_once', side_effect=self.request), \

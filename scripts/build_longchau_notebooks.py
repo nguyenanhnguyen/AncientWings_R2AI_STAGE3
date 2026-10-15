@@ -64,6 +64,8 @@ def main():
             "        default_tag = previous_tag if (WORKDIR / 'runs' / previous_tag).exists() else (source_tag if (WORKDIR / 'runs' / source_tag).exists() else f'ids_{ID_FROM}_{ID_TO}_synced')")
     put(2, config)
     config = replace_literals(get(2), {'LONGCHAU_DELAY': 5.0})
+    if 'VOV_USE_CURL =' not in config:
+        config = config.replace('LONGCHAU_USE_CURL =', 'VOV_USE_CURL = True  # vov.vn và các subdomain dùng curl/Chrome\nLONGCHAU_USE_CURL =', 1)
     config = config.replace("('_longchau' if LONGCHAU_USE_CURL else '')", "('_longchau_v2' if LONGCHAU_USE_CURL else '')")
     put(2, config)
     crawl = get(12)
@@ -76,6 +78,8 @@ def main():
             "                          'budget': LONGCHAU_REQUEST_BUDGET, 'impersonate': 'chrome',\n"
             "                          'retry_failed_on_resume': LONGCHAU_RETRY_FAILED_ON_RESUME},")
     put(12, crawl)
+    if "'vov_use_curl':" not in get(12):
+        put(12, get(12).replace("'longchau_use_curl': LONGCHAU_USE_CURL,", "'longchau_use_curl': LONGCHAU_USE_CURL,\n            'vov_use_curl': VOV_USE_CURL,", 1))
     deps = get(4)
     if "'curl_cffi'" not in deps:
         deps = deps.replace("'pymupdf', 'tld']", "'pymupdf', 'tld', 'curl_cffi']")
@@ -127,12 +131,34 @@ for name, encoded in EMBEDDED_FILES.items():''', 1)
         setup = setup.replace('if name in POSTPROCESS_FILES or (not target.exists() and not POSTPROCESS_ONLY):',
             "if name in POSTPROCESS_FILES or (name == 'longchau_snapshot.py' and POSTPROCESS_ONLY and HAS_LONGCHAU_SAMPLE) or (not target.exists() and not POSTPROCESS_ONLY):",1)
     put(6,setup)
+    if 'HAS_VOV_SAMPLE =' not in get(6):
+        guard = '''HAS_VOV_SAMPLE = False
+if (RUN_DIR / 'sample.jsonl').exists():
+    from urllib.parse import urlsplit
+    with (RUN_DIR / 'sample.jsonl').open(encoding='utf-8') as stream:
+        HAS_VOV_SAMPLE = any((urlsplit(json.loads(line)['url']).hostname or '').lower() == 'vov.vn'
+            or (urlsplit(json.loads(line)['url']).hostname or '').lower().endswith('.vov.vn')
+            for line in stream if line.strip())
+if not POSTPROCESS_ONLY and HAS_VOV_SAMPLE and VOV_USE_CURL and (RUN_DIR / 'corpus_config.json').exists():
+    saved_vov_runtime = json.loads((RUN_DIR / 'corpus_config.json').read_text(encoding='utf-8'))
+    for name,key in (('priority_probe_snapshot.py','probe_sha256'),('corpus_runner_snapshot.py','runner_sha256')):
+        if saved_vov_runtime.get(key) != EMBEDDED_SHA256[name]:
+            raise ValueError('Run VOV cũ cần RUN_TAG mới + RECOVERY_RUN_PATH để chuyển sang curl/Chrome; giữ raw/records/cooldown.')
+
+'''
+        put(6,get(6).replace('HAS_LONGCHAU_SAMPLE = False',guard+'HAS_LONGCHAU_SAMPLE = False',1))
+    put(6,get(6).replace('not POSTPROCESS_ONLY and VOV_USE_CURL and HAS_VOV_SAMPLE',
+                         'not POSTPROCESS_ONLY and HAS_VOV_SAMPLE and VOV_USE_CURL'))
     note = '\n\nLong Châu mặc định dùng `curl_cffi`/Chrome, 1 worker, delay 5 giây; không chạy Selenium cho domain này. '
     note += 'Parser giữ sapo/nội dung chính; `/benh/` lấy đầy đủ các trường HTML y khoa từ JSON đã xác minh slug/canonical. '
     note += 'Xem `longchau_results.csv`, `longchau_summary.json`; parser v2 loại nhóm liên kết “Xem thêm”. '
     note += 'Run mới có hậu tố `_longchau_v2`; dùng recovery từ ZIP đầy đủ để tái trích HTML 200 cũ, giữ cooldown. '
     note += 'Checkpoint thuộc runner chung: lưu theo cadence cho mọi engine và khi dừng/ngắt; log có tiến độ chung theo ID.\n'
     if 'Long Châu mặc định dùng' not in get(11): put(11, get(11).rstrip() + note)
+    vov_note = '\n\nVOV (`vov.vn`, `vov2.vov.vn` và subdomain) mặc định dùng `curl_cffi` với `impersonate="chrome"`, một request VOV tại một thời điểm. Giữ parser hiện có, timeout/budget/robots, raw và ID/URL. Không chạy Selenium cho URL VOV khi `VOV_USE_CURL=True`; 429 dừng nhóm VOV và lưu `vov_request_gate.json` qua resume/recovery. Run VOV cũ dùng RUN_TAG mới + RECOVERY_RUN_PATH.\n'
+    if 'VOV (`vov.vn`' not in get(11): put(11,get(11).rstrip()+vov_note)
+    put(11,get(11).replace('Các domain khác dùng Requests rồi Selenium',
+                           'Các website ngoài PubMed, Long Châu và VOV dùng Requests rồi Selenium'))
     # build_corpus rewrites cell 11, so this note is always derived from the current parser.
     write(nb, path)
     update_domain(updates)
@@ -180,6 +206,7 @@ def update_domain(updates):
     if 'LONGCHAU_USE_CURL =' not in config:
         config += "\nLONGCHAU_USE_CURL = True\nLONGCHAU_CONFIG = {'workers': 1, 'delay': 1.75, 'attempts': 3, 'timeout': [10., 45.], 'budget': 180., 'impersonate': 'chrome', 'retry_failed_on_resume': True}\n"
     put(3, config)
+    if 'VOV_USE_CURL =' not in get(3): put(3,get(3)+'\nVOV_USE_CURL = True\n')
     domain_config = literals(get(3))['LONGCHAU_CONFIG']
     put(3, replace_literals(get(3), {'LONGCHAU_CONFIG': dict(domain_config,delay=5.0)}))
     deps = get(5)
@@ -213,6 +240,7 @@ longchau_spec.loader.exec_module(longchau)
     note += 'Mặc định retry checkpoint lỗi Long Châu khi resume; kết quả trích hợp lệ giữ nguyên. '
     note += 'Báo cáo engine ghi `curl_cffi`; IP đo qua Requests/Chrome là phép đo riêng, chưa xác nhận IP curl.\n'
     if 'Long Châu dùng `curl_cffi`' not in get(10): put(10, get(10).rstrip() + note)
+    if 'VOV dùng `curl_cffi`' not in get(10): put(10,get(10).rstrip()+'\n\nVOV dùng `curl_cffi` với `impersonate="chrome"` cho `vov.vn` và các subdomain, cùng route với corpus chính; không gọi Selenium cho URL VOV khi VOV_USE_CURL=True. Giữ cooldown qua resume/recovery.\n')
     put(10,get(10).replace('delay 1,75 giây, cùng parser với corpus chính', 'delay 5 giây, cùng parser v2 với corpus chính'))
     put(11, '''import argparse
 import os
@@ -241,7 +269,7 @@ try:
             user_agent=USER_AGENT, respect_robots=not DIRECT_PUBLIC_PROBE, record_dir='records',
             robots_options=robots_options, max_new=MAX_NEW, log_every=LOG_EVERY) if longchau_samples else 0
         remaining_limit = None if MAX_NEW is None else MAX_NEW - longchau_new
-        if DIRECT_PUBLIC_PROBE and BROWSER_TEST_MODE != 'off' and remaining_samples:
+        if DIRECT_PUBLIC_PROBE and BROWSER_TEST_MODE != 'off' and any(not VOV_USE_CURL or not priority_probe.is_vov(s['url']) for s in remaining_samples):
             priority_probe.browser_preflight(crawler, RUN_DIR, user_agent=BROWSER_USER_AGENT,
                                              chrome_binary=CHROME_BINARY, load_timeout=BROWSER_LOAD_TIMEOUT)
         primary_enabled = DIRECT_PUBLIC_PROBE and PUBMED_SELENIUM_FIRST and BROWSER_TEST_MODE != 'off'
@@ -265,10 +293,11 @@ try:
                 attempts=PAGE_ATTEMPTS, user_agent=USER_AGENT, respect_robots=not DIRECT_PUBLIC_PROBE,
                 robots_options=robots_options, record_dir='records', lock_run=False,
                 timeout=(PAGE_CONNECT_TIMEOUT, PAGE_READ_TIMEOUT), budget=PAGE_REQUEST_BUDGET,
-                max_new=request_limit, log_every=LOG_EVERY)
+                max_new=request_limit, log_every=LOG_EVERY, vov_use_curl=VOV_USE_CURL)
         records = [crawler.load_json(RUN_DIR / 'records' / f"{s['id']}.json") for s in request_samples
                    if (RUN_DIR / 'records' / f"{s['id']}.json").exists()]
         browser_samples = priority_probe.select_browser_samples(request_samples, records, BROWSER_TEST_MODE) if DIRECT_PUBLIC_PROBE else []
+        if VOV_USE_CURL: browser_samples = [s for s in browser_samples if not priority_probe.is_vov(s['url'])]
         if not DIRECT_PUBLIC_PROBE:
             allowed = {r['id'] for r in records if not r.get('status','').startswith('robots_')
                        and r.get('status') not in ('invalid_url','unsafe_address')}

@@ -261,7 +261,7 @@ Hoàn tất: {len(records)}/{len(sample)}; còn chờ: {len(pending)}.
                     bundle.write(path, 'robots/' + path.name)
             for name in ('manifest.json', 'crawl_config.json', 'source_profile.json', 'quality_report.json',
                          'QUALITY_REPORT.md', 'audit_summary.json', 'AUDIT_REPORT.md', 'notebook_manifest.json',
-                         'notebook_requirements.txt', 'export_manifest.json', 'postprocess_status.json', 'pubmed_efetch_summary.json', 'longchau_summary.json', 'longchau_results.csv', 'longchau_results.jsonl', 'longchau_config.json', 'longchau_request_gate.json', 'longchau_selection.json'):
+                         'notebook_requirements.txt', 'export_manifest.json', 'postprocess_status.json', 'pubmed_efetch_summary.json', 'longchau_summary.json', 'longchau_results.csv', 'longchau_results.jsonl', 'longchau_config.json', 'longchau_request_gate.json', 'longchau_selection.json', 'vov_request_gate.json'):
                 path = out / name
                 if path.is_file():
                     bundle.write(path, 'metadata/' + name)

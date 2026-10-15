@@ -103,7 +103,7 @@ class PubMedEFetchTests(unittest.TestCase):
                 patch.object(self.probe, 'browser_preflight') as preflight, \
                 patch.object(self.probe, 'crawl_browser') as browser, redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out,
-                                      {'attempts': 1, 'delay': 0, 'pubmed_efetch': {'attempts': 1}, **(config or {})},
+                                      {'attempts': 1, 'delay': 0, 'vov_use_curl': False, 'pubmed_efetch': {'attempts': 1}, **(config or {})},
                                       workers=4, max_new=max_new)
         return summary, page, preflight, browser
 

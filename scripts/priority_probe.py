@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 import ctypes
+from email.utils import parsedate_to_datetime
 import gzip
 import json
 import math
@@ -13,15 +14,90 @@ import subprocess
 import sys
 import time
 import threading
-from urllib.parse import urljoin, urldefrag
+from urllib.parse import urljoin, urldefrag, urlsplit
 from collections import Counter, defaultdict
 
-VERSION = 'priority-probe-v9'
+VERSION = 'priority-probe-v10'
 HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Upgrade-Insecure-Requests': '1',
 }
+
+
+def is_vov(url):
+    host = (urlsplit(url).hostname or '').lower()
+    return host == 'vov.vn' or host.endswith('.vov.vn')
+
+
+def make_vov_fetcher(crawler, out, *, delay, attempts, robots_options=None):
+    """One Chrome-profile curl session for the serialized VOV domain job."""
+    from curl_cffi import requests as curl_requests
+
+    class CurlFetcher(crawler.Fetcher):
+        uses_browser_fingerprint = True
+        impersonate = 'chrome'
+        stop_on_rate_limit = True
+
+        def __init__(self):
+            super().__init__(out, delay=delay, attempts=attempts, **(robots_options or {}))
+            self.gate_path = Path(out) / 'vov_request_gate.json'
+            saved = crawler.load_json(self.gate_path).get('not_before', 0.) if self.gate_path.exists() else 0.
+            if not isinstance(saved, (int, float)) or not math.isfinite(saved) or saved < 0:
+                raise ValueError('Invalid VOV cooldown gate.')
+            self.next_at['vov.vn'] = time.monotonic() + max(0., saved - time.time())
+            self.curl_session = curl_requests.Session(impersonate='chrome', verify=True)
+
+        def session(self): return self.curl_session
+        def close(self): self.curl_session.close()
+
+        def request_once(self, url, limit, delay=None, *, timeout=None, deadline=None):
+            self.validate(url)
+            site = crawler.get_fld(url, fail_silently=True) or crawler.host(url)
+            wait = max(0., max(self.next_at.get(site, 0.), self.next_at.get('vov.vn', 0.)) - time.monotonic())
+            if deadline is not None and wait >= deadline - time.monotonic():
+                raise crawler.CrawlError('response_deadline', 'VOV cooldown exceeds request budget; resume later.')
+            time.sleep(wait)
+            pause, chunks, size, callback_error = max(self.delay, delay or 0.), [], 0, None
+            def callback(chunk):
+                nonlocal size, callback_error
+                size += len(chunk)
+                if size > limit:
+                    callback_error = crawler.CrawlError('oversized', f'More than {limit} decompressed bytes')
+                    return 0
+                if deadline is not None and time.monotonic() >= deadline:
+                    callback_error = crawler.CrawlError('response_deadline')
+                    return 0
+                chunks.append(chunk)
+                return len(chunk)
+            try:
+                request_timeout = timeout or (20., 45.)
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0: raise crawler.CrawlError('response_deadline')
+                    request_timeout = tuple(min(v, remaining / 2) for v in request_timeout)
+                response = self.curl_session.get(url, allow_redirects=False, timeout=tuple(request_timeout), content_callback=callback)
+                if callback_error: raise callback_error
+                headers = crawler.requests.structures.CaseInsensitiveDict(response.headers)
+                if response.status_code in (408, 429) or 500 <= response.status_code < 600:
+                    try: cooldown = float(headers.get('Retry-After', '0'))
+                    except ValueError:
+                        try: cooldown = parsedate_to_datetime(headers.get('Retry-After', '')).timestamp() - time.time()
+                        except (ValueError, TypeError, OverflowError): cooldown = 0.
+                    if math.isfinite(cooldown): pause = max(pause, cooldown)
+                return response.status_code, headers, b''.join(chunks)
+            except curl_requests.exceptions.RequestException as exc:
+                if callback_error: raise callback_error from exc
+                if isinstance(exc, curl_requests.exceptions.SSLError):
+                    raise crawler.requests.exceptions.SSLError(str(exc)) from exc
+                if isinstance(exc, curl_requests.exceptions.Timeout):
+                    raise crawler.requests.exceptions.Timeout(str(exc)) from exc
+                raise crawler.requests.exceptions.ConnectionError(str(exc)) from exc
+            finally:
+                self.next_at[site] = self.next_at['vov.vn'] = time.monotonic() + pause
+                crawler.write_json(self.gate_path, {'not_before': time.time() + pause})
+
+    return CurlFetcher()
 
 
 def network_error_kind(crawler, exc):
@@ -107,6 +183,7 @@ def request_record(crawler, fetcher, sample, out, user_agent, timeout, budget, *
                   engine='curl_cffi' if getattr(fetcher, 'uses_browser_fingerprint', False) else 'requests',
                   request_mode='robots_enforced' if respect_robots else 'direct_public_page_probe',
                   robots={'mode': 'pending' if respect_robots else 'not_used_to_gate_access_probe'})
+    if getattr(fetcher, 'impersonate', None): record['impersonate'] = fetcher.impersonate
     current = sample['url']
     session = fetcher.session()
     if not getattr(fetcher, 'uses_browser_fingerprint', False):
@@ -156,7 +233,9 @@ def request_record(crawler, fetcher, sample, out, user_agent, timeout, budget, *
                 crawler.atomic_bytes(Path(out) / raw_path, gzip.compress(body, mtime=0))
                 event.update(raw_path=raw_path.as_posix(), raw_sha256=crawler.digest(body))
                 event['retryable'] = status in (408, 429) or 500 <= status < 600
-                if event['retryable'] and attempt < fetcher.attempts:
+                stop_rate_limit = status == 429 and getattr(fetcher, 'stop_on_rate_limit', False)
+                if stop_rate_limit: record['retry_deferred'] = 'VOV HTTP 429; keep cooldown and resume later.'
+                if event['retryable'] and not stop_rate_limit and attempt < fetcher.attempts:
                     if wait_for_retry(crawler, fetcher, event, deadline, attempt):
                         continue
                     record['retry_deferred'] = event['retry_deferred']
@@ -213,6 +292,14 @@ def seed_successful_requests(crawler, out, samples, source, *, record_dir='recor
             if not isinstance(not_before,(int,float)) or not math.isfinite(not_before):
                 raise ValueError('Invalid Long Chau recovery cooldown.')
             current = crawler.load_json(target_gate).get('not_before',0.) if target_gate.exists() else 0.
+            crawler.write_json(target_gate, {'not_before': max(current,not_before)})
+    if any(is_vov(s['url']) for s in samples):
+        source_gate, target_gate = source/'vov_request_gate.json', out/'vov_request_gate.json'
+        if source_gate.exists():
+            not_before = crawler.load_json(source_gate).get('not_before', 0.)
+            current = crawler.load_json(target_gate).get('not_before', 0.) if target_gate.exists() else 0.
+            if any(not isinstance(v,(int,float)) or not math.isfinite(v) or v < 0 for v in (not_before,current)):
+                raise ValueError('Invalid VOV recovery cooldown.')
             crawler.write_json(target_gate, {'not_before': max(current,not_before)})
     if marker.exists():
         saved = crawler.load_json(marker)
@@ -346,7 +433,8 @@ class CrawlProgress:
 
 def crawl_requests(crawler, out, samples, *, workers=5, delay=1., attempts=3, user_agent,
                    timeout=(20., 45.), budget=180., max_new=None, respect_robots=False,
-                   robots_options=None, record_dir='records', on_record=None, lock_run=True, log_every=300):
+                   robots_options=None, record_dir='records', on_record=None, lock_run=True, log_every=300,
+                   vov_use_curl=True):
     out = Path(out)
     if any(type(v) is not int or v < 1 for v in (workers, attempts)):
         raise ValueError('Workers and attempts must be positive integers.')
@@ -359,13 +447,14 @@ def crawl_requests(crawler, out, samples, *, workers=5, delay=1., attempts=3, us
         raise ValueError('Delay must be finite and non-negative.')
     if max_new is not None and (type(max_new) is not int or max_new < 1):
         raise ValueError('max_new must be a positive integer or None.')
+    if type(vov_use_curl) is not bool: raise ValueError('vov_use_curl must be bool.')
     fetcher = crawler.Fetcher(out, delay=delay, attempts=attempts, **(robots_options or {}))
     identity = {'version': VERSION, 'script_sha256': crawler.file_hash(__file__),
                 'crawler_sha256': crawler.file_hash(crawler.__file__), 'user_agent': user_agent,
                 'headers': HEADERS, 'request_mode': 'robots_enforced' if respect_robots else 'direct_public_page_probe',
                 'robots_options': fetcher.robots_config if respect_robots else None, 'record_dir': record_dir,
                 'timeout': list(timeout), 'budget': budget, 'attempts': attempts, 'delay': delay,
-                'python': sys.version, 'platform': sys.platform}
+                'python': sys.version, 'platform': sys.platform, 'vov_use_curl': vov_use_curl}
     if (out / 'priority_probe_config.json').exists() and crawler.load_json(out / 'priority_probe_config.json') != identity:
         raise ValueError('Priority probe config changed; use a new run directory.')
     crawler.write_json(out / 'priority_probe_config.json', identity)
@@ -376,11 +465,13 @@ def crawl_requests(crawler, out, samples, *, workers=5, delay=1., attempts=3, us
             record = crawler.load_json(path)
             if (record['id'], record['url']) != (sample['id'], sample['url']):
                 raise ValueError('Checkpoint ID/URL mismatch.')
+            if vov_use_curl and is_vov(sample['url']) and record.get('status') != 'extracted': pending.append(sample)
         else:
             pending.append(sample)
     if max_new is not None:
         pending = pending[:max_new]
-    progress = CrawlProgress('requests', len(pending), log_every)
+    curl_count = sum(vov_use_curl and is_vov(s['url']) for s in pending)
+    progress = CrawlProgress('curl_cffi' if curl_count and curl_count == len(pending) else 'http' if curl_count else 'requests', len(pending), log_every)
     groups = defaultdict(list)
     for sample in pending:
         site = crawler.get_fld(sample['url'], fail_silently=True) or sample['domain']
@@ -389,15 +480,24 @@ def crawl_requests(crawler, out, samples, *, workers=5, delay=1., attempts=3, us
     def domain_job(group):
         # One active sample per registered domain: its budget is not spent queued behind its siblings.
         completed = 0
-        for sample in group:
-            if stop.is_set():
-                break
-            row = request_record(crawler, fetcher, sample, out, user_agent, timeout, budget,
-                                 respect_robots=respect_robots, record_dir=record_dir)
-            if on_record:
-                on_record(row)
-            progress.record(row)
-            completed += 1
+        use_curl = vov_use_curl and any(is_vov(s['url']) for s in group)
+        active = make_vov_fetcher(crawler, out, delay=delay, attempts=attempts, robots_options=robots_options) if use_curl else fetcher
+        try:
+            for sample in group:
+                if stop.is_set(): break
+                path = out / record_dir / f"{sample['id']}.json"
+                if use_curl and path.exists():
+                    old = path.read_bytes()
+                    crawler.atomic_bytes(out/'vov_previous_records'/f"{sample['id']}_{crawler.digest(old)}.json",old)
+                row = request_record(crawler, active, sample, out, user_agent, timeout, budget,
+                                     respect_robots=respect_robots, record_dir=record_dir)
+                if on_record: on_record(row)
+                progress.record(row)
+                completed += 1
+                if use_curl and (row.get('http_status') in (403,429) or row.get('retry_deferred')
+                                 or row.get('status') == 'response_deadline' or row.get('challenge_detected')): break
+        finally:
+            if use_curl: active.close()
         return completed
     with (crawler.run_lock(out) if lock_run else nullcontext()), ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(domain_job, group) for group in groups.values()]
