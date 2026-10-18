@@ -158,13 +158,13 @@ class Ask120ParserV2Tests(unittest.TestCase):
             with self.subTest(crawler=crawler.__name__):
                 doc = crawler.extract(body, 'text/html; charset=utf-8',
                                       'https://www.120ask.com/question/104875176.htm')
-                self.assertEqual(doc['extractor'], '120ask_qa_dom_v2')
+                self.assertEqual(doc['extractor'], '120ask_qa_dom_v3')
                 self.assertLess(len(doc['text']), 300)
                 self.assertEqual(crawler.quality(doc)['quality_status'], 'accepted')
         other_path = self.crawler.extract(body, 'text/html', 'https://www.120ask.com/article/104875176.htm')
         other_host = self.crawler.extract(body, 'text/html', 'https://ask.120ask.com/question/104875176.htm')
-        self.assertNotEqual(other_path['extractor'], '120ask_qa_dom_v2')
-        self.assertNotEqual(other_host['extractor'], '120ask_qa_dom_v2')
+        self.assertNotEqual(other_path['extractor'], '120ask_qa_dom_v3')
+        self.assertNotEqual(other_host['extractor'], '120ask_qa_dom_v3')
 
     def test_challenge_missing_content_and_home_redirect_do_not_become_accepted(self):
         challenge = b'<html><head><title>Just a moment...</title></head><body><h1>Checking your browser</h1></body></html>'

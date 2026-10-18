@@ -1,4 +1,4 @@
-"""Embed the 120ask V2 parser in the production and domain-sample notebooks."""
+"""Embed the 120ask V3 parser in the production and domain-sample notebooks."""
 from __future__ import annotations
 
 import base64
@@ -104,6 +104,8 @@ def ask120_module():
         if old_redirect not in source:
             raise ValueError('Crawler redirect marker not found.')
         source = source.replace(old_redirect, new_redirect, 1)
+    source = source.replace("'120ask_qa_dom_v2'", "'120ask_qa_dom_v3'")
+    source = source.replace("VERSION = 'v11'", "VERSION = 'v12'")
     compile(source, 'crawler_snapshot.py', 'exec')
     return source.encode('utf-8')
 
@@ -171,12 +173,13 @@ if not POSTPROCESS_ONLY and HAS_ASK120_SAMPLE and (RUN_DIR / 'corpus_config.json
                               "'user_agent': USER_AGENT, 'requests_trust_env': REQUESTS_TRUST_ENV, "
                               "'delay': DELAY, 'attempts': ATTEMPTS,", 1)
     put(12, crawl)
+    put(11, get(11).replace('120ask V2', '120ask V3'))
     note = (
-        '\n\n120ask V2 chỉ định tuyến `/question/<id>.htm`; `text` giữ câu hỏi và từng lượt theo thread. '
+        '\n\n120ask V3 chỉ định tuyến `/question/<id>.htm`; `text` giữ câu hỏi và từng lượt theo thread. '
         '`ask120_threads`, `ask120_text_raw` và `ask120_qc` nằm trong record checkpoint; Parquet corpus không thêm cột. '
         'Run parser cũ phải dùng RUN_TAG mới + RECOVERY_RUN_PATH để tái trích raw, không resume ghi đè.\n'
     )
-    if '120ask V2 chỉ định tuyến' not in get(11):
+    if '120ask V3 chỉ định tuyến' not in get(11):
         put(11, get(11).rstrip() + note)
     write(notebook, MAIN)
 
@@ -218,22 +221,25 @@ ask120_path.write_bytes(ask120_body)
                               "crawler.ROBOT_AGENT = USER_AGENT.split('/', 1)[0]\n"
                               "crawler.TRUST_ENV = REQUESTS_TRUST_ENV", 1)
     put(7, setup)
+    put(10, get(10).replace('120ask V2', '120ask V3'))
     note = (
-        '\n\n120ask V2 chỉ áp dụng cho `/question/<id>.htm`, giữ thứ tự thread và ghi QC chi tiết '
+        '\n\n120ask V3 chỉ áp dụng cho `/question/<id>.htm`, giữ thứ tự thread và ghi QC chi tiết '
         'trong record JSON. URL khác trên domain dùng route hiện có. Parser đổi thì tạo run mới và recovery raw.\n'
     )
-    if '120ask V2 chỉ áp dụng' not in get(10):
+    if '120ask V3 chỉ áp dụng' not in get(10):
         put(10, get(10).rstrip() + note)
     write(notebook, DOMAIN)
 
 
 def main():
-    build_shared_notebooks()
+    # Update only the established 120ask routes/snapshots; do not rebuild unrelated engines.
     ask120_body = (ROOT / 'scripts/ask120.py').read_bytes()
     compile(ask120_body, 'ask120_snapshot.py', 'exec')
     _update_main(ask120_body)
     _update_domain(ask120_body)
-    print(json.dumps({'parser': '120ask_qa_dom_v2',
+    from build_120ask_gate_notebook import main as build_check
+    build_check()
+    print(json.dumps({'parser': '120ask_qa_dom_v3',
                       'sha256': hashlib.sha256(ask120_body).hexdigest()}, indent=2))
 
 

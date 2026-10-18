@@ -169,6 +169,29 @@ class SamplingTests(unittest.TestCase):
         self.assertLess(baseline,10)
         self.assertTrue(all(n>=1 for n in allocation.values()))
 
+    def test_partial_history_opt_in_selects_500_and_preserves_disclaimer(self):
+        out = self.root/'partial'
+        bundled = self.root/'known_partial.jsonl'
+        check.jsonl(bundled,[{'source_url':'https://cnkang.com/b0/0.html#old'}])
+        config = dict(self.config,history_paths=[],history_complete=False,allow_incomplete_history=True)
+        samples,state = check.prepare(config,out,bundled)
+        self.assertEqual(len(samples),500)
+        self.assertEqual(state['state'],'ready_partial_history')
+        self.assertFalse(state['history_complete_confirmed'])
+        self.assertFalse(state['all_urls_previously_untested_guaranteed'])
+        self.assertEqual(state['excluded_history'],1)
+        self.assertNotIn('cnkang.com/b0/0.html',{r['canonical_url'] for r in samples})
+        self.assertEqual(len({r['canonical_url'] for r in samples}),500)
+        self.assertTrue(all(r['history_scope']=='known_urls_only' and r['history_warning']
+                            and r['all_urls_previously_untested_guaranteed'] is False for r in samples))
+        summary=check.export(out,samples,state)
+        self.assertEqual(summary['history_scope'],'known_urls_only')
+        self.assertIn(state['history_warning'],(out/'review_report.md').read_text(encoding='utf-8'))
+        self.assertFalse(summary['all_urls_previously_untested_guaranteed'])
+        with patch.object(check,'read_population',side_effect=AssertionError('must not resample')):
+            resumed,_=check.prepare(config,out,bundled)
+        self.assertEqual(samples,resumed)
+
 
 class TransportTests(unittest.TestCase):
     def setUp(self):

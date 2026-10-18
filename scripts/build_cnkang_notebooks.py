@@ -143,18 +143,20 @@ def build_check():
         if kind == 'code': c.update(execution_count=None,outputs=[])
         cells.append(c)
     add('markdown', '''
-# Kiểm tra 500 URL mới cnkang.com
+# Kiểm tra 500 URL cnkang.com sau khi loại URL đã biết
 
 Kaggle: gắn dataset lighth/r2ai-stage3, bật **Internet**, không cần GPU/Playwright.
 Notebook độc lập, nhúng parser và transport dùng chung với crawl chính; output mặc định
 /kaggle/working/check_cnkang_com/. Không crawl toàn corpus.
 
-**Lịch sử:** gắn output các lượt cũ vào Kaggle Input, đặt HISTORY_PATHS, rồi đặt
-HISTORY_COMPLETE=True sau khi kiểm tra đã đủ mọi lượt đã chạy. Bản notebook cũ/mã v6 và
-60 URL xác định được đã được lưu bền trong repo; notebook này nhúng danh sách URL đó.
-Danh sách ấy **chưa đủ lịch sử**: thiếu manifest đầy đủ, nên nếu chưa bổ sung, notebook
-dừng ở trạng thái history_required, xuất báo cáo hướng dẫn và không gửi request.
-Không phụ thuộc file Downloads còn tồn tại hoặc thư mục working của session trước.
+**Mặc định chạy với lịch sử chưa đầy đủ:** loại 60 URL đã biết được nhúng sẵn, cùng
+URL trong HISTORY_PATHS hoặc lịch sử tự tìm thấy (nếu có), rồi chọn 500 URL duy nhất.
+**Không bảo đảm toàn bộ 500 URL chưa từng được kiểm tra.** Giới hạn này được ghi vào
+manifest, history_summary.json, summary.json và review_report.md.
+Không cần file Downloads hoặc manifest các session cũ để bắt đầu.
+Nếu có thêm lịch sử, gắn output cũ vào Input và đặt HISTORY_PATHS.
+Chỉ đặt HISTORY_COMPLETE=True khi đã đủ mọi lượt cũ. Muốn buộc kiểm tra lịch sử đầy đủ,
+đặt ALLOW_INCOMPLETE_HISTORY=False.
 
 Chọn tối đa 10 URL mỗi nhánh trước, chia phần còn lại theo dung lượng và phần dư lớn nhất.
 Giữ ID gốc, các ID/URL trùng canonical, query/path và manifest bất biến khi resume.
@@ -181,6 +183,7 @@ if missing:
 PARQUET_PATH = None  # Tự tìm đúng file theo đặc tả; local: đặt đường dẫn rõ ràng.
 HISTORY_PATHS = []  # Ví dụ ['/kaggle/input/my-old-output/cnkang_review_v6']
 HISTORY_COMPLETE = False  # True sau khi gắn đủ review/samples manifests các lượt cũ.
+ALLOW_INCOMPLETE_HISTORY = True  # Chạy sau khi loại URL đã biết; không bảo đảm chưa từng test.
 TARGET_URLS = 500
 RANDOM_SEED = 20261020
 REQUEST_GAP_SECONDS = 1.5
@@ -209,7 +212,12 @@ for name, encoded in PAYLOADS.items():
     body = zlib.decompress(base64.b85decode(encoded))
     if hashlib.sha256(body).hexdigest() != HASHES[name]: raise ValueError('Snapshot corrupted: '+name)
     path = support / name
-    if path.exists() and path.read_bytes() != body:
+    manifest = OUTPUT_DIR / 'sample_manifest.jsonl'
+    has_saved_sample = manifest.exists() and manifest.stat().st_size > 0
+    has_saved_records = any((OUTPUT_DIR/'records').glob('*.json'))
+    journal = OUTPUT_DIR / 'crawl_journal.jsonl'
+    has_saved_journal = journal.exists() and journal.stat().st_size > 0
+    if path.exists() and path.read_bytes() != body and (has_saved_sample or has_saved_records or has_saved_journal):
         raise ValueError('Code changed; use a new OUTPUT_DIR instead of overwriting a saved run.')
     path.write_bytes(body)
 history_path = support / 'known_history_partial.jsonl'
@@ -219,6 +227,7 @@ check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
 CONFIG = {'parquet_path':str(PARQUET_PATH) if PARQUET_PATH else None,
     'history_paths':[str(p) for p in HISTORY_PATHS], 'history_complete':HISTORY_COMPLETE,
+    'allow_incomplete_history':ALLOW_INCOMPLETE_HISTORY,
     'target':TARGET_URLS, 'seed':RANDOM_SEED}
 NETWORK = {'gap':REQUEST_GAP_SECONDS,'timeout':[CONNECT_TIMEOUT,READ_TIMEOUT],
     'attempts':MAX_ATTEMPTS_PER_URL,'trust_env':REQUESTS_TRUST_ENV,
@@ -231,6 +240,8 @@ print('Trạng thái:', history_summary['state'])
 print('Lịch sử:', history_summary['history_files'])
 print('URL đã biết:', history_summary['history_unique_urls'])
 print('Mẫu thực chọn:', len(samples))
+if history_summary.get('history_warning'):
+    print('LƯU Ý:', history_summary['history_warning'])
 if not samples:
     print(history_summary.get('reason'))
 from IPython.display import display, FileLink
@@ -252,7 +263,7 @@ try:
     if samples:
         check.run(OUTPUT_DIR, samples, NETWORK)
     else:
-        print('Chưa đủ lịch sử/URL; không gửi request.')
+        print('Chưa có mẫu hợp lệ; xem history_summary để biết nguyên nhân.')
 finally:
     summary = check.export(OUTPUT_DIR, samples, history_summary)
 ''')

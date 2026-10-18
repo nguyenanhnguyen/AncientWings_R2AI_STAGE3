@@ -17,22 +17,34 @@ Notebook tham chiếu có log hai vòng 120 URL, nhưng chỉ in một phần UR
 nhúng raw HTML hoặc manifest đầy đủ. Đã giữ 60 URL xuất hiện trong output hoặc
 danh sách fallback trong known_history_partial.jsonl. Danh sách này không chứng
 minh đầy đủ mọi lượt cũ, cũng không chứng minh tất cả URL fallback đã được tải.
-Nó được dùng để loại trừ bảo thủ, không dùng làm mẫu thay cho 500 URL mới.
+Nó được dùng để loại trừ bảo thủ, không dùng làm mẫu thay cho 500 URL được chọn.
 Thử tái dựng theo seed trên corpus hiện có không khớp tất cả URL hiển thị của
 vòng thứ hai, nên không coi mẫu tái dựng là lịch sử đầy đủ.
 
-Để chạy 500 URL mới:
+## Chạy khi không còn lịch sử đầy đủ
+
+Theo lựa chọn mới của người dùng, mặc định ALLOW_INCOMPLETE_HISTORY=True.
+Notebook loại các URL đã biết được nhúng sẵn, cộng lịch sử bổ sung nếu có, rồi
+chọn 500 URL duy nhất từ corpus. Không cần cấu hình HISTORY_PATHS để bắt đầu.
+HISTORY_COMPLETE vẫn là False; không đánh dấu lịch sử đầy đủ để vượt điều kiện.
+
+Manifest từng URL, history_summary.json, summary.json và review_report.md đều ghi:
+chỉ loại URL đã biết, không bảo đảm toàn bộ mẫu chưa từng được kiểm tra.
+Trạng thái là ready_partial_history. Nếu trước đó chỉ có output history_required
+rỗng, notebook cho cập nhật snapshot và chạy tiếp trong cùng thư mục. Nếu đã có
+manifest thật, record hoặc journal có dữ liệu, vẫn giữ chặn đổi code để bảo vệ run.
+
+Nếu cần bảo đảm không trùng lịch sử đầy đủ:
 
 1. Gắn dataset lighth/r2ai-stage3 và bật Internet.
 2. Gắn output cũ chứa review.jsonl, samples.jsonl hoặc sample_manifest.jsonl.
-3. Đặt HISTORY_PATHS tới các file/thư mục này và HISTORY_COMPLETE=True sau khi
-   kiểm tra đã bao phủ các lượt chạy trước.
+3. Đặt HISTORY_PATHS tới các file/thư mục này, HISTORY_COMPLETE=True sau khi
+   kiểm tra đã bao phủ các lượt chạy trước; ALLOW_INCOMPLETE_HISTORY=False nếu
+   muốn dừng khi thiếu lịch sử.
 4. Restart & Run All. Giữ ZIP đầy đủ để resume trong phiên Kaggle sau.
 
-Nếu chưa có lịch sử, Run All vẫn tạo báo cáo/CSV/Parquet rỗng đúng schema và ZIP,
-với trạng thái history_required, không gửi request. Đây là trạng thái có chủ đích,
-không phải lỗi biến/hàm hoặc âm thầm dùng lại URL cũ. Có thể bổ sung lịch sử rồi
-chạy lại trong cùng output nếu chưa có manifest mẫu thật.
+Ở chế độ buộc lịch sử đầy đủ, thiếu lịch sử sẽ tạo báo cáo/CSV/Parquet rỗng đúng
+schema và ZIP với trạng thái history_required, không gửi request.
 
 ## Mã dùng chung
 

@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 from lxml import html
 
 
-VERSION = '120ask-parser-v2'
-EXTRACTOR = '120ask_qa_dom_v2'
+VERSION = '120ask-parser-v3'
+EXTRACTOR = '120ask_qa_dom_v3'
 HOSTS = {'120ask.com', 'www.120ask.com'}
 QUESTION_PATH = re.compile(r'/question/[0-9]+\.htm')
 TAIL = re.compile(
@@ -166,200 +166,299 @@ def _publication_date(tree):
     return f'{int(match.group(1)):04d}-{int(match.group(2)):02d}-{int(match.group(3)):02d}'
 
 
+
+LEGACY_MARKUP = re.compile(r'</?(?:p|br|div|span)\b[^<>]*>', re.I)
+AUDIO_FALLBACK = re.compile(r'您的浏览器不支持\s*audio\s*元素[。.]?|your browser does not support.*?audio[.]?', re.I)
+QUESTION_LABELS = re.compile(r'健康咨询描述\s*[：:]|曾经的治疗情况和效果\s*[：:]|想得到怎样的帮助\s*[：:]')
+
+
+def sha(value):
+    return hashlib.sha256(value if isinstance(value, bytes) else value.encode('utf-8')).hexdigest()
+
+
+def normalize_legacy_markup(text):
+    """Two bounded entity passes, only for known escaped formatting tags."""
+    import html as entity
+    original = text
+    actions = []
+    for step in range(2):
+        decoded = entity.unescape(text)
+        if not LEGACY_MARKUP.search(decoded):
+            break
+        matches = [m.group() for m in LEGACY_MARKUP.finditer(decoded)]
+        # Replace only allowlisted formatting markup; inequalities/gene symbols survive.
+        text = LEGACY_MARKUP.sub(lambda m: '\n' if re.match(r'</?(?:p|br|div)\b', m.group(), re.I) else '', decoded)
+        actions.append({'action':'normalize_legacy_formatting', 'pass':step + 1,
+                        'matched_tags':matches, 'before_sha256':sha(original), 'after_sha256':sha(text)})
+    text = '\n'.join(re.sub(r'[ \t\u00a0]+',' ',line).strip() for line in text.splitlines() if line.strip())
+    return text, actions
+
+
+def _paragraph_text(node):
+    clone = _remove_noise(node)
+    for e in clone.iter():
+        if not isinstance(e.tag, str): continue
+        if e.tag.lower() == 'br':
+            e.tail = '\n' + (e.tail or '')
+        elif e.tag.lower() in ('p','div','section','li'):
+            e.text = '\n' + (e.text or '')
+            e.tail = '\n' + (e.tail or '')
+    return '\n'.join(re.sub(r'[ \t\u00a0]+',' ',s).strip() for s in clone.text_content().splitlines() if s.strip())
+
+
+def classify_reply_media(node, url, *, followup=False):
+    from urllib.parse import urljoin
+    clone = _remove_noise(node)
+    if followup:
+        paragraphs = [c for c in clone if isinstance(c.tag,str) and c.tag.lower() == 'p']
+        wrapper = html.Element('div')
+        for child in paragraphs: wrapper.append(deepcopy(child))
+        clone = wrapper
+    else:
+        for child in list(clone.iterdescendants()):
+            if _has_class(child,'b_ansaddli'): child.drop_tree()
+    raw = _paragraph_text(clone)
+    audio_nodes = clone.xpath('.//audio|.//source')
+    urls = []
+    for el in audio_nodes:
+        src = el.get('src')
+        if src:
+            resolved = urljoin(url,src)
+            if urlsplit(resolved).scheme in ('http','https') and resolved not in urls: urls.append(resolved)
+    for a in clone.xpath('.//a[@href]'):
+        if re.search(r'\.(?:mp3|wav|m4a|ogg)(?:[?#]|$)',a.get('href'),re.I):
+            src = urljoin(url,a.get('href'))
+            if src not in urls: urls.append(src)
+    has_audio = bool(audio_nodes or urls)
+    attachment_urls = [urljoin(url,n.get('src')) for n in clone.xpath('.//img[@src]')]
+    for el in list(clone.xpath('.//audio|.//source')):
+        if el.getparent() is not None: el.drop_tree()
+    clean, actions = normalize_legacy_markup(_paragraph_text(clone))
+    if has_audio and AUDIO_FALLBACK.search(clean):
+        clean = AUDIO_FALLBACK.sub('',clean).strip()
+        actions.append({'action':'remove_dom_audio_fallback','evidence':'audio/source node present'})
+    # Source labels alone are not an answer.
+    semantic = re.sub(r'^(?:(?:病情分析|指导意见|医生询问)\s*[：:]\s*)+', '',clean).strip()
+    if not compact(semantic): clean = ''
+    kind = 'mixed' if has_audio and clean else 'audio' if has_audio else 'text' if clean else 'empty'
+    return {'answer_type':kind,'media_urls':urls,'raw_text':raw,'clean_text':clean,'text':clean,
+            'attachment_urls':attachment_urls,
+            'raw_text_sha256':sha(raw),'clean_text_sha256':sha(clean),'normalization_actions':actions,
+            'residual_markup':bool(LEGACY_MARKUP.search(clean) or re.search(r'&lt;/?(?:p|br|div|span)\b',clean,re.I))}
+
+
+def _locator(node):
+    return node.getroottree().getpath(node)
+
+
 def extract(body, url, content_type=''):
-    """Extract one exact 120ask question URL without a generic-text fallback."""
-    if not is_question_url(url):
-        raise ValueError('Not a 120ask /question/<id>.htm URL')
+    if not is_question_url(url): raise ValueError('Not a 120ask question URL')
     tree, encoding, decode_warning = _tree(body, content_type)
-    title_nodes = tree.xpath('//*[@id="d_askH1"]')
-    if not title_nodes:
-        title_nodes = tree.xpath(
-            '//*[contains(concat(" ", normalize-space(@class), " "), " b_askti ")]//h1')
-    question_nodes = tree.xpath('//*[@id="d_msCon"]')
-    if not question_nodes:
-        question_nodes = tree.xpath(
-            '//*[contains(concat(" ", normalize-space(@class), " "), " b_askbox ")]'
-            '//*[contains(concat(" ", normalize-space(@class), " "), " b_askcont ")]')
-    title = normalize(title_nodes[0].text_content()) if title_nodes else ''
-    question = _node_text(question_nodes[0]) if question_nodes else ''
-
-    answer_boxes = tree.xpath(
-        '//*[contains(concat(" ", normalize-space(@class), " "), " b_answerbox ")]')
-    answer_boxes = [box for box in answer_boxes
-                    if not any(_has_class(parent, 'b_answerbox') for parent in box.iterancestors())]
-    cards = []
-    for box in answer_boxes:
-        cards.extend(node for node in box.iterdescendants() if _has_class(node, 'b_answerli')
-                     and not any(_has_class(parent, 'b_answerli') for parent in node.iterancestors()))
-    all_followups = [node for box in answer_boxes for node in box.iterdescendants()
-                     if _has_class(node, 'b_ansaddli')]
-    source_followups_with_text = sum(bool(_node_text(node, followup=True)) for node in all_followups)
-    source_main_regions = 0
-    empty_main_regions = 0
-    attached_followups = 0
-    unrecognized_followups = sum(
-        not bool(_node_text(node, followup=True)) and bool(normalize(_remove_noise(node).text_content()))
-        for node in all_followups
-    )
-    unknown_roles = 0
-    removed_tails = 0
-    threads = []
-
-    for card in cards:
+    titles = tree.xpath('//*[@id="d_askH1"]') or tree.xpath(
+        '//*[contains(concat(" ",normalize-space(@class)," ")," b_askti ")]//h1')
+    questions = tree.xpath('//*[@id="d_msCon"]') or tree.xpath(
+        '//*[contains(concat(" ",normalize-space(@class)," ")," b_askbox ")]'
+        '//*[contains(concat(" ",normalize-space(@class)," ")," b_askcont ")]')
+    title = normalize(titles[0].text_content()) if titles else ''
+    question_raw = _node_text(questions[0]) if questions else ''
+    question = QUESTION_LABELS.sub('',question_raw).strip()
+    question_valid = len(questions) == 1 and bool(compact(question))
+    boxes = tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," b_answerbox ")]')
+    boxes = [b for b in boxes if not any(_has_class(p,'b_answerbox') for p in b.iterancestors())]
+    cards, all_followups = [], []
+    for box in boxes:
+        cards.extend(n for n in box.iterdescendants() if _has_class(n,'b_answerli')
+                     and not any(_has_class(p,'b_answerli') for p in n.iterancestors()))
+        all_followups.extend(n for n in box.iterdescendants() if _has_class(n,'b_ansaddli'))
+    threads, unresolved, card_evidence = [], [], []
+    main_regions = empty_regions = removed_tails = unrecognized = attached = 0
+    represented_followups = set()
+    for card_index, card in enumerate(cards,1):
         blocks = _owned_blocks(card)
-        main_blocks = [block for block in blocks if _has_class(block, 'b_anscont_cont')]
-        source_main_regions += len(main_blocks)
-        empty_main_regions += sum(not bool(_node_text(block)) for block in main_blocks)
-        if not main_blocks:
-            continue
-        doctor_nodes = card.xpath(
-            './/*[contains(concat(" ", normalize-space(@class), " "), " b_answertl ")]'
-            '//*[contains(concat(" ", normalize-space(@class), " "), " b_sp1 ")]//a')
-        reply_nodes = card.xpath('.//*[contains(concat(" ", normalize-space(@class), " "), " crazy_new ")]')
-        reply = next((node for node in reply_nodes if (node.get('id') or '').startswith('reply')), None)
-        thread = {'index': len(threads) + 1,
-                  'doctor': normalize(doctor_nodes[0].text_content()) if doctor_nodes else '',
-                  'reply_id': reply.get('id', '') if reply is not None else '', 'turns': []}
-        thread_attached_followups = 0
-        thread_unknown_roles = 0
-        for block in blocks:
+        main = [n for n in blocks if _role(n) == 'doctor_answer']
+        if not main: continue
+        card_path = _locator(card)
+        names = card.xpath('.//*[contains(concat(" ",normalize-space(@class)," ")," b_answertl ")]'
+                          '//*[contains(concat(" ",normalize-space(@class)," ")," b_sp1 ")]/*[self::a or self::var]')
+        card_doctor = normalize(names[0].text_content()) if len(names)==1 else None
+        card_threads = []
+        node_to_thread = {}
+        for block in main:
+            main_regions += 1
+            reply_nodes = [n for n in block.iter() if (n.get('id') or '').startswith('reply')]
+            reply_nodes = [n for n in reply_nodes if not any(
+                p in reply_nodes for p in n.iterancestors())]
+            # Keep each source reply distinct, including p[id^=reply] audio replies.
+            for core in reply_nodes or [block]:
+                media = classify_reply_media(core,url)
+                text = media['text']
+                cleaned, tail = _remove_tail(text,title)
+                media.update(text=cleaned,clean_text=cleaned,clean_text_sha256=sha(cleaned))
+                removed_tails += int(tail)
+                if tail: media['normalization_actions'].append({'action':'remove_title_matched_doctor_tail'})
+                if media['answer_type'] == 'empty': empty_regions += 1
+                index = len(threads)+1
+                reply_id = core.get('id') if (core.get('id') or '').startswith('reply') else None
+                # Card-level doctor identity is safe only for one reply in the card.
+                t = {'index':index,'thread_id':f'card{card_index}:{reply_id or _locator(core)}',
+                     'card_index':card_index,'card_id':card.get('id'),'card_locator':card_path,
+                     'reply_id':reply_id,'doctor':card_doctor,'card_doctor':card_doctor,
+                     'doctor_identity_scope':'card','ownership_status':'resolved',
+                     'parser_flags':[],'turns':[]}
+                turn = dict(media,role='doctor_answer',turn_index=1,reply_id=reply_id,
+                            card_index=card_index,dom_locator=_locator(core),source_block_locator=_locator(block))
+                t['turns'].append(turn)
+                threads.append(t);card_threads.append(t);node_to_thread.setdefault(block,[]).append(t)
+        if len(card_threads)>1:
+            for t in card_threads:
+                t.update(doctor=None,doctor_identity_scope='unresolved_per_reply')
+                t['parser_flags'].append('REPLY_AUTHOR_REVIEW')
+        for block in [b for b in blocks if _role(b) != 'doctor_answer']:
+            represented_followups.add(_locator(block))
             role = _role(block)
-            is_main = role == 'doctor_answer'
-            raw_text = _node_text(block, followup=not is_main)
-            if not raw_text:
+            media = classify_reply_media(block,url,followup=True)
+            if not media['raw_text']:
+                if normalize(_remove_noise(block).text_content()): unrecognized += 1
+                unresolved.append({'dom_locator':_locator(block),'reason':'UNRECOGNIZED_FOLLOWUP_STRUCTURE'})
                 continue
-            cleaned, removed = _remove_tail(raw_text, title) if role in (
-                'doctor_answer', 'doctor_followup') else (raw_text, False)
-            removed_tails += int(removed)
-            if not is_main:
-                thread_attached_followups += 1
-                thread_unknown_roles += int(role == 'unknown_followup')
-            if not cleaned:
+            # Single reply in card proves ownership. For multiple replies require a common
+            # b_anscontc ancestor containing exactly one of their main source blocks.
+            owner = card_threads[0] if len(card_threads)==1 else None
+            if owner is None:
+                for parent in block.iterancestors():
+                    if parent is card: break
+                    eligible = [t for b,ts in node_to_thread.items() if parent in b.iterancestors() for t in ts]
+                    if len(eligible)==1: owner=eligible[0]; break
+            if owner is None:
+                unresolved.append({'dom_locator':_locator(block),'reason':'UNRESOLVED_FOLLOWUP_OWNERSHIP',
+                                   'role':role,**media})
+                for t in card_threads: t['parser_flags'].append('UNRESOLVED_OWNERSHIP')
                 continue
-            thread['turns'].append({'role': role, 'text': cleaned, 'raw_text': raw_text})
-        if any(turn['role'] == 'doctor_answer' for turn in thread['turns']):
-            attached_followups += thread_attached_followups
-            unknown_roles += thread_unknown_roles
-            threads.append(thread)
-    # Follow-ups outside a usable card are observable but cannot be safely assigned.
-    orphan_followups = max(0, source_followups_with_text - attached_followups)
-    turns = [turn for thread in threads for turn in thread['turns']]
-    main_answers = [turn['text'] for turn in turns if turn['role'] == 'doctor_answer']
-    text_parts = [title, '问题：\n' + question] if title else ['问题：\n' + question]
-    raw_parts = list(text_parts)
-    for thread in threads:
-        for turn in thread['turns']:
-            suffix = f" {thread['index']}"
-            if thread['doctor'] and turn['role'] in ('doctor_answer', 'doctor_followup'):
-                suffix += f"（{thread['doctor']}）"
-            label = LABELS[turn['role']] + suffix + '：'
-            text_parts.append(label + '\n' + turn['text'])
-            raw_parts.append(label + '\n' + turn['raw_text'])
-    text = '\n\n'.join(part for part in text_parts if part.strip())
-    text_raw = '\n\n'.join(part for part in raw_parts if part.strip())
-    published_count = _published_reply_count(tree)
-    page_probe = normalize(' '.join(tree.xpath('//title//text() | //h1//text() | //body//text()')))[:4000]
-    challenge_detected = bool(re.search(
-        r'access denied|just a moment|attention required|checking your browser|cookies must be enabled|'
-        r'verify you are human|enable javascript and cookies|验证码|安全验证|访问受限',
-        page_probe, re.I))
-    duplicate_groups = {}
-    for thread in threads:
-        for turn in thread['turns']:
-            key = compact(turn['text'])
-            if key:
-                duplicate_groups.setdefault(key, []).append((thread['index'], turn['role']))
-    duplicate_groups = [locations for locations in duplicate_groups.values() if len(locations) > 1]
-    qc = {
-        'scope': 'observable_html_only',
-        'source_main_answer_regions': source_main_regions,
-        'extracted_main_answers': len(main_answers),
-        'published_reply_count': published_count,
-        'published_reply_difference': (None if published_count is None else len(main_answers) - published_count),
-        'source_followup_blocks': len(all_followups),
-        'source_followups_with_direct_p_text': source_followups_with_text,
-        'attached_followups': attached_followups,
-        'unrecognized_followup_blocks': unrecognized_followups,
-        'orphan_followups': orphan_followups,
-        'unknown_followup_roles': unknown_roles,
-        'empty_main_answer_regions': empty_main_regions,
-        'removed_template_tails': removed_tails,
-        'duplicate_turn_groups': len(duplicate_groups),
-        'ui_markers_in_text': [marker for marker in UI_MARKERS if marker in text],
-    }
+            cleaned, tail = _remove_tail(media['text'],title) if role=='doctor_followup' else (media['text'],False)
+            removed_tails += int(tail)
+            media.update(text=cleaned,clean_text=cleaned,clean_text_sha256=sha(cleaned))
+            if tail: media['normalization_actions'].append({'action':'remove_title_matched_doctor_tail'})
+            owner['turns'].append(dict(media,role=role,turn_index=len(owner['turns'])+1,
+                reply_id=owner['reply_id'],card_index=card_index,dom_locator=_locator(block),
+                source_block_locator=_locator(block)))
+            attached += 1
+            if role=='unknown_followup': owner['parser_flags'].append('UNKNOWN_FOLLOWUP_ROLE')
+        card_evidence.append({'card_index':card_index,'card_id':card.get('id'),'dom_locator':card_path,
+                              'main_blocks':len(main),'reply_ids':[t['reply_id'] for t in card_threads],
+                              'card_doctor':card_doctor})
+    for block in all_followups:
+        if _locator(block) not in represented_followups:
+            unresolved.append({'dom_locator':_locator(block),'reason':'ORPHAN_FOLLOWUP'})
+    published = _published_reply_count(tree)
+    card_count = len(card_evidence)
+    semantics = ('card_count_matches_template' if published is not None and published==card_count
+                 else 'unresolved' if published is not None else 'not_available')
+    # Detect repeats separately by role. Equal text in different replies is not DOM duplication.
+    repeats = []
+    for role, label in (('doctor_answer','duplicate_main_answer'),('patient_followup','repeated_patient_followup'),
+                        ('doctor_followup','repeated_doctor_followup')):
+        values = {}
+        for t in threads:
+            for turn in t['turns']:
+                if turn['role']==role and turn['text']:
+                    values.setdefault(compact(turn['text']),[]).append({'thread_id':t['thread_id'],
+                        'reply_id':turn['reply_id'],'dom_locator':turn['dom_locator'],
+                        'raw_text_sha256':turn['raw_text_sha256']})
+        for text, locations in values.items():
+            if len(locations)>1:
+                same_reply=(role=='doctor_answer' and len({x['reply_id'] for x in locations})==1
+                            and bool(locations[0]['reply_id'])
+                            and len({x['raw_text_sha256'] for x in locations})==1)
+                kind='duplicate_dom_representation' if same_reply else label
+                repeats.append({'kind':kind,'text_sha256':sha(text),'locations':locations,
+                                'action':'preserved_for_review'})
+                if role=='doctor_answer':
+                    for t in threads:
+                        if any(x['thread_id']==t['thread_id'] for x in locations):
+                            t['parser_flags'].append('DUPLICATE_DOM_REPRESENTATION_REVIEW' if same_reply
+                                                     else 'DUPLICATE_MAIN_ANSWER_REVIEW')
+    main_turns = [t['turns'][0] for t in threads]
+    text_answers = [t['text'] for t in main_turns if t['text']]
+    all_turns = [turn for t in threads for turn in t['turns']]
+    def formatted(raw=False):
+        parts = [title,'问题：\n'+(question_raw if raw else question)]
+        for t in threads:
+            for turn in t['turns']:
+                value = turn['raw_text'] if raw else turn['text']
+                if not value: continue
+                name = f"（{t['doctor']}）" if t['doctor'] and turn['role']!='patient_followup' else ''
+                parts.append(f"{LABELS[turn['role']]} {t['index']}{name}：\n{value}")
+        return '\n\n'.join(p for p in parts if p.strip())
+    text, rawtext = formatted(),formatted(True)
+    challenge = bool(re.search(r'just a moment|checking your browser|verify you are human|安全验证|访问受限',
+        ' '.join(tree.xpath('//title/text()'))+' '+text[:2000],re.I))
     reasons = []
-    if len(title_nodes) != 1 or not title:
-        reasons.append('ask120_missing_or_ambiguous_title')
-    if len(question_nodes) != 1 or len(compact(question)) < 10:
-        reasons.append('ask120_missing_or_ambiguous_question')
-    if not main_answers:
-        reasons.append('ask120_no_main_answer')
-    if source_main_regions != len(main_answers) or empty_main_regions:
-        reasons.append('ask120_main_answer_mismatch')
-    if published_count is not None and published_count != len(main_answers):
-        reasons.append('ask120_published_reply_mismatch')
-    if unrecognized_followups:
-        reasons.append('ask120_unrecognized_followup_structure')
-    if orphan_followups:
-        reasons.append('ask120_orphan_followup')
-    if unknown_roles:
-        reasons.append('ask120_unknown_followup_role')
-    if attached_followups != source_followups_with_text:
-        reasons.append('ask120_followup_count_mismatch')
-    if qc['ui_markers_in_text']:
-        reasons.append('ask120_ui_marker_suspect')
-    if decode_warning or '\ufffd' in text:
-        reasons.append('ask120_decode_suspect')
-    if challenge_detected:
-        reasons.append('error_or_challenge')
-    access_pass = (bool(title) and len(compact(question)) >= 10 and bool(main_answers)
-                   and sum(len(compact(answer)) for answer in main_answers) >= 20
-                   and not reasons)
-    return {
-        'title': title, 'text': text, 'extractor': EXTRACTOR,
-        'published_at': _publication_date(tree), 'declared_encoding': encoding,
-        'decode_warning': decode_warning, 'source_question_chars': len(question),
-        'source_answer_count': len(main_answers),
-        'source_body_chars': sum(len(answer) for answer in main_answers),
-        'source_followup_count': len(all_followups),
-        'main_answer_count': len(main_answers), 'followup_count': attached_followups,
-        'patient_followups': sum(turn['role'] == 'patient_followup' for turn in turns),
-        'doctor_followups': sum(turn['role'] == 'doctor_followup' for turn in turns),
-        'unknown_roles': unknown_roles, 'removed_template_tails': removed_tails,
-        'ask120_question': question, 'ask120_main_answers': main_answers,
-        'ask120_threads': threads, 'ask120_qc': qc,
-        'ask120_text_raw': text_raw,
-        'ask120_text_raw_sha256': hashlib.sha256(text_raw.encode('utf-8')).hexdigest(),
-        'ask120_review_reasons': reasons, 'ask120_access_pass': access_pass,
-        'ask120_challenge_detected': challenge_detected,
-        'ask120_parser_version': VERSION,
-        'extraction_selectors': ['#d_askH1 / .b_askti h1', '#d_msCon / .b_askbox .b_askcont',
-                                 '.b_answerbox .b_answerli (DOM-order owned turns)'],
-    }
+    if len(titles)!=1 or not title: reasons.append('ask120_missing_or_ambiguous_title')
+    if not question_valid: reasons.append('ask120_missing_or_ambiguous_question')
+    if not text_answers: reasons.append('ask120_no_main_answer')
+    if semantics=='unresolved': reasons.append('PUBLISHED_COUNT_SEMANTICS_REVIEW')
+    if unresolved: reasons.append('ask120_unresolved_followups')
+    if any(u['reason']=='ORPHAN_FOLLOWUP' for u in unresolved): reasons.append('ask120_orphan_followup')
+    if unrecognized: reasons.append('ask120_unrecognized_followup_structure')
+    if any(t['role']=='unknown_followup' for t in all_turns): reasons.append('ask120_unknown_followup_role')
+    if any(t['answer_type']=='audio' for t in main_turns): reasons.append('ask120_audio_reply_present')
+    if any(t['residual_markup'] for t in all_turns): reasons.append('ask120_residual_markup')
+    if any(marker in text for marker in UI_MARKERS): reasons.append('ask120_ui_marker_suspect')
+    if decode_warning or '\ufffd' in text: reasons.append('ask120_decode_suspect')
+    if challenge: reasons.append('error_or_challenge')
+    for t in threads:
+        t['parser_flags'] = sorted(set(t['parser_flags']))
+        t['ownership_status'] = 'unresolved' if 'UNRESOLVED_OWNERSHIP' in t['parser_flags'] else 'resolved'
+        reasons.extend(t['parser_flags'])
+    counters = {
+        'source_reply_blocks':main_regions,'source_card_count':card_count,'source_reply_count':len(main_turns),
+        'text_main_answers':sum(t['answer_type']=='text' for t in main_turns),
+        'audio_main_answers':sum(t['answer_type']=='audio' for t in main_turns),
+        'mixed_main_answers':sum(t['answer_type']=='mixed' for t in main_turns),
+        'usable_text_main_answers':len(text_answers)}
+    qc = {'scope':'observable_html_only',**counters,'source_main_answer_regions':main_regions,
+          'extracted_main_answers':len(text_answers),'published_reply_count':published,
+          'published_reply_difference':None if published is None else card_count-published,
+          'published_count_semantics':semantics,'card_evidence':card_evidence,
+          'source_followup_blocks':len(all_followups),'source_followups_with_direct_p_text':attached+len(unresolved),
+          'attached_followups':attached,'unrecognized_followup_blocks':unrecognized,
+          'orphan_followups':sum(u['reason']=='ORPHAN_FOLLOWUP' for u in unresolved),
+          'unknown_followup_roles':sum(t['role']=='unknown_followup' for t in all_turns),
+          'empty_main_answer_regions':empty_regions,'removed_template_tails':removed_tails,
+          'duplicate_turn_groups':len(repeats),'duplicates_by_role':repeats,
+          'duplicate_dom_representation':[g for g in repeats if g['kind']=='duplicate_dom_representation'],
+          'unresolved_blocks':unresolved,
+          'question_node_count':len(questions),'title_node_count':len(titles),
+          'question_content_excerpt':question[:300],
+          'ui_markers_in_text':[m for m in UI_MARKERS if m in text]}
+    return {'title':title,'text':text,'extractor':EXTRACTOR, 'published_at':_publication_date(tree),
+        'question_asked_at':_publication_date(tree),'declared_encoding':encoding,'decode_warning':decode_warning,
+        'source_question_chars':len(question),'source_answer_count':len(text_answers),
+        'source_body_chars':sum(len(a) for a in text_answers),'source_followup_count':len(all_followups),
+        'main_answer_count':len(text_answers),'followup_count':attached,
+        'patient_followups':sum(t['role']=='patient_followup' for t in all_turns),
+        'doctor_followups':sum(t['role']=='doctor_followup' for t in all_turns),
+        'unknown_roles':qc['unknown_followup_roles'],'removed_template_tails':removed_tails,
+        'ask120_question':question,'ask120_question_raw':question_raw,'question_valid':question_valid,
+        'ask120_main_answers':text_answers,'ask120_threads':threads,'ask120_qc':qc,
+        'ask120_text_raw':rawtext,'ask120_text_raw_sha256':sha(rawtext),
+        'ask120_review_reasons':sorted(set(reasons)),
+        'ask120_access_pass':bool(question_valid and text_answers and not reasons),
+        'ask120_challenge_detected':challenge,'ask120_parser_version':VERSION,
+        'raw_response_sha256':sha(body),**counters,
+        'extraction_selectors':['#d_askH1 / .b_askti h1','#d_msCon / .b_askbox .b_askcont',
+                                '.b_answerbox .b_answerli (reply/card-owned DOM turns)']}
 
 
 def audit(body, url, record, content_type=''):
-    """Re-extract raw evidence and compare the complete parser sidecar."""
-    doc = extract(body, url, content_type)
-    fields = (
-        'title', 'text', 'extractor', 'published_at', 'source_question_chars',
-        'source_answer_count', 'source_body_chars', 'source_followup_count',
-        'main_answer_count', 'followup_count', 'patient_followups', 'doctor_followups',
-        'unknown_roles', 'removed_template_tails',
-        'ask120_question', 'ask120_main_answers', 'ask120_threads', 'ask120_qc',
-        'ask120_text_raw', 'ask120_text_raw_sha256', 'ask120_review_reasons',
-        'ask120_access_pass', 'ask120_parser_version',
-        'ask120_challenge_detected',
-    )
-    mismatches = [field for field in fields if doc.get(field) != record.get(field)]
-    if mismatches:
-        raise ValueError('120ask raw/checkpoint mismatch: ' + ', '.join(mismatches))
-    qc = doc['ask120_qc']
-    return {
-        'ask120_raw_reextraction_verified': True,
-        'ask120_main_answers_verified': qc['extracted_main_answers'],
-        'ask120_followups_verified': qc['attached_followups'],
-        'ask120_orphan_followups': qc['orphan_followups'],
-        'ask120_unknown_followup_roles': qc['unknown_followup_roles'],
-        'ask120_qc_scope': qc['scope'],
-    }
+    doc = extract(body,url,content_type)
+    fields = ('title','text','extractor','published_at','ask120_question','ask120_threads','ask120_qc',
+              'ask120_text_raw','ask120_text_raw_sha256','ask120_review_reasons','ask120_parser_version',
+              'source_reply_blocks','text_main_answers','audio_main_answers','mixed_main_answers',
+              'usable_text_main_answers')
+    mismatches = [k for k in fields if record.get(k)!=doc.get(k)]
+    if mismatches: raise ValueError('120ask raw/checkpoint mismatch: '+', '.join(mismatches))
+    qc=doc['ask120_qc']
+    return {'ask120_raw_reextraction_verified':True,'ask120_main_answers_verified':doc['main_answer_count'],
+            'ask120_followups_verified':doc['followup_count'],'ask120_orphan_followups':qc['orphan_followups'],
+            'ask120_unknown_followup_roles':qc['unknown_followup_roles'],'ask120_qc_scope':qc['scope']}

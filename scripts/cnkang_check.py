@@ -169,7 +169,8 @@ def prepare(config, out, bundled_history=None):
     saved_path = out / 'config.json'
     identity = {**config, 'parser_sha256': parser.sha(Path(parser.__file__).read_bytes()),
                 'check_sha256':parser.sha(Path(__file__).read_bytes()),
-                'transport_sha256':parser.sha(Path(transport_module.__file__).read_bytes())}
+                'transport_sha256':parser.sha(Path(transport_module.__file__).read_bytes()),
+                'bundled_history_sha256':parser.sha(Path(bundled_history).read_bytes()) if bundled_history else None}
     if manifest.exists() and manifest.stat().st_size:
         if not saved_path.exists() or json.loads(saved_path.read_text(encoding='utf-8')) != identity:
             raise ValueError('Code/config changed. Use a new OUTPUT_DIR; preserve the previous run.')
@@ -183,15 +184,22 @@ def prepare(config, out, bundled_history=None):
     source = find_source(config)
     population, profile = read_population(source)
     history, files = read_history(config.get('history_paths', []), bundled_history)
+    complete = bool(config.get('history_complete') and files and any(f['url_rows'] for f in files))
+    warning = ('' if complete else
+        'Chỉ loại các URL đã biết từ lịch sử hiện có; lịch sử chưa đầy đủ, '
+        'không bảo đảm toàn bộ mẫu chưa từng được kiểm tra.')
     history_summary = {'source':str(source), 'source_sha256':parser.sha(source.read_bytes()),
         'requested':config['target'],
         'profile':profile, 'history_files':files, 'history_unique_urls':len(history),
-        'history_complete_confirmed':bool(config.get('history_complete')),
+        'history_complete_confirmed':complete,
+        'all_urls_previously_untested_guaranteed':complete,
+        'history_scope':'complete_declared_history' if complete else 'known_urls_only',
+        'history_warning':warning,
         'bundled_history_is_partial':True}
     write_json(out / 'history_summary.json', history_summary)
     write_json(saved_path, identity)
     # Missing history is an explicit, reviewable state, not an unhandled exception or fake sample.
-    if not config.get('history_complete') or not files or not any(f['url_rows'] for f in files):
+    if not complete and not config.get('allow_incomplete_history', False):
         history_summary.update(state='history_required', reason=(
             'Bundled URLs are partial evidence only. Mount complete previous review/samples manifests, '
             'set HISTORY_PATHS, then HISTORY_COMPLETE=True after checking coverage. No requests sent.'))
@@ -219,7 +227,11 @@ def prepare(config, out, bundled_history=None):
         samples.extend(chosen)
     random.Random(config['seed']).shuffle(samples)
     if {r['canonical_url'] for r in samples} & history: raise AssertionError('History overlap')
-    history_summary.update(state='ready', baseline_per_branch=baseline,
+    for sample in samples:
+        sample.update(history_scope=history_summary['history_scope'],
+                      all_urls_previously_untested_guaranteed=complete,
+                      history_warning=warning)
+    history_summary.update(state='ready' if complete else 'ready_partial_history', baseline_per_branch=baseline,
         baseline_note='Reduced baseline to fit target' if baseline < 10 else 'Up to 10 URLs per branch',
         selected=len(samples), excluded_history=sum(excluded.values()), overlap_with_history=0)
     save_csv(out / 'sampling_summary.csv', [
@@ -303,9 +315,16 @@ def export(out, samples, history_summary=None):
         'source_flags':dict(Counter(f for r in records for f in set(r.get('source_flags', [])))),
         'templates':dict(Counter(r.get('template','not_parsed') for r in records)),
         'date_missing':sum(r['status']=='extracted' and not r.get('date_candidates') for r in records),
-        'history_state':(history_summary or {}).get('state')}
+        'history_state':(history_summary or {}).get('state'),
+        'history_scope':(history_summary or {}).get('history_scope'),
+        'history_warning':(history_summary or {}).get('history_warning', ''),
+        'history_unique_urls':(history_summary or {}).get('history_unique_urls', 0),
+        'excluded_history':(history_summary or {}).get('excluded_history', 0),
+        'all_urls_previously_untested_guaranteed':(history_summary or {}).get(
+            'all_urls_previously_untested_guaranteed', False)}
     write_json(out / 'summary.json', summary)
-    lines = ['# Báo cáo cnkang', '', json.dumps(summary,ensure_ascii=False,indent=2), '',
+    lines = ['# Báo cáo cnkang', '', summary['history_warning'], '',
+             json.dumps(summary,ensure_ascii=False,indent=2), '',
              'QC là heuristic trích xuất; không xác nhận độ đúng y khoa.', '',
              '## Mẫu từng nhánh (giới hạn đầu/cuối)', '']
     for i, branch in enumerate(sorted({r['branch'] for r in records})):
