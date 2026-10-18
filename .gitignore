@@ -23,6 +23,8 @@ __pycache__/
 /notebooks/runs/
 /notebooks/check_pubmed_efetch_100.ipynb
 /notebooks/check_longchau_50.ipynb
+/notebooks/check_120ask_50.ipynb
+/notebooks/check_cnkang.com.ipynb
 /scripts/check_120ask.py
 /work/
 /tmp/

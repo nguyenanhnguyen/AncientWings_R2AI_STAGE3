@@ -183,6 +183,14 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
     if type(config['browser_attempts']) is not int or config['browser_attempts'] < 1:
         raise ValueError('browser_attempts must be a positive integer.')
     samples = read_samples(crawler, out)
+    cnkang = None
+    cnkang_samples = [s for s in samples if (urlsplit(s['url']).hostname or '').lower() == 'cnkang.com'
+                     or (urlsplit(s['url']).hostname or '').lower().endswith('.cnkang.com')]
+    if cnkang_samples:
+        module_path = Path(__file__).with_name('cnkang_transport_snapshot.py')
+        if not module_path.exists(): module_path = Path(__file__).with_name('cnkang_transport.py')
+        cnkang = load_module('corpus_cnkang', module_path)
+        config['cnkang'] = {**cnkang.DEFAULTS, **config.get('cnkang', {})}
     identity = {'version': VERSION, 'settings': config,
                 'runner_sha256': crawler.file_hash(__file__),
                 'crawler_sha256': crawler.file_hash(crawler.__file__),
@@ -199,6 +207,9 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         if not ask120_path.exists():
             raise ValueError('Missing 120ask parser snapshot.')
         identity['ask120_sha256'] = crawler.file_hash(ask120_path)
+    if cnkang:
+        identity['cnkang_sha256'] = crawler.file_hash(cnkang.PARSER.__file__)
+        identity['cnkang_transport_sha256'] = crawler.file_hash(cnkang.__file__)
     if efetch:
         identity['pubmed_efetch_sha256'] = crawler.file_hash(efetch.__file__)
     if longchau:
@@ -217,6 +228,14 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         page_samples = [s for s in samples if not efetch or crawler.host(s['url']) != 'pubmed.ncbi.nlm.nih.gov']
         if recovery_source:
             probe.seed_successful_requests(crawler, out, page_samples, recovery_source, record_dir='requests_records')
+            old_gate = Path(recovery_source) / 'cnkang_transport_state.json'
+            if cnkang and old_gate.exists():
+                current_gate = out / 'cnkang_transport_state.json'
+                previous_gate = crawler.load_json(old_gate)
+                current_state = crawler.load_json(current_gate) if current_gate.exists() else {}
+                for key in ('not_before', 'last_request'):
+                    current_state[key] = max(previous_gate.get(key, 0), current_state.get(key, 0))
+                crawler.write_json(current_gate, current_state)
         elif (out / 'recovery_manifest.json').exists():
             # Resume a recovered run without requiring its old source to remain mounted.
             pass
@@ -238,8 +257,12 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         if config['vov_use_curl']:
             planned.update(s['id'] for s in samples if probe.is_vov(s['url'])
                            and previous[s['id']] is not None and previous[s['id']].get('status') != 'extracted')
+        if cnkang:
+            planned.update(s['id'] for s in cnkang_samples if previous[s['id']] is not None
+                           and previous[s['id']].get('retry_deferred'))
         browser_pages = [s for s in page_samples if (not longchau or not longchau.is_host(s['url']))
-                         and (not config['vov_use_curl'] or not probe.is_vov(s['url']))]
+                         and (not config['vov_use_curl'] or not probe.is_vov(s['url']))
+                         and not (cnkang and cnkang.PARSER.is_host(s['url']))]
         browser_records = [previous[s['id']] for s in browser_pages if previous[s['id']] is not None]
         browser_pending = probe.select_browser_samples(browser_pages, browser_records, config['browser_mode'])
         planned.update(s['id'] for s in browser_pending if not (out/'browser_records'/f"{s['id']}.json").exists())
@@ -292,6 +315,12 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                         on_record=publish_request, log_every=log_every)
                     if remaining_limit is not None: remaining_limit -= longchau_new
                 page_samples = [s for s in page_samples if not longchau.is_host(s['url'])]
+            if cnkang:
+                if remaining_limit != 0:
+                    count = cnkang.crawl(crawler, probe, out, cnkang_samples, config['cnkang'],
+                        max_new=remaining_limit, on_record=publish_request, log_every=log_every)
+                    if remaining_limit is not None: remaining_limit -= count
+                page_samples = [s for s in page_samples if not cnkang.PARSER.is_host(s['url'])]
             if any(not config['vov_use_curl'] or not probe.is_vov(s['url']) for s in page_samples) and config['browser_mode'] != 'off':
                 probe.browser_preflight(crawler, out, user_agent=config['browser_user_agent'],
                                         chrome_binary=config['chrome_binary'],

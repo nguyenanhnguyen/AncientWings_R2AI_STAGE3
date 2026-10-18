@@ -1,0 +1,483 @@
+{
+  "repo": "AIGuruTinix/ViBioMIR",
+  "revision": "71be0e1239a19dfd7a717e2bc13e3bec21bd0334",
+  "file": "links_corpus_vi_en_zh.parquet",
+  "sha256": "87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7",
+  "bytes": 37689434,
+  "rows": 1220598,
+  "schema": "id: int64\nurl: string",
+  "domain_counts": {
+    "pubmed.ncbi.nlm.nih.gov": 240000,
+    "suckhoecongdongonline.vn": 154503,
+    "www.120ask.com": 98160,
+    "suckhoedoisong.vn": 85823,
+    "nhathuoclongchau.com.vn": 79598,
+    "thanhnien.vn": 72111,
+    "www.cnkang.com": 40046,
+    "ask.39.net": 32772,
+    "laodong.vn": 31282,
+    "phunusuckhoe.giadinhonline.vn": 27577,
+    "www.familydoctor.com.cn": 26819,
+    "www.vinmec.com": 26129,
+    "medlatec.vn": 24762,
+    "giadinhonline.vn": 16729,
+    "baohaiphong.vn": 16286,
+    "baonghean.vn": 15941,
+    "vietnamnet.vn": 15543,
+    "baodanang.vn": 14500,
+    "tiemchunglongchau.com.vn": 13281,
+    "baocantho.com.vn": 12016,
+    "hellobacsi.com": 11747,
+    "baoangiang.com.vn": 10738,
+    "vov.vn": 9784,
+    "khoahocphothong.vn": 8143,
+    "youmed.vn": 7189,
+    "vov2.vov.vn": 6899,
+    "zysjonline.com": 6591,
+    "phuyen.baodaklak.vn": 6252,
+    "zhongyibaodian.net": 6061,
+    "suckhoeviet.org.vn": 5627,
+    "baoquangtri.vn": 5483,
+    "pmc-ecm-healthblog.beta.pharmacity.io": 5333,
+    "nhandan.vn": 5225,
+    "baovinhlong.com.vn": 5113,
+    "www.a-hospital.com": 4701,
+    "tamanhhospital.vn": 4261,
+    "www.youlai.cn": 4139,
+    "tuoitre.vn": 3893,
+    "www.qdnd.vn": 3700,
+    "www.vietnamplus.vn": 3695,
+    "baby.39.net": 3368,
+    "baogialai.com.vn": 3290,
+    "tienphong.vn": 3021,
+    "test.pmphai.com": 2989,
+    "thaythuocvietnam.vn": 2927,
+    "baoquangninh.vn": 2912,
+    "bachmai.gov.vn": 2783,
+    "baochinhphu.vn": 2302,
+    "dantri.com.vn": 2063,
+    "vnexpress.net": 2055,
+    "jbk.39.net": 2033,
+    "baolangson.vn": 1981,
+    "www.sggp.org.vn": 1853,
+    "baophutho.vn": 1288,
+    "hanoimoi.vn": 1283,
+    "care.39.net": 1282,
+    "benhviennhitrunguong.gov.vn": 1200,
+    "baotayninh.vn": 1198,
+    "heart.39.net": 1055,
+    "fk.39.net": 928,
+    "www.msdmanuals.cn": 905,
+    "baothanhhoa.vn": 782,
+    "nk.39.net": 762,
+    "cancer.39.net": 736,
+    "article.iiyi.com": 729,
+    "tnb.39.net": 717,
+    "www.wujue.com": 708,
+    "woman.39.net": 687,
+    "food.39.net": 594,
+    "jb39.com": 527,
+    "ek.39.net": 448,
+    "benhvienvietduc.org": 425,
+    "man.39.net": 382,
+    "shen.39.net": 325,
+    "gan.39.net": 294,
+    "wei.39.net": 225,
+    "www.zydcd.com": 204,
+    "sj.39.net": 197,
+    "fitness.39.net": 185,
+    "gk.39.net": 90,
+    "pf.39.net": 85,
+    "www.pharmacity.vn": 69,
+    "baidianfeng.familydoctor.com.cn": 60,
+    "gc.39.net": 59,
+    "health.people.com.cn": 50,
+    "byby.39.net": 37,
+    "qihuangzhishu.com": 29,
+    "www.baidu.com": 11,
+    "bingli.iiyi.com": 5,
+    "mega.vietnamplus.vn": 2,
+    "qy.familydoctor.com.cn": 2,
+    "www.familydoctor.cn": 2,
+    "special.vietnamplus.vn": 1,
+    "ask.familydoctor.com.cn": 1
+  },
+  "examples": {
+    "special.vietnamplus.vn": {
+      "id": 583,
+      "url": "http://special.vietnamplus.vn/benh_vien_nhan_ai"
+    },
+    "bachmai.gov.vn": {
+      "id": 584,
+      "url": "https://bachmai.gov.vn/bai-viet/-nguoi-dan-se-duoc-thu-huong-chat-luong-kham-chua-benh-quoc-te-ngay-tai-benh-vien-bach-mai--9867?id=da6d8b2d-c5bd-c612-e89c-e85f802063b4"
+    },
+    "baoangiang.com.vn": {
+      "id": 3367,
+      "url": "https://baoangiang.com.vn/-3-dung-3-nen-nguyen-tac-vang-moi-ngay-giup-song-lau-khoe-manh-a379318.html"
+    },
+    "baocantho.com.vn": {
+      "id": 14105,
+      "url": "https://baocantho.com.vn/-1-lon-cola-1-gio-chay-bo-hieu-qua-hon-thong-tin-ham-luong-calorie-a72528.html"
+    },
+    "baochinhphu.vn": {
+      "id": 26121,
+      "url": "https://baochinhphu.vn/100-benh-vien-phai-trien-khai-benh-an-dien-tu-truoc-thang-10-2025-102250319135405888.htm"
+    },
+    "baodanang.vn": {
+      "id": 28423,
+      "url": "https://baodanang.vn/1-000-nguoi-tham-gia-ngay-hoi-hien-mau-trai-tim-song-han-3239955.html"
+    },
+    "baogialai.com.vn": {
+      "id": 42923,
+      "url": "https://baogialai.com.vn/1-2-tep-toi-moi-ngay-dieu-gi-xay-ra-cho-huyet-ap-mo-mau-va-mach-mau-post583049.html"
+    },
+    "baohaiphong.vn": {
+      "id": 46213,
+      "url": "https://baohaiphong.vn/0-gio-ngay-4-3-het-cach-ly-dich-covid-19-voi-xa-son-loi-va-thanh-cong-cua-nganh-y-te-441745.html"
+    },
+    "baolangson.vn": {
+      "id": 62499,
+      "url": "https://baolangson.vn/1-000-don-vi-mau-tu-ha-noi-chi-vien-cho-tp-ho-chi-minh-1438563.html"
+    },
+    "baonghean.vn": {
+      "id": 64480,
+      "url": "https://baonghean.vn/1-000-nguoi-tham-gia-ngay-toan-dan-hien-mau-tinh-nguyen-10135008.html"
+    },
+    "baophutho.vn": {
+      "id": 80421,
+      "url": "https://baophutho.vn/10-duong-chat-tot-cho-nao-bo-si-tu-nen-bo-sung-truoc-ngay-thi-234906.htm"
+    },
+    "baoquangninh.vn": {
+      "id": 81709,
+      "url": "https://baoquangninh.vn/1-000-co-so-y-te-ket-noi-he-thong-kham-chua-benh-tu-xa-2502044.html"
+    },
+    "baoquangtri.vn": {
+      "id": 84621,
+      "url": "https://baoquangtri.vn/Multimedia/202202/nhung-thien-than-ao-trang-noi-tuyen-dau-chong-dich-covid-19-2198176/"
+    },
+    "baotayninh.vn": {
+      "id": 90104,
+      "url": "https://baotayninh.vn/10-thuc-pham-lanh-manh-nhat-giup-cai-thien-suc-khoe-toan-dien-139587.html"
+    },
+    "baothanhhoa.vn": {
+      "id": 91302,
+      "url": "https://baothanhhoa.vn/1-560-hoc-sinh-duoc-kham-mat-mien-phi-280834.htm"
+    },
+    "baovinhlong.com.vn": {
+      "id": 92084,
+      "url": "https://baovinhlong.com.vn/infographics/202109/infographic-thong-diep-5t-phao-dai-chong-dich-covid-19-trong-thoi-gian-tang-cuong-gian-cach-xa-hoi-3076847/"
+    },
+    "benhviennhitrunguong.gov.vn": {
+      "id": 97197,
+      "url": "https://benhviennhitrunguong.gov.vn/08-tre-ngo-doc-do-an-qua-hong-trau-da-ra-vien.html"
+    },
+    "benhvienvietduc.org": {
+      "id": 98397,
+      "url": "https://benhvienvietduc.org/10-nam-chuan-bi-cho-cuoc-mo-nao-thuc-tinh-o-viet-nam.html"
+    },
+    "dantri.com.vn": {
+      "id": 98822,
+      "url": "https://dantri.com.vn/doi-song/bac-sy-vien-k-chi-ra-sai-lam-an-uong-khien-nhieu-nguoi-viet-mac-ung-thu-da-day-20190709072140099.htm"
+    },
+    "giadinhonline.vn": {
+      "id": 101003,
+      "url": "https://giadinhonline.vn/1-6-dan-so-the-gioi-bi-anh-huong-do-khong-co-con-d190107.html"
+    },
+    "hanoimoi.vn": {
+      "id": 117732,
+      "url": "https://hanoimoi.vn/100-benh-vien-cong-lap-ha-noi-trien-khai-benh-an-dien-tu-717971.html"
+    },
+    "hellobacsi.com": {
+      "id": 119015,
+      "url": "https://hellobacsi.com/an-uong-lanh-manh/5-dieu-ban-nen-biet-khi-su-dung-nhan-sam-hoa-ky/"
+    },
+    "khoahocphothong.vn": {
+      "id": 134860,
+      "url": "https://khoahocphothong.vn/03-benh-nhan-may-man-duoc-ghep-giac-mac-mien-phi-tai-bv-fv-237449.html"
+    },
+    "laodong.vn": {
+      "id": 143003,
+      "url": "https://laodong.vn/an/nhung-mon-an-khong-nen-thuong-thuc-trong-3-ngay-tet-591418.ldo"
+    },
+    "medlatec.vn": {
+      "id": 174285,
+      "url": "https://medlatec.vn/"
+    },
+    "mega.vietnamplus.vn": {
+      "id": 199047,
+      "url": "https://mega.vietnamplus.vn/thai-huong-nu-anh-hung-dam-me-lam-cho-dat-no-hoa-5415.html"
+    },
+    "nhandan.vn": {
+      "id": 199049,
+      "url": "https://nhandan.vn/1-mieng-banh-chung-bang-45-phut-chay-bo-nen-an-the-nao-de-nhe-nhang-don-tet-post943576.html"
+    },
+    "nhathuoclongchau.com.vn": {
+      "id": 204274,
+      "url": "https://nhathuoclongchau.com.vn/bai-viet/1-banh-trung-thu-bang-may-bat-com-goc-nhin-dinh-duong-va-suc-khoe.html"
+    },
+    "phunusuckhoe.giadinhonline.vn": {
+      "id": 283872,
+      "url": "https://phunusuckhoe.giadinhonline.vn/1-6-benh-nhan-mac-ung-thu-deu-do-viem-5-vi-tri-tren-co-the-bi-viem-canh-bao-ung-thu-dang-den-gan-c12a372458.html"
+    },
+    "phuyen.baodaklak.vn": {
+      "id": 311449,
+      "url": "https://phuyen.baodaklak.vn/300/321037/y-me-nguoi-uy-tin-mot-long-voi-van-hoa-dan-toc/"
+    },
+    "pmc-ecm-healthblog.beta.pharmacity.io": {
+      "id": 317701,
+      "url": "https://pmc-ecm-healthblog.beta.pharmacity.io/1-cay-xuc-xich-40g-bao-nhieu-calo-bi-quyet-an-khong-lo-tang-can/"
+    },
+    "suckhoecongdongonline.vn": {
+      "id": 323034,
+      "url": "https://suckhoecongdongonline.vn/"
+    },
+    "suckhoedoisong.vn": {
+      "id": 477537,
+      "url": "https://suckhoedoisong.vn/-tai-chong-vung-ve-1692341.htm"
+    },
+    "suckhoeviet.org.vn": {
+      "id": 563469,
+      "url": "https://suckhoeviet.org.vn/03-nguyen-tac-cha-me-can-biet-khi-cho-tre-uong-oresol-5319.html"
+    },
+    "tamanhhospital.vn": {
+      "id": 569096,
+      "url": "https://tamanhhospital.vn/tin-tuc/10-nam-bi-tieu-chay-vi-benh-hiem/"
+    },
+    "thanhnien.vn": {
+      "id": 587453,
+      "url": "https://thanhnien.vn/-phu-huynh-anh-bo-quen-doi-mat-cua-con-nho-185179557.htm"
+    },
+    "thaythuocvietnam.vn": {
+      "id": 659564,
+      "url": "https://thaythuocvietnam.vn/10-bai-tap-thoat-vi-dia-dem-cho-hieu-qua-cao/"
+    },
+    "tiemchunglongchau.com.vn": {
+      "id": 662491,
+      "url": "https://tiemchunglongchau.com.vn/kien-thuc-tiem-chung/1-khoanh-banh-tet-bao-nhieu-calo-an-banh-tet-co-map-khong"
+    },
+    "tienphong.vn": {
+      "id": 675772,
+      "url": "https://tienphong.vn/10-nam-vinmec-central-park-tu-benh-vien-quoc-te-den-khat-vong-kien-tao-mo-hinh-y-hoc-dua-tren-gia-tri-post1807638.tpo"
+    },
+    "tuoitre.vn": {
+      "id": 679161,
+      "url": "https://tuoitre.vn/1-000-nguoi-dan-duoc-kham-mien-phi-ai-sap-ho-tro-y-te-co-so-2025080217025175.htm"
+    },
+    "vietnamnet.vn": {
+      "id": 683054,
+      "url": "https://vietnamnet.vn/1-000-benh-nhan-can-xa-tri-moi-ngay-benh-vien-k-mua-them-may-100-ty-dong-2410008.html"
+    },
+    "vnexpress.net": {
+      "id": 701680,
+      "url": "https://vnexpress.net/10-000-don-vi-mau-hien-kip-bo-sung-cho-dieu-tri-sau-tet-5046292.html"
+    },
+    "vov.vn": {
+      "id": 703735,
+      "url": "https://vov.vn/an-sach-song-khoe/1-tan-mang-tuoi-bi-niem-phong-tai-cho-dong-ha-khong-co-chat-vang-o-501115.vov"
+    },
+    "vov2.vov.vn": {
+      "id": 713519,
+      "url": "https://vov2.vov.vn/chuyen-tham-kin/cuon-vao-dem-xuan-32256.vov2"
+    },
+    "www.pharmacity.vn": {
+      "id": 720418,
+      "url": "https://www.pharmacity.vn/5-cach-tay-not-ruoi-tai-nha-don-gian-hieu-qua-tu-thien-nhien.htm"
+    },
+    "www.qdnd.vn": {
+      "id": 720487,
+      "url": "https://www.qdnd.vn/80-nam-cach-mang-thang-tam-va-quoc-khanh-2-9/bao-dam-y-te-dip-dai-le-843873"
+    },
+    "www.sggp.org.vn": {
+      "id": 724187,
+      "url": "https://www.sggp.org.vn/1-benh-nhan-tu-vong-sau-khi-an-banh-mi-post770696.html"
+    },
+    "www.vietnamplus.vn": {
+      "id": 729429,
+      "url": "https://www.vietnamplus.vn/10-bai-tap-co-bung-ban-co-the-thuc-hien-trong-khi-xem-netflix-tren-giuong-post978414.vnp"
+    },
+    "www.vinmec.com": {
+      "id": 733124,
+      "url": "https://www.vinmec.com/vie/bai-viet/-benh-tim-thieu-mau-cuc-bo-man-co-phai-la-nhoi-mau-co-tim-vi"
+    },
+    "youmed.vn": {
+      "id": 759253,
+      "url": "https://youmed.vn/tin-tuc/10-bai-tap-tang-chieu-cao-truoc-khi-di-ngu/"
+    },
+    "pubmed.ncbi.nlm.nih.gov": {
+      "id": 4421055,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/11197/"
+    },
+    "ask.familydoctor.com.cn": {
+      "id": 766444,
+      "url": "http://ask.familydoctor.com.cn/zt/mn.html"
+    },
+    "baby.39.net": {
+      "id": 766468,
+      "url": "http://baby.39.net/a/090415/842083.html"
+    },
+    "byby.39.net": {
+      "id": 794136,
+      "url": "http://byby.39.net/a/20101110/1533940.html"
+    },
+    "cancer.39.net": {
+      "id": 794513,
+      "url": "http://cancer.39.net/a/20101014/1499401.html"
+    },
+    "care.39.net": {
+      "id": 796390,
+      "url": "http://care.39.net/a/100418/1236024.html"
+    },
+    "ek.39.net": {
+      "id": 811489,
+      "url": "http://ek.39.net/a/090609/893034.html"
+    },
+    "fitness.39.net": {
+      "id": 814870,
+      "url": "http://fitness.39.net/a/110216/1613962.html"
+    },
+    "fk.39.net": {
+      "id": 826763,
+      "url": "http://fk.39.net/a/080822/620947.html"
+    },
+    "food.39.net": {
+      "id": 836547,
+      "url": "http://food.39.net/a/100417/1232752.html"
+    },
+    "gan.39.net": {
+      "id": 847575,
+      "url": "http://gan.39.net/a/100402/1207384.html"
+    },
+    "gc.39.net": {
+      "id": 852619,
+      "url": "http://gc.39.net/a/110327/1640355.html"
+    },
+    "gk.39.net": {
+      "id": 854997,
+      "url": "http://gk.39.net/a/100224/1162932.html"
+    },
+    "health.people.com.cn": {
+      "id": 856430,
+      "url": "http://health.people.com.cn/n1/2021/1126/c14739-32292346.html"
+    },
+    "heart.39.net": {
+      "id": 857796,
+      "url": "http://heart.39.net/a/080117/228542.html"
+    },
+    "man.39.net": {
+      "id": 863719,
+      "url": "http://man.39.net/a/081016/683568.html"
+    },
+    "nk.39.net": {
+      "id": 869039,
+      "url": "http://nk.39.net/a/100226/1165394.html"
+    },
+    "pf.39.net": {
+      "id": 875740,
+      "url": "http://pf.39.net/a/120816/4035036.html"
+    },
+    "qihuangzhishu.com": {
+      "id": 877312,
+      "url": "http://qihuangzhishu.com/1002/192.htm"
+    },
+    "qy.familydoctor.com.cn": {
+      "id": 900874,
+      "url": "http://qy.familydoctor.com.cn/a/201404/603902.html"
+    },
+    "shen.39.net": {
+      "id": 900909,
+      "url": "http://shen.39.net/a/110711/1743462.html"
+    },
+    "sj.39.net": {
+      "id": 904122,
+      "url": "http://sj.39.net/a/100327/1199782.html"
+    },
+    "tnb.39.net": {
+      "id": 905074,
+      "url": "http://tnb.39.net/a/100225/1163553.html"
+    },
+    "wei.39.net": {
+      "id": 909309,
+      "url": "http://wei.39.net/a/101225/1576119.html"
+    },
+    "woman.39.net": {
+      "id": 913169,
+      "url": "http://woman.39.net/a/100525/1304083.html"
+    },
+    "www.120ask.com": {
+      "id": 924822,
+      "url": "http://www.120ask.com/question/1000036.htm"
+    },
+    "www.cnkang.com": {
+      "id": 1404805,
+      "url": "http://www.cnkang.com/cm/201404/1145800.html"
+    },
+    "www.wujue.com": {
+      "id": 1999329,
+      "url": "http://www.wujue.com/Article/yyzx/201203/49964.html"
+    },
+    "www.zydcd.com": {
+      "id": 2052421,
+      "url": "http://www.zydcd.com/YiAn/25215eizz.html"
+    },
+    "article.iiyi.com": {
+      "id": 2131083,
+      "url": "https://article.iiyi.com/detail/10052.html"
+    },
+    "ask.39.net": {
+      "id": 2136736,
+      "url": "https://ask.39.net/question/100015049.html"
+    },
+    "baidianfeng.familydoctor.com.cn": {
+      "id": 2474097,
+      "url": "https://baidianfeng.familydoctor.com.cn/"
+    },
+    "bingli.iiyi.com": {
+      "id": 2502455,
+      "url": "https://bingli.iiyi.com/show/66406-1.html"
+    },
+    "jb39.com": {
+      "id": 2509534,
+      "url": "https://jb39.com/jibing/AiZiBingRenDeJiXingLanWeiYan256234.htm"
+    },
+    "jbk.39.net": {
+      "id": 2516810,
+      "url": "https://jbk.39.net/aechmbxcd/"
+    },
+    "test.pmphai.com": {
+      "id": 2535946,
+      "url": "https://test.pmphai.com/jeesitede/appcase/toPcDetail?sessionId=&knowledgeLibPrefix=case&id=11912"
+    },
+    "www.a-hospital.com": {
+      "id": 2989615,
+      "url": "https://www.a-hospital.com/w/%CE%91-%E5%B9%B2%E6%89%B0%E7%B4%A0"
+    },
+    "www.baidu.com": {
+      "id": 3159015,
+      "url": "https://www.baidu.com/bh/dict/ydxx_10564436041452919187?from=dicta&sf_ref=med_pc&sf_ch=ch_med_pc"
+    },
+    "www.familydoctor.cn": {
+      "id": 3530727,
+      "url": "https://www.familydoctor.cn/a/201308/493539.html"
+    },
+    "www.familydoctor.com.cn": {
+      "id": 3530776,
+      "url": "https://www.familydoctor.com.cn/baby/a/201005/119629.html"
+    },
+    "www.msdmanuals.cn": {
+      "id": 3978224,
+      "url": "https://www.msdmanuals.cn/home/blood-disorders/anemia/anemia-due-to-excessive-bleeding"
+    },
+    "www.youlai.cn": {
+      "id": 3984400,
+      "url": "https://www.youlai.cn/yyk/article/187456.html"
+    },
+    "zhongyibaodian.net": {
+      "id": 4030538,
+      "url": "https://zhongyibaodian.net/a/100023.html"
+    },
+    "zysjonline.com": {
+      "id": 4178045,
+      "url": "https://zysjonline.com/articles/misc/10944/"
+    }
+  }
+}

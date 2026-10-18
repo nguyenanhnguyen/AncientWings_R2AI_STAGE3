@@ -1,0 +1,169 @@
+{
+  "started_at": "2026-10-13T21:22:48+07:00",
+  "source_file": "data\\research\\eda\\results\\url_health_20261013\\links_corpus_vi_en_zh.parquet",
+  "source_sha256": "87e44a792d7a99fb0fde5dff7f09f1a38a0a1fdf02ddd1ac93a005736e00b0a7",
+  "sample_per_domain": 50,
+  "seed": 20261013,
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+  "requested_sources": {
+    "pubmed.ncbi.nlm.nih.gov": 240000,
+    "suckhoecongdongonline.vn": 154503,
+    "www.120ask.com": 98160,
+    "suckhoedoisong.vn": 85823,
+    "nhathuoclongchau.com.vn": 79598,
+    "thanhnien.vn": 72111,
+    "www.vinmec.com": 26129,
+    "medlatec.vn": 24762
+  },
+  "run_note": "Initial run stopped after seven sources completed; 120ask limited to two original HTTP URLs with retries and HTTPS alternatives, plus one additional original HTTPS URL with retries (2-second per-address connect timeout). Remaining 47 120ask samples untested.",
+  "completed_source_count": 7,
+  "total_tested_urls": 353,
+  "finished_at": "2026-10-13T21:29:47+07:00",
+  "by_domain": {
+    "pubmed.ncbi.nlm.nih.gov": {
+      "expected_count": 240000,
+      "actual_count": 240000,
+      "schemes": {
+        "https": 240000
+      },
+      "homepage_urls": 0,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "blocked_http": 50
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "suckhoecongdongonline.vn": {
+      "expected_count": 154503,
+      "actual_count": 154503,
+      "schemes": {
+        "https": 154503
+      },
+      "homepage_urls": 1,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 50
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "www.120ask.com": {
+      "expected_count": 98160,
+      "actual_count": 98160,
+      "schemes": {
+        "http": 85916,
+        "https": 12244
+      },
+      "homepage_urls": 0,
+      "sampled": 3,
+      "planned": 50,
+      "untested": 47,
+      "classifications": {
+        "timeout": 2,
+        "temporary_http": 1
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "suckhoedoisong.vn": {
+      "expected_count": 85823,
+      "actual_count": 85823,
+      "schemes": {
+        "https": 85823
+      },
+      "homepage_urls": 0,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 50
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "nhathuoclongchau.com.vn": {
+      "expected_count": 79598,
+      "actual_count": 79598,
+      "schemes": {
+        "https": 79598
+      },
+      "homepage_urls": 0,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 50
+      },
+      "redirects": 4,
+      "recovered_on_retry": 1,
+      "https_alternative_ok": 0
+    },
+    "thanhnien.vn": {
+      "expected_count": 72111,
+      "actual_count": 72111,
+      "schemes": {
+        "https": 72111
+      },
+      "homepage_urls": 0,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 50
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "www.vinmec.com": {
+      "expected_count": 26129,
+      "actual_count": 26129,
+      "schemes": {
+        "https": 26129
+      },
+      "homepage_urls": 0,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 49,
+        "suspected_missing_article": 1
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    },
+    "medlatec.vn": {
+      "expected_count": 24762,
+      "actual_count": 24762,
+      "schemes": {
+        "https": 24762
+      },
+      "homepage_urls": 1,
+      "sampled": 50,
+      "planned": 50,
+      "untested": 0,
+      "classifications": {
+        "http_ok": 50
+      },
+      "redirects": 0,
+      "recovered_on_retry": 0,
+      "https_alternative_ok": 0
+    }
+  },
+  "pubmed_api_verification": {
+    "http_status": 200,
+    "returned_articles": 50,
+    "missing_pmids": [],
+    "articles_with_abstract": 50
+  }
+}

@@ -202,6 +202,7 @@ def main():
     source_views = {}
     longchau_parser = None
     ask120_parser = None
+    cnkang_parser = None
     for r in records:
         case = {'id': r['id'], 'url': r['url'], 'quality_status': r.get('quality_status'), 'flags': []}
         if 'text' in r and sha(r['text'].encode()) != r['text_sha256']:
@@ -235,6 +236,22 @@ def main():
                     longchau_parser = load_longchau(out)
                 source_views[r['id']], details = audit_longchau(r, body, longchau_parser)
                 case.update(details)
+            elif (urlsplit(r['url']).hostname or '').lower() == 'cnkang.com' or \
+                    (urlsplit(r['url']).hostname or '').lower().endswith('.cnkang.com'):
+                if r.get('status') == 'extracted':
+                    if cnkang_parser is None:
+                        parser_path = out / 'cnkang_snapshot.py'
+                        if not parser_path.exists(): parser_path = Path(__file__).with_name('cnkang.py')
+                        spec = importlib.util.spec_from_file_location('audit_cnkang', parser_path)
+                        cnkang_parser = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(cnkang_parser)
+                    if r.get('extractor') != cnkang_parser.EXTRACTOR:
+                        raise ValueError(f"Legacy cnkang extraction: {r['id']}; use a new run and recovery.")
+                    case.update(cnkang_parser.audit(body, r.get('final_url') or r['url'], r,
+                                                    r.get('content_type') or 'text/html'))
+                    source_views[r['id']] = r.get('text_before', '')
+                else:
+                    case['cnkang_http_evidence_only'] = True
             elif not body.startswith(b'%PDF-'):
                 enc = r.get('declared_encoding') or 'utf-8'
                 tree, parse_flag = raw_html_tree(body, enc)
@@ -277,6 +294,7 @@ def main():
                'documents_with_intro': sum(c.get('intro_preserved') is not None for c in cases),
                'documents_with_intro_preserved': sum(c.get('intro_preserved') is True for c in cases),
                'documents_with_source_tables': sum(c.get('source_table_count', 0) > 0 for c in cases),
+               'cnkang_raw_records_verified': sum(c.get('cnkang_raw_reextraction_verified', False) for c in cases),
                'pubmed_xml_records_verified': sum(c.get('pubmed_xml_verified', False) for c in cases),
                'pubmed_abstract_sections_verified': sum(c.get('pubmed_abstract_sections', 0) for c in cases),
                'longchau_raw_records_verified': sum(c.get('longchau_raw_reextraction_verified', False) for c in cases),

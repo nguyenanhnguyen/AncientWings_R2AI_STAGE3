@@ -10,6 +10,9 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 import zlib
+import requests
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from test_notebook_selenium_fallback import assignments, load_module
 
@@ -80,7 +83,8 @@ class CnkangParserTests(unittest.TestCase):
             with self.subTest(crawler=crawler.__name__):
                 doc = crawler.extract(disease_page(), 'text/html; charset=UTF-8', URL)
                 self.assertEqual(doc['title'], '正文标题')
-                self.assertEqual(doc['extractor'], 'cnkang_dise_dom_v1')
+                self.assertEqual(doc['extractor'], 'cnkang_v6_spec_dom')
+                self.assertEqual(doc['template'], 'detailc')
                 for text in PARAGRAPHS:
                     self.assertIn(text, doc['text'])
                 for text in ('疾病导航标题', '广告咨询', '上一篇下一篇', '热门文章导航'):
@@ -115,7 +119,8 @@ class CnkangParserTests(unittest.TestCase):
             with self.subTest(crawler=crawler.__name__):
                 doc = crawler.extract(disease_page(article), 'text/html', 'https://www.cnkang.com/yyk/article/1.html')
                 self.assertEqual(doc['title'], '旧版正文标题')
-                self.assertEqual(doc['extractor'], 'cnkang_article_dom_v1')
+                self.assertEqual(doc['extractor'], 'cnkang_v6_spec_dom')
+                self.assertEqual(doc['template'], 'endtext')
                 for text in ('推荐广告', '评论模块', '推荐文章'):
                     self.assertNotIn(text, doc['text'])
                 self.assertEqual(crawler.quality(doc)['quality_status'], 'accepted')
@@ -145,21 +150,38 @@ class CnkangParserTests(unittest.TestCase):
         self.assertTrue(original['domain_parser_fallback'])
 
     def test_correct_disease_page_reaches_accepted_corpus_without_selenium(self):
+        source = self.out / 'source.parquet'
+        pq.write_table(pa.Table.from_pylist([{'id':1,'url':URL}]),source)
         self.crawler.jsonl(self.out / 'sample.jsonl', [self.sample])
         self.crawler.write_json(self.out / 'manifest.json', {
-            'sample_sha256': self.crawler.file_hash(self.out / 'sample.jsonl'), 'sampling': 'test fixture'})
+            'sample_sha256': self.crawler.file_hash(self.out / 'sample.jsonl'), 'sampling': 'test fixture',
+            'source':str(source),'source_sha256':self.crawler.file_hash(source)})
         self.crawler.write_json(self.out / 'source_profile.json', {
             'rows': 1, 'host_counts': {'www.cnkang.com': 1}, 'sample_host_counts': {'www.cnkang.com': 1}})
-        with patch.object(self.crawler.Fetcher, 'request_once',
-                          return_value=(200, {'Content-Type': 'text/html; charset=UTF-8'}, disease_page())), \
-                patch.object(self.probe, 'browser_preflight'), \
+        def response(url, **kwargs):
+            result = requests.Response()
+            result.status_code = 200
+            result._content = b'User-agent: *\nAllow: /\n' if url.endswith('/robots.txt') else disease_page()
+            result._content_consumed = True
+            result.headers['Content-Type'] = 'text/plain' if url.endswith('/robots.txt') else 'text/html; charset=UTF-8'
+            return result
+
+        with patch('requests.Session.get', side_effect=response), patch('time.sleep'), \
+                patch.object(self.probe, 'browser_preflight') as preflight, \
                 patch.object(self.probe, 'create_browser') as browser, redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
         browser.assert_not_called()
+        preflight.assert_not_called()
         self.assertEqual(summary['accessible'], 1)
         accepted = [json.loads(line) for line in (self.out / 'corpus.accepted.jsonl').read_text(encoding='utf-8').splitlines()]
         self.assertEqual(len(accepted), 1)
         self.assertEqual(accepted[0]['title'], '正文标题')
+        (self.out/'cnkang_snapshot.py').write_bytes((self.root/'cnkang_snapshot.py').read_bytes())
+        auditor = load_module('cnkang_test_audit',self.root/'audit_snapshot.py')
+        with patch('sys.argv',['audit','--out',str(self.out)]), redirect_stdout(io.StringIO()):
+            auditor.main()
+        audit_summary=json.loads((self.out/'audit_summary.json').read_text(encoding='utf-8'))
+        self.assertEqual(audit_summary['cnkang_raw_records_verified'],1)
 
     def test_quality_reviews_are_batched_and_not_counted_as_access_failures(self):
         samples = [dict(self.sample, id=i, url=URL + f'?test={i}') for i in range(1, 302)]
