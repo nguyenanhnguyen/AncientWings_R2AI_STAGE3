@@ -296,24 +296,32 @@ def export(out, samples, history_summary=None):
     for branch in sorted({r['branch'] for r in samples}):
         rows = [r for r in records if r['branch'] == branch]
         by_branch.append({'branch':branch,'selected':sum(r['branch']==branch for r in samples),
-            'completed':len(rows),'fetched':sum(bool(r.get('fetched_at')) for r in rows),
+            'completed':len(rows),
+            'responses_received':sum(bool(r.get('fetched_at')) for r in rows),
+            'fetched':sum(r['status'] in ('fetched','parse_failed','extracted') for r in rows),
             'parsed':sum(r['status']=='extracted' for r in rows),
             'fetch_failed':sum(r['crawl_status']=='fetch_failed' for r in rows),
             'parser_review':sum(bool(r.get('parser_flags')) for r in rows),
             'source_review':sum(bool(r.get('source_flags')) for r in rows),
+            'date_checked':sum(r['status']=='extracted' for r in rows),
             'date_missing':sum(r['status']=='extracted' and not r.get('date_candidates') for r in rows)})
     save_csv(out / 'summary_by_branch.csv', by_branch, ['branch','selected','completed','fetched','parsed',
-                                                       'fetch_failed','parser_review','source_review','date_missing'])
+                                                       'fetch_failed','parser_review','source_review',
+                                                       'responses_received','date_checked','date_missing'])
     summary = {'target': (history_summary or {}).get('requested',len(samples)),
         'selected':len(samples),'completed':len(records),'pending':len(samples)-len(records),
-        'fetched':sum(bool(r.get('fetched_at')) for r in records),
+        'responses_received':sum(bool(r.get('fetched_at')) for r in records),
+        'fetched':sum(r['status'] in ('fetched','parse_failed','extracted') for r in records),
         'parsed':sum(r['status']=='extracted' for r in records),
+        'parse_failed':sum(r['status']=='parse_failed' for r in records),
+        'parser_clean_pages':sum(r['status']=='extracted' and not r.get('parser_flags') for r in records),
         'fetch_failed':sum(r['crawl_status']=='fetch_failed' for r in records),
         'parser_review_pages':sum(bool(r.get('parser_flags')) for r in records),
         'source_review_pages':sum(bool(r.get('source_flags')) for r in records),
         'parser_flags':dict(Counter(f for r in records for f in set(r.get('parser_flags', [])))),
         'source_flags':dict(Counter(f for r in records for f in set(r.get('source_flags', [])))),
         'templates':dict(Counter(r.get('template','not_parsed') for r in records)),
+        'date_checked':sum(r['status']=='extracted' for r in records),
         'date_missing':sum(r['status']=='extracted' and not r.get('date_candidates') for r in records),
         'history_state':(history_summary or {}).get('state'),
         'history_scope':(history_summary or {}).get('history_scope'),
@@ -325,6 +333,10 @@ def export(out, samples, history_summary=None):
     write_json(out / 'summary.json', summary)
     lines = ['# Báo cáo cnkang', '', summary['history_warning'], '',
              json.dumps(summary,ensure_ascii=False,indent=2), '',
+             'responses_received đếm URL có phản hồi HTTP, kể cả redirect/lỗi. '
+             'fetched chỉ đếm HTML đã qua kiểm tra fetch, kể cả trang sau đó lỗi parser. '
+             'parsed đếm trang trích xuất được; parser_clean_pages là số trang không có cờ parser. '
+             'date_missing chỉ tính trên date_checked trang trích xuất được.', '',
              'QC là heuristic trích xuất; không xác nhận độ đúng y khoa.', '',
              '## Mẫu từng nhánh (giới hạn đầu/cuối)', '']
     for i, branch in enumerate(sorted({r['branch'] for r in records})):

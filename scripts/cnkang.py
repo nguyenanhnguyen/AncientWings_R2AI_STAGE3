@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from lxml import html, etree
 
-VERSION = 'cnkang-v6-spec-1'
+VERSION = 'cnkang-v6-spec-2'
 EXTRACTOR = 'cnkang_v6_spec_dom'
 
 
@@ -219,7 +219,10 @@ def metadata(tree, body, template, container):
         if not headings:
             headings = body.xpath('preceding::h1[1]')
         heading = node_text(headings[0]) if headings else ''
-        before = list(body.itersiblings(preceding=True))[:4]
+        # Comments and processing instructions are not metadata elements. Filter
+        # before taking the window so they cannot hide the actual date/source.
+        before = [n for n in body.itersiblings(preceding=True)
+                  if isinstance(n.tag, str)][:4]
         context = '\n'.join(node_text(n) for n in reversed(before) if len(node_text(n)) < 1000)
         method = 'endtext_adjacent_metadata'
     dates = list(dict.fromkeys(DATE.findall(context)))
@@ -313,7 +316,11 @@ def review_text(text, tree, encoding):
 
 def extract(body, url, content_type='text/html'):
     decoded, encoding = decode_bytes(body, content_type)
-    tree = html.fromstring(decoded)
+    # Decoding has already selected the encoding. Strip only the leading XML
+    # declaration that lxml rejects on Unicode input; keep Unicode HTML parsing
+    # so the original declaration cannot trigger a second, incorrect decode.
+    parse_input = re.sub(r'\A(\ufeff?\s*)<\?xml\s[^?]*\?>', r'\1', decoded, count=1, flags=re.I)
+    tree = html.fromstring(parse_input)
     node, template, candidates, flags, container = choose_body(tree)
     before = node_text(node)
     fallback = None

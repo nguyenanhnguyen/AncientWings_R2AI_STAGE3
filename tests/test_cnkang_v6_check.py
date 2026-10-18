@@ -42,6 +42,29 @@ def response(status=200, body=None, headers=None):
 
 
 class ParserTests(unittest.TestCase):
+    def test_endtext_metadata_skips_comments_and_processing_instructions(self):
+        raw = page().replace(b'<div id="endText">',
+            b'<!-- spacer --><!-- spacer --><!-- spacer --><!-- spacer -->'
+            b'<?legacy instruction?><div id="endText">')
+        doc = cnkang.extract(raw, URL)
+        self.assertEqual(doc['date_candidates'], ['2020-01-02'])
+        self.assertEqual(doc['source_name'], '医院 2020-01-02')
+        self.assertEqual(doc['heading_title'], '正文标题')
+        self.assertEqual(doc['text'].count(TEXT), 8)
+
+    def test_xml_declaration_preserves_selected_encoding_and_chinese(self):
+        for encoding in ('utf-8', 'gb2312'):
+            raw = (f'<?xml version="1.0" encoding="{encoding}"?>\r\n'.encode()
+                   + page(encoding=encoding))
+            doc = cnkang.extract(raw, URL)
+            self.assertEqual(doc['text'].count(TEXT), 8)
+            self.assertEqual(doc['heading_title'], '正文标题')
+            self.assertEqual(doc['date_candidates'], ['2020-01-02'])
+            self.assertFalse(doc['encoding_uncertain'])
+            self.assertEqual(doc['selected_encoding'],
+                             'utf-8' if encoding == 'utf-8' else 'gb18030')
+            self.assertTrue(cnkang.audit(raw, URL, doc)['cnkang_raw_reextraction_verified'])
+
     def test_strict_encoding_and_table_inline_order(self):
         for encoding in ('utf-8', 'gb2312', 'gb18030'):
             raw = page('<p>正文<a>中文</a>链接</p><table><tr><td>BRCA1</td><td>50mg</td></tr></table>',
@@ -274,7 +297,36 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(r['challenge_detected'])
         summary=check.export(self.out,[self.sample])
         self.assertEqual(summary['fetch_failed'],1)
+        self.assertEqual(summary['responses_received'],1)
+        self.assertEqual(summary['fetched'],0)
+        self.assertEqual(summary['date_checked'],0)
         self.assertEqual(r['text_sha256'],cnkang.sha(r['text']))
+
+    def test_summary_separates_responses_fetch_parse_and_date_coverage(self):
+        samples = []
+        cases = [('extracted','parsed',200,['2020-01-02']),
+                 ('extracted','needs_review',200,[]),
+                 ('parse_failed','needs_review',200,[]),
+                 ('fetch_failed','fetch_failed',302,[]),
+                 ('fetch_failed','fetch_failed',404,[]),
+                 ('fetch_failed','fetch_failed',None,[])]
+        for i,(status,crawl_status,http_status,dates) in enumerate(cases,1):
+            sample = dict(self.sample,id=i)
+            samples.append(sample)
+            r = dict(sample,status=status,crawl_status=crawl_status,http_status=http_status,
+                     fetched_at='2026-10-18' if http_status else None,
+                     date_candidates=dates,parser_flags=['PARSER_EXCEPTION_REVIEW']
+                     if status=='parse_failed' else [],source_flags=[])
+            transport.write_json(self.out/f'records/{i}.json',r)
+        summary = check.export(self.out,samples)
+        for key,value in dict(responses_received=5,fetched=3,parsed=2,parse_failed=1,
+                              fetch_failed=3,date_checked=2,date_missing=1).items():
+            self.assertEqual(summary[key],value,key)
+        import csv
+        with (self.out/'summary_by_branch.csv').open(encoding='utf-8-sig',newline='') as stream:
+            branch = next(csv.DictReader(stream))
+        for key in ('responses_received','fetched','parsed','fetch_failed','date_checked','date_missing'):
+            self.assertEqual(int(branch[key]),summary[key],key)
 
 
 class NotebookTests(unittest.TestCase):

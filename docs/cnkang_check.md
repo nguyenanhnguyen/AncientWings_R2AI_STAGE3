@@ -83,3 +83,18 @@ không chọn mẫu/tải lại, encoding, conmain lồng sâu/mơ hồ, synopsi
 abstract/bảng/URL hợp lệ, PUA, 403/429, và không dùng browser trong runner chính.
 Không có raw 120 trang cũ để xác nhận các mốc v6 trên cùng baseline, và chưa crawl
 live 500 trang bằng notebook mới.
+
+## Sửa lỗi từ run ngày 2026-10-18
+
+Parser `cnkang-v6-spec-2` bỏ qua comment/processing instruction khi lấy metadata
+trước `endText`, và bỏ khai báo XML đầu tài liệu sau khi đã chọn encoding để lxml
+nhận chuỗi Unicode. Có kiểm thử hồi quy cho cả UTF-8 và GB2312.
+
+Báo cáo phân biệt `responses_received` (URL có phản hồi HTTP, gồm redirect/lỗi)
+với `fetched` (HTML qua kiểm tra fetch, kể cả sau đó lỗi parser), `parsed` và
+`parse_failed`. `parser_clean_pages` chỉ đếm trang trích xuất được không có cờ
+parser. `date_missing` có mẫu số riêng là `date_checked`, không bao gồm trang
+chưa trích xuất được. Các cờ nguồn vẫn độc lập với chất lượng parser.
+
+Notebook check và hai notebook crawl được build lại với snapshot mới. Run cũ
+giữ nguyên ZIP/checkpoint; dùng thư mục run mới khi chạy bản mã mới.
