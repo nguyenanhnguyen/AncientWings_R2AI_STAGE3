@@ -15,7 +15,9 @@ def main():
     keys=('crawler_snapshot.py','priority_probe_snapshot.py','ask120_snapshot.py')
     files={k:pack['EMBEDDED_FILES'][k] for k in keys}
     hashes={k:pack['EMBEDDED_SHA256'][k] for k in keys}
-    for name,source in (('ask120_snapshot.py','ask120.py'),('ask120_gate.py','ask120_gate.py')):
+    for name,source in (('ask120_snapshot.py','ask120.py'),('ask120_gate.py','ask120_gate.py'),
+                        ('ask120_experiments.py','ask120_experiments.py'),
+                        ('ask120_experiment_baseline.json','ask120_experiment_baseline.json')):
         body=(ROOT/'scripts'/source).read_bytes()
         files[name]=base64.b85encode(zlib.compress(body,9)).decode('ascii')
         hashes[name]=hashlib.sha256(body).hexdigest()
@@ -55,6 +57,7 @@ HISTORY_PATHS = []     # ZIP run hoặc thư mục/file JSONL mẫu/lịch sử 
 MANUAL_REVIEW_PATH = None
 MIN_ANSWER_CHARS = 20
 EXPORT_CANDIDATE_CORPUS = True
+RUN_EXPERIMENTS = True  # Offline A/B; cần replay đủ regression và EXPORT_CANDIDATE_CORPUS=True.
 ALLOW_UPLOAD = False
 DELAY = 2.0
 ATTEMPTS = 2
@@ -76,6 +79,8 @@ if sys.version_info < (3,11): raise RuntimeError('Cần Python 3.11+')
 import importlib.util
 import subprocess
 needed={'lxml':'lxml','pyarrow':'pyarrow','IPython':'ipython'}
+if RUN_EXPERIMENTS:
+    needed['requests']='requests'
 if MODE=='crawl_new':
     needed.update(requests='requests',trafilatura='trafilatura',tld='tld')
 missing=[package for module,package in needed.items() if importlib.util.find_spec(module) is None]
@@ -123,7 +128,7 @@ Replay đọc raw response cuối, kiểm hash, lưu raw và kết quả mới s
 Không import support/script từ input. Raw thiếu hoặc hash sai trở thành EXCLUDE có reason.
 Crawl mới giới hạn một worker/delay 2 giây, dừng khi 429/challenge, không browser.
 Checkpoint gắn parser/policy hash; resume không bỏ qua kết quả khác phiên bản.
-Sau interrupt có thể chạy lại hai ô cuối để tổng hợp/ZIP phần hoàn tất.
+Sau interrupt có thể chạy lại ô tổng hợp và ô ZIP để lưu phần hoàn tất.
 ''')
     add('code','''
 try:
@@ -147,6 +152,70 @@ print('Kết luận:',summary['readiness'])
 print('Candidate:',summary['candidate_documents'],'documents /',summary['candidate_threads'],'threads')
 print('Manual review:',summary['manual_reviewed'],'/',summary['manual_required'])
 print('Đọc report.md và regression_comparison.csv; không chỉ so số accepted.')
+''')
+    add('markdown','''
+## Thí nghiệm A/B — kiểm chứng hướng sửa (20/10/2026)
+
+Các ô dưới chạy **offline**, dùng bản sao và fixture riêng. Baseline là snapshot V3 trước fix,
+được đóng băng và kiểm hash; candidate là source đã fix hiện tại, sao vào `experiments/.../suggested_patch/`. Không sửa source production
+hoặc dùng nhãn thử làm review nội dung thật. Mỗi lần chạy ô khởi tạo tạo thư mục thí nghiệm mới.
+
+Ba giả thuyết: (1) giữ nhãn PARSER_ERROR khi chọn lại mẫu review, (2) phát hiện raw/metadata
+đổi trước khi resume và khôi phục raw output bị mất, (3) lưu media câu hỏi và chuyển REVIEW.
+Cuối cùng parse lại toàn bộ raw bằng bản sửa thử để đo thay đổi candidate/regression.
+Baseline FAIL ở các ca tái hiện lỗi là kết quả thí nghiệm; candidate phải PASS các guard đã đặt.
+Đặt RUN_EXPERIMENTS=False để chỉ chạy check thường. Các thí nghiệm cần mẫu có đủ chín regression
+và ít nhất 50 thread INCLUDE thông thường; không áp dụng trực tiếp cho crawl_new thiếu các ca này.
+''')
+    add('code','''
+# Khởi tạo thí nghiệm; helper được đóng gói và kiểm hash như parser/gate.
+if RUN_EXPERIMENTS:
+    spec_exp=importlib.util.spec_from_file_location('ask120_experiment_runtime',SUPPORT_DIR/'ask120_experiments.py')
+    experiments=importlib.util.module_from_spec(spec_exp)
+    spec_exp.loader.exec_module(experiments)
+    EXPERIMENT_DIR=RUN_DIR/'experiments'/datetime.now(timezone.utc).strftime('ab_%Y%m%dT%H%M%S%fZ')
+    EXP=experiments.prepare(gate,RUN_DIR,EXPERIMENT_DIR)
+    print('Bản sửa thử và kết quả:',EXPERIMENT_DIR)
+''')
+    add('code','''
+# Thí nghiệm 1: nhãn EXCLUDE + PARSER_ERROR phải còn trong audit và chặn readiness.
+# Nhãn giả lập có raw/parser/policy hash thật; kiểm thêm nhãn stale vẫn bị từ chối.
+if RUN_EXPERIMENTS:
+    manual_ab=experiments.manual_review_ab(EXP)
+    display(manual_ab)
+''')
+    add('code','''
+# Thí nghiệm 2: nguồn đổi phải từ chối resume; nguồn không đổi không parse lại.
+# Kiểm riêng raw+hash, final_url, charset, HTTP status, mất raw output và hash nguồn sai.
+if RUN_EXPERIMENTS:
+    resume_ab=experiments.resume_ab(EXP)
+    display(resume_ab)
+''')
+    add('code','''
+# Thí nghiệm 3: text thuần, ảnh y khoa, lazy image, private placeholder và template fallback.
+# Ảnh chưa rõ vai trò vẫn REVIEW; không tự đoán ảnh trang trí để cho qua gate.
+if RUN_EXPERIMENTS:
+    media_ab=experiments.media_ab(EXP)
+    display(media_ab)
+''')
+    add('code','''
+# Thí nghiệm 4: parse lại tất cả raw đã kiểm hash bằng parser/gate candidate.
+# So candidate ID/text, quyết định trang, chín regression và các invariant văn bản.
+if RUN_EXPERIMENTS:
+    impact_ab=experiments.impact_replay(EXP)
+    display(impact_ab)
+''')
+    add('code','''
+# Báo cáo A/B + bản sao source hiện tại để đối chiếu với baseline V3 trước fix.
+if RUN_EXPERIMENTS:
+    from IPython.display import Markdown
+    experiment_report=experiments.report(EXP)
+    display(Markdown(experiment_report.read_text(encoding='utf-8')))
+    display(FileLink(str(experiment_report)))
+    display(FileLink(str(EXPERIMENT_DIR/'experiment_results.json')))
+    display(FileLink(str(EXPERIMENT_DIR/'suggested.patch')))
+    display(FileLink(str(EXPERIMENT_DIR/'suggested_patch/ask120_gate.py')))
+    display(FileLink(str(EXPERIMENT_DIR/'suggested_patch/ask120_snapshot.py')))
 ''')
     add('code','''
 import shutil

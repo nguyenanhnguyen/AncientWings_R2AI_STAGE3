@@ -301,6 +301,10 @@ class ReplayGateTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(body).hexdigest(),pack['EMBEDDED_SHA256']['ask120_snapshot.py'])
         gate_body=zlib.decompress(base64.b85decode(pack['EMBEDDED_FILES']['ask120_gate.py']))
         self.assertEqual(gate_body,(ROOT/'scripts/ask120_gate.py').read_bytes())
+        for name in ('ask120_experiments.py','ask120_experiment_baseline.json'):
+            body=zlib.decompress(base64.b85decode(pack['EMBEDDED_FILES'][name]))
+            self.assertEqual(body,(ROOT/'scripts'/name).read_bytes())
+            self.assertEqual(hashlib.sha256(body).hexdigest(),pack['EMBEDDED_SHA256'][name])
 
 
 if __name__=='__main__':unittest.main()

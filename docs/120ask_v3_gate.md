@@ -1,5 +1,35 @@
 # 120ask V3 và xét nhập candidate corpus
 
+## Cập nhật V3.1 — 20/10/2026
+
+Parser hiện là `120ask-parser-v3.1`, gate `120ask-gate-v2`, policy
+`120ask-admission-v2`; extractor family và schema Parquet giữ nguyên.
+Tạo output run mới để replay raw cũ; không resume checkpoint hoặc tự chuyển nhãn
+review có parser/policy hash cũ sang bản này.
+
+- `manual_review_cohort.json` giữ tập mục review bắt buộc theo parser/gate/policy/sample
+  hash. Mục cũ và nhãn EXCLUDE vẫn còn khi bổ sung mẫu thay thế; PARSER_ERROR trong
+  mọi nhãn hợp lệ chặn readiness. Vẫn phải truyền MANUAL_REVIEW_PATH khi tổng hợp
+  với nhãn đã điền; không tự tạo nhãn reviewer.
+- Replay khóa cả hash record nguồn, kiểm mapping/metadata/raw trước khi skip,
+  khôi phục raw output từ source hợp lệ nếu bản output mất/hỏng. Crawl mới kiểm
+  fetch checkpoint và raw, không âm thầm gửi request bù khi resume; có thể tiếp
+  tục từ fetch đã lưu nếu bị ngắt trước khi ghi parsed record. 429/challenge đã
+  dừng run vẫn được giữ khi resume.
+- Câu hỏi lưu `question_media`, `question_attachment_urls` với DOM locator,
+  thuộc tính gốc và alt; nhận diện img/audio/video/source, src/data-src/data-original,
+  poster và srcset/data-srcset. Media chưa giải quyết chuyển ESSENTIAL_MEDIA_REVIEW;
+  không tự coi ảnh alt rỗng là trang trí. Raw auditor và candidate JSONL giữ các
+  trường này; Parquet không thêm cột.
+- Tổng hợp từ chối runtime/checkpoint khác hash hoặc raw đã mất/hỏng trước khi
+  xuất lại candidate.
+- Check notebook giữ sáu cell A/B: baseline V3 trước fix được đóng băng và kiểm
+  hash trong `scripts/ask120_experiment_baseline.json`; candidate là source hiện tại.
+  Baseline này chỉ phục vụ thí nghiệm, không dùng cho crawl production.
+
+Test bổ sung: `tests/test_ask120_fixes.py`. Báo cáo triển khai:
+[120ask_fixes_20261020.md](reports/120ask_fixes_20261020.md).
+
 Notebook check giữ tên legacy notebooks/check_120ask_50.ipynb, nhưng LIMIT mặc định
 là 1.000. MODE mặc định replay. Notebook vẫn được gitignore; tái tạo bằng:
 

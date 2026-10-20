@@ -8,12 +8,12 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 from lxml import html
 
 
-VERSION = '120ask-parser-v3'
+VERSION = '120ask-parser-v3.1'
 EXTRACTOR = '120ask_qa_dom_v3'
 HOSTS = {'120ask.com', 'www.120ask.com'}
 QUESTION_PATH = re.compile(r'/question/[0-9]+\.htm')
@@ -251,6 +251,22 @@ def _locator(node):
     return node.getroottree().getpath(node)
 
 
+def _question_media(nodes, url):
+    evidence = []
+    for node in nodes:
+        for element in node.xpath('.//img|.//audio|.//video|.//source'):
+            attributes = {key:element.get(key) for key in ('src','data-src','data-original','poster','srcset','data-srcset')
+                          if element.get(key)}
+            values = [value for key,value in attributes.items() if 'srcset' not in key]
+            for key,value in attributes.items():
+                if 'srcset' in key:
+                    values.extend(part.strip().split()[0] for part in value.split(',') if part.strip())
+            urls = list(dict.fromkeys(urljoin(url,value) for value in values))
+            evidence.append({'tag':element.tag, 'urls':urls, 'attributes':attributes,
+                             'alt':element.get('alt'), 'dom_locator':_locator(element)})
+    return evidence
+
+
 def extract(body, url, content_type=''):
     if not is_question_url(url): raise ValueError('Not a 120ask question URL')
     tree, encoding, decode_warning = _tree(body, content_type)
@@ -263,6 +279,7 @@ def extract(body, url, content_type=''):
     question_raw = _node_text(questions[0]) if questions else ''
     question = QUESTION_LABELS.sub('',question_raw).strip()
     question_valid = len(questions) == 1 and bool(compact(question))
+    question_media = _question_media(questions, url)
     boxes = tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," b_answerbox ")]')
     boxes = [b for b in boxes if not any(_has_class(p,'b_answerbox') for p in b.iterancestors())]
     cards, all_followups = [], []
@@ -395,6 +412,7 @@ def extract(body, url, content_type=''):
     reasons = []
     if len(titles)!=1 or not title: reasons.append('ask120_missing_or_ambiguous_title')
     if not question_valid: reasons.append('ask120_missing_or_ambiguous_question')
+    if question_media: reasons.append('ask120_question_media_review')
     if not text_answers: reasons.append('ask120_no_main_answer')
     if semantics=='unresolved': reasons.append('PUBLISHED_COUNT_SEMANTICS_REVIEW')
     if unresolved: reasons.append('ask120_unresolved_followups')
@@ -440,6 +458,8 @@ def extract(body, url, content_type=''):
         'doctor_followups':sum(t['role']=='doctor_followup' for t in all_turns),
         'unknown_roles':qc['unknown_followup_roles'],'removed_template_tails':removed_tails,
         'ask120_question':question,'ask120_question_raw':question_raw,'question_valid':question_valid,
+        'question_media':question_media,
+        'question_attachment_urls':list(dict.fromkeys(u for item in question_media for u in item['urls'])),
         'ask120_main_answers':text_answers,'ask120_threads':threads,'ask120_qc':qc,
         'ask120_text_raw':rawtext,'ask120_text_raw_sha256':sha(rawtext),
         'ask120_review_reasons':sorted(set(reasons)),
@@ -455,7 +475,7 @@ def audit(body, url, record, content_type=''):
     fields = ('title','text','extractor','published_at','ask120_question','ask120_threads','ask120_qc',
               'ask120_text_raw','ask120_text_raw_sha256','ask120_review_reasons','ask120_parser_version',
               'source_reply_blocks','text_main_answers','audio_main_answers','mixed_main_answers',
-              'usable_text_main_answers')
+              'usable_text_main_answers','question_media','question_attachment_urls')
     mismatches = [k for k in fields if record.get(k)!=doc.get(k)]
     if mismatches: raise ValueError('120ask raw/checkpoint mismatch: '+', '.join(mismatches))
     qc=doc['ask120_qc']

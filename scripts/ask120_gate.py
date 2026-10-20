@@ -26,12 +26,12 @@ def _load_parser():
     return module
 
 PARSER = _load_parser()
-POLICY = {'version':'120ask-admission-v1','min_answer_chars':20,'manual_seed':20261020,
+POLICY = {'version':'120ask-admission-v2','min_answer_chars':20,'manual_seed':20261020,
           'manual_include_minimum':50,'promotional_claims_require_review':True}
 REGRESSIONS = ('1015858','3202910','3530545','3256774','3434509','378338','257785','13753474','77939582')
 PROMO = re.compile(r'包治|根治|无(?:任何)?(?:的)?(?:毒)?副作用|没有(?:任何)?副作用|百分之百|100%\s*治愈|有特效|彻底治愈')
 CORRUPT = re.compile(r'\ufffd|(?:Ã.|Â.){3,}|\?/[A-Za-z]+>')
-GATE_VERSION = '120ask-gate-v1'
+GATE_VERSION = '120ask-gate-v2'
 
 
 def sha(value):
@@ -161,7 +161,7 @@ def review_thread(thread,page,policy):
         if any(m in text for m in PARSER.UI_MARKERS):reasons.append('UI_CONTAMINATION_REVIEW')
         if not page.get('title'):reasons.append('TITLE_MISSING_REVIEW')
         if page['ask120_qc'].get('unresolved_blocks'):reasons.append('UNRESOLVED_PAGE_FOLLOWUPS')
-        if page.get('essential_media_missing'):reasons.append('ESSENTIAL_MEDIA_REVIEW')
+        if page.get('essential_media_missing') or page.get('question_media'):reasons.append('ESSENTIAL_MEDIA_REVIEW')
         if any(t.get('attachment_urls') for t in thread['turns']):reasons.append('ESSENTIAL_ATTACHMENT_REVIEW')
         if flags and policy.get('promotional_claims_require_review'):reasons.append('SOURCE_CLAIM_REVIEW')
         if reasons:decision='REVIEW'
@@ -208,6 +208,8 @@ def build_candidate_document(page,included_threads):
         'published_at':page.get('question_asked_at'),'raw_path':page['raw_path'],'raw_sha256':page['raw_sha256'],
         'text_sha256':sha(text),'duplicate_doc_ids':[],
         'parser_sha256':page['parser_sha256'],'policy_sha256':page['policy_sha256'],
+        'question_media':page.get('question_media',[]),
+        'question_attachment_urls':page.get('question_attachment_urls',[]),
         'included_thread_ids':[t['thread_id'] for t in included_threads],
         'excluded_or_review_threads':[{'thread_id':t['thread_id'],'decision':t['corpus_decision'],
             'reasons':t['decision_reasons']} for t in page['thread_decisions'] if t['corpus_decision']!='INCLUDE'],
@@ -223,6 +225,13 @@ def safe_raw(reader,record):
     return body
 
 
+def verify_checkpoint_source(saved, source):
+    fields=('id','url','final_url','content_type','http_status','raw_sha256')
+    source_path=saved.get('parent_raw_path',saved.get('raw_path'))
+    if any(saved.get(k)!=source.get(k) for k in fields) or source_path!=source.get('raw_path'):
+        raise ValueError('Checkpoint source evidence changed; use a new output run')
+
+
 def replay(input_path,out,policy=None):
     out=Path(out);out.mkdir(parents=True,exist_ok=True)
     policy={**POLICY,**(policy or {})}
@@ -232,7 +241,14 @@ def replay(input_path,out,policy=None):
     samples=read_jsonl_bytes(reader.read('sample.jsonl'))
     if len({s['id'] for s in samples})!=len(samples):raise ValueError('Duplicate source IDs in sample')
     if any(type(s['id']) is not int for s in samples):raise ValueError('Source IDs must be original integers')
-    identity={'mode':'replay','parent_run':str(Path(input_path).resolve()),'parent_manifest_sha256':sha(reader.read('manifest.json')),
+    record_hashes=[]
+    for sample in samples:
+        try:digest=sha(reader.read(f"records/{sample['id']}.json"))
+        except (KeyError,FileNotFoundError):digest=None
+        record_hashes.append((sample['id'],digest))
+    identity={'mode':'replay','gate_version':GATE_VERSION,
+        'parent_records_sha256':sha(json.dumps(record_hashes)),
+        'parent_run':str(Path(input_path).resolve()),'parent_manifest_sha256':sha(reader.read('manifest.json')),
         'parent_parser_sha256':(parent.get('snapshot_sha256') or {}).get('ask120_snapshot.py'),
         'parser_sha256':p_hash,'gate_sha256':g_hash,'policy_sha256':pol_hash,'policy':policy,
         'selected':len(samples),'sample_sha256':sha(reader.read('sample.jsonl'))}
@@ -258,9 +274,10 @@ def replay(input_path,out,policy=None):
             if output.exists():
                 saved=json.loads(output.read_text(encoding='utf-8'))
                 if saved.get('parser_sha256')==p_hash and saved.get('policy_sha256')==pol_hash:
-                    # Input directories can change without their manifest changing.
+                    verify_checkpoint_source(saved,old)
                     try:
                         safe_raw(reader,old)
+                        safe_raw(RunInput(out),saved)
                         continue
                     except (KeyError,FileNotFoundError,ValueError,OSError):
                         pass
@@ -282,7 +299,7 @@ def replay(input_path,out,policy=None):
                 metadata['raw_path']=path.as_posix()
                 page=parse_source_response(body,metadata)
                 page['access_status']='VAO_DUOC' if 200 <= (old.get('http_status') or 0) < 300 and not page['ask120_challenge_detected'] else 'KHONG_VAO_DUOC'
-                page['essential_media_missing']='图片涉及用户隐私' in page['ask120_question_raw']
+                page['essential_media_missing']=bool(page.get('question_media')) or '图片涉及用户隐私' in page['ask120_question_raw']
                 page['parser_status']='needs_review' if page['ask120_review_reasons'] else 'parsed'
                 threads=[review_thread(t,page,policy) for t in page['ask120_threads']]
                 page.update(thread_decisions=threads,**decide_page(threads,page))
@@ -314,11 +331,12 @@ def crawl_new(source,out,policy=None,*,limit=1000,seed=20261020,history_paths=()
         'history_paths':[str(p) for p in history_paths],'delay':delay,'attempts':attempts,
         'timeout':list(timeout),'budget':budget,'trust_env':trust_env,
         'respect_robots':respect_robots,'stop_on_block':stop_on_block}
-    identity={'mode':'crawl_new','parser_sha256':p_hash,'policy_sha256':pol_hash,
+    identity={'mode':'crawl_new','gate_version':GATE_VERSION,'parser_sha256':p_hash,'policy_sha256':pol_hash,
               'gate_sha256':sha(Path(__file__).read_bytes()),'policy':policy,'settings':settings}
     if (out/'manifest.json').exists():
         saved=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
         if any(saved.get(k)!=v for k,v in identity.items()):raise ValueError('Crawl identity changed; use a new output run')
+        if sha(Path(source).read_bytes())!=saved['source_sha256']:raise ValueError('Crawl source changed; use a new output run')
         if sha((out/'sample.jsonl').read_bytes())!=saved['sample_sha256']:raise ValueError('Sample manifest changed')
         samples=read_jsonl_bytes((out/'sample.jsonl').read_bytes())
     else:
@@ -386,13 +404,28 @@ def crawl_new(source,out,policy=None,*,limit=1000,seed=20261020,history_paths=()
     try:
         for i,sample in enumerate(samples,1):
             path=out/'records'/f"{sample['id']}.json"
+            fetch_path=out/'fetch_records'/f"{sample['id']}.json"
+            old=json.loads(fetch_path.read_text(encoding='utf-8')) if fetch_path.exists() else None
+            if old and (old.get('id')!=sample['id'] or old.get('url')!=sample['url']):
+                raise ValueError('Fetch checkpoint source mapping changed')
             if path.exists():
                 saved=json.loads(path.read_text(encoding='utf-8'))
                 if saved.get('parser_sha256')!=p_hash or saved.get('policy_sha256')!=pol_hash:
                     raise ValueError('Checkpoint parser/policy mismatch')
+                if old is None:raise ValueError('Fetch checkpoint missing; use a new output run')
+                verify_checkpoint_source(saved,old)
+                if old.get('raw_path'):
+                    try:
+                        safe_raw(RunInput(out),old)
+                        safe_raw(RunInput(out),saved)
+                    except (KeyError,FileNotFoundError,ValueError,OSError) as exc:
+                        raise ValueError('Checkpoint raw evidence missing or corrupt; use a new output run') from exc
+                if stop_on_block and (old.get('http_status')==429 or old.get('challenge_detected') or old.get('ask120_challenge_detected')):
+                    break
                 continue
-            old=probe.request_record(crawler,fetcher,sample,out,'ViBioMIR-120askGate/1.0',
-                timeout,budget,respect_robots=respect_robots,record_dir='fetch_records')
+            if old is None:
+                old=probe.request_record(crawler,fetcher,sample,out,'ViBioMIR-120askGate/1.0',
+                    timeout,budget,respect_robots=respect_robots,record_dir='fetch_records')
             baseline.append(old)
             metadata={k:old.get(k) for k in ('id','url','final_url','content_type','http_status','raw_path','raw_sha256')}
             metadata.update(parser_sha256=p_hash,policy_sha256=pol_hash,
@@ -405,7 +438,7 @@ def crawl_new(source,out,policy=None,*,limit=1000,seed=20261020,history_paths=()
                 body=safe_raw(reader,old)
                 page=parse_source_response(body,metadata)
                 page['access_status']=probe.access_outcome(old)[0]
-                page['essential_media_missing']='图片涉及用户隐私' in page['ask120_question_raw']
+                page['essential_media_missing']=bool(page.get('question_media')) or '图片涉及用户隐私' in page['ask120_question_raw']
                 page['parser_status']='needs_review' if page['ask120_review_reasons'] else 'parsed'
                 threads=[review_thread(t,page,policy) for t in page['ask120_threads']]
                 page.update(thread_decisions=threads,**decide_page(threads,page))
@@ -457,17 +490,80 @@ def load_manual(path,pages):
             page=pages.get(key[0])
             if not page or row.get('raw_sha256')!=page.get('raw_sha256') or row.get('parser_sha256')!=page.get('parser_sha256') or row.get('policy_sha256')!=page.get('policy_sha256'):
                 raise ValueError('Stale manual review provenance')
+            valid_ids={t['thread_id'] for t in page.get('thread_decisions',[])} or {'__page__'}
+            if key[1] not in valid_ids:raise ValueError('Unknown manual review thread')
         result[key]=row
     return result
+
+
+def select_manual_threads(threads,pages,policy):
+    # Seeded, stratified review: date decade / length / template / partial-page bins.
+    bins=defaultdict(list)
+    for thread in threads:
+        page=pages[thread['source_id']]
+        length=sum(len(turn['text']) for turn in thread['turns'])
+        date=page.get('question_asked_at') or 'unknown'
+        template=thread['turns'][0]['dom_locator'].rsplit('/',1)[-1].split('[')[0]
+        key=(thread['corpus_decision'],date[:3],template,
+             'short' if length<200 else 'medium' if length<1000 else 'long',
+             page['corpus_decision']=='INCLUDE_PARTIAL')
+        bins[key].append(thread)
+    rng=random.Random(policy['manual_seed'])
+    for key in sorted(bins):rng.shuffle(bins[key])
+    include_sample=[]
+    minimum=min(policy['manual_include_minimum'],sum(t['corpus_decision']=='INCLUDE' for t in threads))
+    while len(include_sample)<minimum:
+        for key in sorted(bins):
+            if key[0]=='INCLUDE' and bins[key] and len(include_sample)<minimum:
+                include_sample.append(bins[key].pop())
+    required={(t['source_id'],t['thread_id']) for t in include_sample}
+    for thread in threads:
+        qid=urlsplit(thread['url']).path.split('/')[-1].split('.')[0]
+        if qid in REGRESSIONS or thread['source_flags'] or thread.get('parser_flags'):
+            required.add((thread['source_id'],thread['thread_id']))
+    for reason in sorted({r for t in threads for r in t['decision_reasons']}):
+        thread=next(t for t in threads if reason in t['decision_reasons'])
+        required.add((thread['source_id'],thread['thread_id']))
+    for page in pages.values():
+        qid=urlsplit(page['url']).path.split('/')[-1].split('.')[0]
+        if not page.get('thread_decisions') and (qid in REGRESSIONS or page.get('replay_error')):
+            required.add((page['id'],'__page__'))
+    return include_sample,required
+
+
+def retain_review_cohort(out,manifest,required):
+    identity={key:manifest[key] for key in ('parser_sha256','gate_sha256','policy_sha256')}
+    identity['sample_sha256']=sha((out/'sample.jsonl').read_bytes())
+    path=out/'manual_review_cohort.json'
+    if path.exists():
+        previous=json.loads(path.read_text(encoding='utf-8'))
+        if previous['identity']!=identity:raise ValueError('Manual review cohort identity changed; use a new output run')
+        required.update((row['source_id'],row['thread_id']) for row in previous['threads'])
+    write_json(path,{'identity':identity,'threads':[{'source_id':key[0],'thread_id':key[1]} for key in sorted(required)]})
+    return required
 
 
 def build_outputs(out, *, manual_review_path=None, export_candidates=True):
     out=Path(out)
     manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'));policy=manifest['policy']
+    expected={'parser_sha256':sha(Path(PARSER.__file__).read_bytes()),
+              'gate_sha256':sha(Path(__file__).read_bytes()),'policy_sha256':policy_hash(policy)}
+    if any(manifest.get(key)!=value for key,value in expected.items()):
+        raise ValueError('Aggregation runtime identity changed; replay into a new output run')
     samples=read_jsonl_bytes((out/'sample.jsonl').read_bytes())
     pages={s['id']:json.loads((out/'records'/f"{s['id']}.json").read_text(encoding='utf-8'))
            for s in samples if (out/'records'/f"{s['id']}.json").exists()}
+    if any(page.get('id')!=key or page.get('parser_sha256')!=expected['parser_sha256']
+           or page.get('policy_sha256')!=expected['policy_sha256'] for key,page in pages.items()):
+        raise ValueError('Checkpoint identity differs from aggregation manifest')
+    for page in pages.values():
+        if not page.get('replay_error'):
+            try:safe_raw(RunInput(out),page)
+            except (KeyError,FileNotFoundError,ValueError,OSError) as exc:
+                raise ValueError('Aggregation raw evidence missing or corrupt; recover raw before exporting') from exc
     manual=load_manual(manual_review_path,pages)
+    automatic_threads=[t for page in pages.values() for t in page.get('thread_decisions',[])]
+    _,automatic_required=select_manual_threads(automatic_threads,pages,policy)
     all_threads=[]
     # Decisions are recomputed from immutable parsed checkpoints on every aggregation.
     for page in pages.values():
@@ -484,6 +580,10 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
                     t['corpus_decision']=label['reviewer_decision']
             all_threads.append(t)
         page.update(decide_page(page.get('thread_decisions',[]),page))
+    include_sample,required=select_manual_threads(all_threads,pages,policy)
+    required.update(automatic_required)
+    required.update(key for key,label in manual.items() if label.get('reviewer_decision'))
+    required=retain_review_cohort(out,manifest,required)
     candidates=[]
     violations=[]
     for page in pages.values():
@@ -519,33 +619,6 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
     save_csv(out/'corpus_decisions.csv',decisions,['id','url','access_status','parser_status','corpus_decision',
         'decision_reasons','include_thread_count','review_thread_count','exclude_thread_count',
         'baseline_quality_status','baseline_probe_verdict'])
-    # Seeded, stratified review: cycle through date decade / length / partial-page bins.
-    bins=defaultdict(list)
-    for t in all_threads:
-        p=pages[t['source_id']]
-        length=sum(len(x['text']) for x in t['turns'])
-        date=p.get('question_asked_at') or 'unknown'
-        template=t['turns'][0]['dom_locator'].rsplit('/',1)[-1].split('[')[0]
-        key=(t['corpus_decision'],date[:3],template, 'short' if length<200 else 'medium' if length<1000 else 'long',
-             p['corpus_decision']=='INCLUDE_PARTIAL')
-        bins[key].append(t)
-    rng=random.Random(policy['manual_seed'])
-    for key in sorted(bins):rng.shuffle(bins[key])
-    include_sample=[]
-    while len(include_sample)<min(policy['manual_include_minimum'],sum(t['corpus_decision']=='INCLUDE' for t in all_threads)):
-        for key in sorted(bins):
-            if key[0]=='INCLUDE' and bins[key] and len(include_sample)<policy['manual_include_minimum']:
-                include_sample.append(bins[key].pop())
-    required={(t['source_id'],t['thread_id']) for t in include_sample}
-    for t in all_threads:
-        p=pages[t['source_id']]
-        qid=urlsplit(t['url']).path.split('/')[-1].split('.')[0]
-        if qid in REGRESSIONS or t['source_flags'] or t.get('parser_flags'):
-            required.add((t['source_id'],t['thread_id']))
-    # Every newly observed decision-reason group gets a review representative.
-    for reason in sorted({r for t in all_threads for r in t['decision_reasons']}):
-        t=next(t for t in all_threads if reason in t['decision_reasons'])
-        required.add((t['source_id'],t['thread_id']))
     review_rows=[]
     for t in all_threads:
         key=(t['source_id'],t['thread_id'])
@@ -559,7 +632,7 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
             'reviewed_at':label.get('reviewed_at','')})
     for page in pages.values():
         qid=urlsplit(page['url']).path.split('/')[-1].split('.')[0]
-        if not page.get('thread_decisions') and (qid in REGRESSIONS or page.get('replay_error')):
+        if not page.get('thread_decisions') and (page['id'],'__page__') in required:
             label=manual.get((page['id'],'__page__'),{})
             review_rows.append({'source_id':page['id'],'thread_id':'__page__','url':page['url'],
                 'corpus_decision':page['corpus_decision'],'decision_reasons':page['decision_reasons'],
@@ -587,7 +660,8 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
     missing_regressions=sorted(set(REGRESSIONS)-{r['question_id'] for r in comparison})
     regression_checks=validate_regressions(pages)
     reviewed=sum(bool(r['reviewer_decision']) for r in review_rows)
-    critical_manual=any('PARSER_ERROR' in r.get('reviewer_notes','').upper() for r in review_rows)
+    critical_manual=any('PARSER_ERROR' in row.get('reviewer_notes','').upper()
+                        for row in manual.values() if row.get('reviewer_decision'))
     # Any rejected final invariant blocks site readiness even though that document is not exported.
     readiness=('NEEDS_PARSER_FIX' if len(pages)!=len(samples) or violations or any(p.get('replay_error') for p in pages.values()) or critical_manual or missing_regressions
                or any(not r['passed'] for r in regression_checks.values())
