@@ -1,0 +1,14 @@
+function formattext(count)
+{
+	 var result="";
+	 for(var i = count;i>=0;i--)
+	 {
+		 var obj = document.getElementById("jbk"+i);
+		 if (obj)
+		 {
+			 result =obj.innerHTML + result;
+			 obj.style.display = "none";
+		 }	
+	 }
+	 document.getElementById("jkpl").innerHTML = result;
+}

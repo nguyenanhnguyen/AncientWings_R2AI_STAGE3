@@ -10,12 +10,16 @@ import copy
 import hashlib
 import html as html_std
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 from lxml import html, etree
 
-VERSION = 'cnkang-v6-spec-2'
+VERSION = 'cnkang-v6-spec-3'
 EXTRACTOR = 'cnkang_v6_spec_dom'
+FORMATTEXT_RULE = 'cnkang-formattext-1'
+# Verified source: /images/jkpl.js, fetched 2026-10-20. Runtime ports this
+# deterministic rule; it neither downloads nor executes website JavaScript.
+FORMATTEXT_JS_SHA256 = '55e84799edcefd67fa1f98addc24e1eed6b803d44824054bad1aa2040b7b674f'
 
 
 def is_host(url):
@@ -121,6 +125,115 @@ def link_ratio(node):
 
 def descriptor(node):
     return node.getroottree().getpath(node)
+
+
+def _inner_html(node):
+    return html_std.escape(node.text or '', quote=False) + ''.join(
+        html.tostring(child, encoding='unicode') for child in node)
+
+
+def restore_formattext(tree, body, template, url):
+    """Apply only the verified formatter's DOM operation, without decoding again."""
+    calls = [script for script in tree.xpath('//script[not(@src)]')
+             if re.search(r'\bformattext\s*\(', script.text or '')]
+    numbered = [n for n in tree.iter() if isinstance(n.tag, str)
+                and re.fullmatch(r'jbk\d+', n.get('id') or '')]
+    relevant = [n for n in body.iter() if isinstance(n.tag, str)
+                and re.fullmatch(r'jbk\d+', n.get('id') or '')]
+    proof = {'state': 'not_applicable', 'rule': FORMATTEXT_RULE,
+             'javascript_sha256': FORMATTEXT_JS_SHA256}
+    if not calls and not relevant:
+        return proof, [], []
+
+    def blocked(reason):
+        return {**proof, 'state': 'unverified', 'reason': reason}, ['FORMATTEXT_UNVERIFIED_REVIEW'], []
+
+    if template != 'endtext' or len(calls) != 1:
+        return blocked('Expected one formatter call in a known endText body')
+    match = re.fullmatch(r'\s*(?:<!--\s*)?formattext\(\s*(\d+)\s*\)\s*;?\s*(?:-->\s*)?',
+                         calls[0].text or '')
+    if not match or int(match.group(1)) > 10000 or body not in calls[0].iterancestors():
+        return blocked('Unverified formatter expression, count or scope')
+    count = int(match.group(1))
+    sources = [urljoin(url, src) for src in tree.xpath('//script/@src')]
+    known = []
+    for source in sources:
+        try:
+            parts = urlsplit(source)
+            valid = (parts.scheme in ('http', 'https')
+                     and (parts.hostname or '').lower() in ('cnkang.com', 'www.cnkang.com')
+                     and parts.path == '/images/jkpl.js' and not parts.query and not parts.fragment
+                     and not parts.username and not parts.password and parts.port in (None, 80, 443))
+        except ValueError:
+            valid = False
+        if valid:
+            known.append(source)
+    targets = tree.xpath('//*[@id="jkpl"]')
+    if not known or len(targets) != 1:
+        return blocked('Missing verified script source or unique jkpl target')
+    target = targets[0]
+    parent = target.getparent()
+    if (body not in target.iterancestors() or list(target) or compact(target.text)
+            or not relevant or len(relevant) != len(numbered)):
+        return blocked('Nonempty target or blocks outside the selected body')
+    by_id = {}
+    for node in relevant:
+        index = int(node.get('id')[3:])
+        if index in by_id or index > count or node.getparent() is not parent:
+            return blocked('Duplicate, out-of-range or nested jbk block')
+        by_id[index] = node
+    fragments = {index: _inner_html(node) for index, node in by_id.items()}
+    combined = ''.join(fragments[index] for index in sorted(fragments))
+    # Construct before mutating the source tree: an ambiguous DOM stays untouched.
+    try:
+        replacement = html.fragment_fromstring('<div id="cnkang_verified_jkpl">' + combined + '</div>')
+    except (etree.ParserError, ValueError):
+        return blocked('Cannot reconstruct formatter output')
+    proof.update(state='restored', count=count, script_sources=known,
+                 target_path=descriptor(target), dom_ids=list(by_id), ordered_ids=sorted(by_id),
+                 combined_html_sha256=sha(combined))
+    replacement.tail = target.tail
+    parent.replace(target, replacement)
+    for node in relevant:
+        # JS hides the blocks; their tails stay visible. drop_tree retains tails.
+        node.drop_tree()
+    return proof, [], [{'action': 'restore_verified_formattext', **proof}]
+
+
+def _article_identity(url):
+    parts = urlsplit(url)
+    try:
+        if (not is_host(url) or parts.scheme not in ('http', 'https') or parts.query
+                or parts.username or parts.password or parts.port not in (None, 80, 443)):
+            return None
+    except ValueError:
+        return None
+    match = re.fullmatch(r'(.+?)(?:_([1-9]\d*))?\.html', parts.path)
+    if not match:
+        return None
+    return (parts.hostname.lower().removeprefix('www.'), match.group(1))
+
+
+def remove_verified_pagers(body, url):
+    """Remove only demonstrated pager markup whose links stay in this article."""
+    actions, flags = [], []
+    identity = _article_identity(url)
+    for node in list(body.iter('b')):
+        label = compact(node.text_content())
+        if (not re.fullmatch(r'(?:(?:上一页|下一页)|\[\d+\])+', label)
+                or not re.search(r'上一页|下一页', label)):
+            continue
+        links = list(node.iter('a'))
+        targets = [urljoin(url, a.get('href') or '') for a in links]
+        safe_tags = all(n.tag in ('a', 'font', 'span') for n in node.iterdescendants())
+        if (not identity or not links or not safe_tags or any(not a.get('href') for a in links)
+                or any(_article_identity(target) != identity for target in targets)):
+            flags.append('PAGER_UNVERIFIED_REVIEW')
+            continue
+        actions.append({'action': 'remove_verified_pager', 'rule': 'cnkang-pager-1',
+                        'path': descriptor(node), 'removed': node.text_content(), 'links': targets})
+        node.drop_tree()
+    return actions, sorted(set(flags))
 
 
 def choose_body(tree):
@@ -322,14 +435,23 @@ def extract(body, url, content_type='text/html'):
     parse_input = re.sub(r'\A(\ufeff?\s*)<\?xml\s[^?]*\?>', r'\1', decoded, count=1, flags=re.I)
     tree = html.fromstring(parse_input)
     node, template, candidates, flags, container = choose_body(tree)
+    source_dom_text = node_text(node)
+    # Discover links before removing their presentation from the article text.
+    pagination = [{'text': ''.join(a.itertext()).strip(), 'href': a.get('href')}
+                  for a in tree.iter('a') if re.fullmatch(r'\s*(?:下一页|下页|阅读全文|继续阅读)\s*', ''.join(a.itertext()))]
+    info = metadata(tree, node, template, container)
+    order, order_flags, normalization = restore_formattext(tree, node, template, url)
+    pager_actions, pager_flags = remove_verified_pagers(node, url) if template != 'unknown' else ([], [])
+    flags += order_flags + pager_flags
+    normalization += pager_actions
     before = node_text(node)
     fallback = None
     if template == 'unknown':
         import trafilatura
         fallback = trafilatura.extract(decoded, url=url, include_tables=False, include_comments=False)
         if fallback: before = fallback
-    info = metadata(tree, node, template, container)
     text, actions = deduplicate_intro(before, info['title'])
+    actions = normalization + actions
     parser, source, evidence, types = review_text(text, tree, encoding)
     flags += parser
     if not info['heading_title']: flags.append('TITLE_HEADING_MISSING_REVIEW')
@@ -348,14 +470,14 @@ def extract(body, url, content_type='text/html'):
         evidence.append({'group':'source','flag':'TITLE_BODY_ALIGNMENT_REVIEW',
                          'snippet':text[:300], 'title_terms':sorted(terms)})
     tables = [html.tostring(t, encoding='unicode') for t in node.iter('table')]
-    pagination = [{'text': ''.join(a.itertext()).strip(), 'href': a.get('href')}
-                  for a in tree.iter('a') if re.fullmatch(r'\s*(?:下一页|下页|阅读全文|继续阅读)\s*', ''.join(a.itertext()))]
     if pagination: flags.append('PAGINATION_REVIEW')
     flags = sorted(set(flags))
     result = {'extractor': EXTRACTOR, 'cnkang_parser_version': VERSION, **encoding, **info,
             'text': text, 'text_before': before, 'text_sha256': sha(text),
             'chars_before': len(compact(before)), 'chars_after': len(compact(text)),
             'cleaning_actions': actions, 'parser_flags': flags, 'source_flags': sorted(set(source)),
+            'source_dom_text': source_dom_text, 'source_dom_text_sha256': sha(source_dom_text),
+            'formattext_evidence': order, 'pager_removals': pager_actions,
             'flag_evidence': evidence, 'content_types': types, 'tables': tables,
             'selector': descriptor(node) if node.getparent() is not None else 'combined_regions',
             'template': template, 'body_candidates': candidates,
@@ -370,7 +492,9 @@ def extract(body, url, content_type='text/html'):
 def audit(body, url, record, content_type='text/html'):
     doc = extract(body, url, content_type)
     for key in ('text', 'text_before', 'selected_encoding', 'selector', 'template', 'cleaning_actions',
-                'date_candidates', 'tables', 'body_candidates', 'source_flags'):
+                'date_candidates', 'tables', 'body_candidates', 'source_flags',
+                'cnkang_parser_version', 'source_dom_text', 'source_dom_text_sha256',
+                'formattext_evidence', 'pager_removals'):
         if record.get(key) != doc.get(key):
             raise ValueError('cnkang raw re-extraction mismatch: ' + key)
     # Cross-document duplicate flags are added by aggregation, not the per-page parser.

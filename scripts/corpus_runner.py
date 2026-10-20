@@ -210,6 +210,8 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
     if cnkang:
         identity['cnkang_sha256'] = crawler.file_hash(cnkang.PARSER.__file__)
         identity['cnkang_transport_sha256'] = crawler.file_hash(cnkang.__file__)
+        identity['cnkang_network_sha256'] = crawler.file_hash(cnkang.NETWORK.__file__)
+        identity['cnkang_network_worker_sha256'] = crawler.file_hash(cnkang.NETWORK.WORKER_PATH)
     if efetch:
         identity['pubmed_efetch_sha256'] = crawler.file_hash(efetch.__file__)
     if longchau:

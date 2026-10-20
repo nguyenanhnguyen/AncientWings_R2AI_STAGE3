@@ -25,9 +25,28 @@ def load_parser():
 
 
 PARSER = load_parser()
+_network_path = Path(__file__).with_name('cnkang_network_snapshot.py')
+if not _network_path.exists(): _network_path = Path(__file__).with_name('cnkang_network.py')
+_network_spec = importlib.util.spec_from_file_location('_cnkang_network_' + str(_network_path), _network_path)
+NETWORK = importlib.util.module_from_spec(_network_spec)
+_network_spec.loader.exec_module(NETWORK)
+NetworkFailure = NETWORK.NetworkFailure
 DEFAULTS = {'gap': 1.5, 'timeout': [10., 30.], 'attempts': 2,
             'user_agent': 'ViBioMIR-CnkangCheck/1.0', 'trust_env': False,
-            'max_inline_wait': 30., 'max_bytes': 10 * 1024 * 1024}
+            'max_inline_wait': 30., 'max_bytes': 10 * 1024 * 1024,
+            'request_deadline': 45., 'url_deadline': 120.,
+            'max_consecutive_network_errors': 3}
+
+
+def failure_details(exc, stage='network'):
+    if isinstance(exc, NetworkFailure):
+        return dict(exc.details)
+    if isinstance(exc, OSError) and not isinstance(exc, requests.RequestException):
+        return {'error_kind': 'checkpoint_error', 'error_stage': 'checkpoint',
+                'error': f'{type(exc).__name__}: {exc}'[:700]}
+    return {'error_kind': ('read_timeout' if isinstance(exc, requests.Timeout) else 'connection_error'),
+            'error_stage': stage, 'error': f'{type(exc).__name__}: {exc}'[:700],
+            'error_causes': [{'type': type(exc).__name__, 'message': str(exc)[:700]}]}
 
 
 def utc():
@@ -67,22 +86,42 @@ class Transport:
             raise ValueError('Invalid cnkang attempts')
         if len(self.config['timeout']) != 2 or any(not math.isfinite(x) or x <= 0 for x in self.config['timeout']):
             raise ValueError('Invalid cnkang timeout')
-        self.session = requests.Session()
-        self.session.trust_env = self.config['trust_env']
-        self.session.headers.update({'User-Agent': self.config['user_agent'],
-                                     'Accept': 'text/html,application/xhtml+xml'})
+        for key in ('request_deadline', 'url_deadline'):
+            if not math.isfinite(self.config[key]) or self.config[key] <= 0:
+                raise ValueError('Invalid cnkang ' + key)
+        for key in ('max_bytes', 'max_consecutive_network_errors'):
+            if type(self.config[key]) is not int or self.config[key] < 1:
+                raise ValueError('Invalid cnkang ' + key)
+        self.worker = NETWORK.NetworkWorker()
+        self._url_limit = None
+        self.network_events = []
+        self.consecutive_network_errors = 0
         self.robots, self.policies = {}, {}
         self.state_path = self.out / 'cnkang_transport_state.json'
         self.state = json.loads(self.state_path.read_text(encoding='utf-8')) if self.state_path.exists() else {}
         self.stopped = False
+        self.stop_reason = None
+
+    def budget(self, stage):
+        if self._url_limit is not None and NETWORK.remaining(self._url_limit) <= 0:
+            raise NetworkFailure({'error_kind': 'url_deadline', 'error_stage': stage,
+                                  'error': 'URL deadline exceeded during ' + stage,
+                                  'deadline_exceeded': True, 'error_causes': []})
 
     def wait(self, extra=0):
         delay = max(self.state.get('not_before', 0) - time.time(),
                     self.state.get('last_request', 0) + self.config['gap'] - time.time(), extra)
         if delay > self.config['max_inline_wait']:
             raise Paused('Cooldown active; resume after ' +
-                         datetime.fromtimestamp(self.state['not_before'], timezone.utc).isoformat())
+                         datetime.fromtimestamp(time.time() + delay, timezone.utc).isoformat())
+        self.budget('throttle')
+        if self._url_limit is not None and delay >= NETWORK.remaining(self._url_limit):
+            raise NetworkFailure({'error_kind': 'url_deadline', 'error_stage': 'throttle',
+                                  'error': 'Remaining URL budget cannot cover required wait',
+                                  'deadline_exceeded': True, 'error_causes': [],
+                                  'required_wait_seconds': delay})
         if delay > 0: time.sleep(delay)
+        self.budget('throttle')
 
     def cooldown(self, seconds):
         self.state['not_before'] = max(self.state.get('not_before', 0), time.time() + seconds)
@@ -96,24 +135,24 @@ class Transport:
         self.wait()
         self.state['last_request'] = time.time()
         write_json(self.state_path, self.state)
+        start = time.monotonic()
+        event = {'url': url, 'at': utc()}
+        self.network_events.append(event)
         try:
-            response = self.session.get(url, timeout=tuple(self.config['timeout']),
-                                        allow_redirects=False, stream=True)
-        except BaseException:
-            self.state['last_request'] = time.time()
-            write_json(self.state_path, self.state)
-            raise
-        try:
-            data = bytearray()
-            for chunk in response.iter_content(65536):
-                data.extend(chunk)
-                if len(data) > self.config['max_bytes']:
-                    raise ValueError('Response exceeds configured size limit')
-            # These bytes are response.content after decompression; no text decoding here.
-            response._content = bytes(data)
+            self.budget('request_start')
+            limit = NETWORK.deadline(self.config['request_deadline'])
+            scope = 'request'
+            if self._url_limit is not None and NETWORK.remaining(self._url_limit) < NETWORK.remaining(limit):
+                limit, scope = self._url_limit, 'url'
+            event['deadline_seconds'] = max(0., round(NETWORK.remaining(limit), 3))
+            response = self.worker.get(url, self.config, limit, scope=scope)
+            event.update(response.network, http_status=response.status_code)
             return response
+        except NetworkFailure as exc:
+            event.update(exc.details)
+            raise
         finally:
-            response.close()
+            event['elapsed_seconds'] = round(time.monotonic() - start, 3)
             # Gap is measured from completion, including robots, redirects and retries.
             self.state['last_request'] = time.time()
             write_json(self.state_path, self.state)
@@ -160,15 +199,21 @@ class Transport:
                     entry['status'] = 'rate_limited'
                 else:
                     entry['status'] = 'unverifiable'
+            except NetworkFailure as exc:
+                entry.update(status='unverifiable', **exc.details)
+                if (exc.details.get('deadline_exceeded')
+                        or exc.details['error_kind'] == 'network_worker_error'):
+                    self.stopped, self.stop_reason = True, exc.details['error_kind']
             except (requests.RequestException, ValueError) as exc:
-                entry.update(status='unverifiable', error=str(exc)[:500])
+                entry.update(status='unverifiable', **failure_details(exc, 'robots'))
             self.policies[origin], self.robots[origin] = policy, entry
         entry = dict(self.robots[origin], target_url=url)
         if entry['status'] in ('checked', 'absent_404_410', 'denied'):
             policy = self.policies[origin]
             entry['allowed'] = policy.can_fetch(self.config['user_agent'], url)
             delay = policy.crawl_delay(self.config['user_agent']) or policy.crawl_delay('*')
-            if delay: self.wait(extra=float(delay))
+            # Waiting happens once per actual request, rather than on each cached policy lookup.
+            entry['crawl_delay'] = float(delay or 0)
         else:
             entry['allowed'] = None
         self.robots[origin].setdefault('decisions', {})[url] = entry['allowed']
@@ -197,15 +242,25 @@ class Transport:
             record.setdefault(name, default)
         attempts = 0
         begin = time.monotonic()
+        self._url_limit = NETWORK.deadline(self.config['url_deadline'])
+        self.network_events = []
+        record['network_limits'] = {key: self.config[key] for key in ('request_deadline', 'url_deadline')}
         current, used_original = preferred, preferred == source
         error = None
         try:
             for redirect in range(9):
+                self.budget('redirect')
                 record['final_url'] = current
                 robot = self.robot_policy(current)
                 record['robots'] = robot
                 if robot['allowed'] is not True:
-                    record.update(error='robots ' + robot['status'], error_kind='robots_not_allowed_or_unknown')
+                    record.update(error='robots ' + robot['status'], error_kind='robots_not_allowed_or_unknown',
+                                  error_stage='robots')
+                    if robot.get('error_kind'):
+                        record.update({key: robot[key] for key in
+                            ('error', 'error_kind', 'error_stage', 'error_causes', 'deadline_exceeded')
+                            if key in robot})
+                        record['error_context'] = 'robots'
                     break
                 response = None
                 while attempts < self.config['attempts']:
@@ -220,8 +275,15 @@ class Transport:
                         record['robots'] = robot
                         if robot['allowed'] is not True:
                             error = 'robots ' + robot['status']
+                            record.update(error_kind=robot.get('error_kind', 'robots_not_allowed_or_unknown'),
+                                          error_stage=robot.get('error_stage', 'robots'), error_context='robots')
+                            record.update({key: robot[key] for key in
+                                ('error', 'error_causes', 'deadline_exceeded') if key in robot})
+                            error = robot.get('error', error)
                             break
+                        self.wait(extra=robot.get('crawl_delay', 0))
                         response = self.get(current)
+                        self.budget('response')
                         body = response.content
                         body_hash = PARSER.sha(body)
                         raw = Path('raw') / (key + '_' + body_hash + '.gz')
@@ -238,7 +300,8 @@ class Transport:
                         if response.status_code == 429:
                             wait = self.retry_after(response)
                             self.cooldown(wait)
-                            record.update(error='HTTP 429', retry_deferred=True, retry_after_seconds=wait)
+                            record.update(error='HTTP 429', error_kind='http_429', error_stage='http',
+                                          retry_deferred=True, retry_after_seconds=wait)
                             if wait > self.config['max_inline_wait']:
                                 self.stopped = True
                                 break
@@ -250,12 +313,18 @@ class Transport:
                                 current, used_original = source, True
                             continue
                         break
-                    except (requests.ConnectionError, requests.Timeout) as exc:
-                        event['error'] = str(exc)[:500]
+                    except (NetworkFailure, requests.ConnectionError, requests.Timeout) as exc:
+                        details = failure_details(exc)
+                        event.update(details)
+                        record.update(details)
                         error = str(exc)[:500]
+                        if details.get('deadline_exceeded') or details['error_kind'] == 'network_worker_error':
+                            self.stopped, self.stop_reason = True, details['error_kind']
+                            raise
                         if attempts < self.config['attempts']:
                             self.wait(extra=2 ** attempts)
-                            if not used_original and parts.scheme == 'http':
+                            if (not used_original and parts.scheme == 'http'
+                                    and details['error_kind'] not in ('dns_error',)):
                                 current, used_original = source, True
                             continue
                         response = None
@@ -276,7 +345,9 @@ class Transport:
                     attempts = 0
                     continue
                 if not 200 <= status < 300:
-                    record['error'] = 'HTTP ' + str(status)
+                    record.update(error='HTTP ' + str(status), error_kind='http_' + str(status), error_stage='http')
+                    if status in (401, 403):
+                        self.stopped, self.stop_reason = True, 'http_' + str(status)
                     break
                 content_type = record['content_type'].lower()
                 if 'html' not in content_type and not re_html(response.content):
@@ -288,6 +359,8 @@ class Transport:
                                   challenge_detected=True)
                     break
                 record.update(status='fetched', crawl_status='fetched')
+                for field in ('error', 'error_kind', 'error_stage', 'error_causes', 'error_context'):
+                    record.pop(field, None)
                 append(self.out / 'crawl_journal.jsonl', dict(record, event='fetched'))
                 doc = PARSER.extract(response.content, current, record['content_type'])
                 record.update(doc, status='extracted',
@@ -300,16 +373,33 @@ class Transport:
                 break
             else:
                 record.update(error='Redirect limit exceeded', error_kind='redirect_limit')
+        except NetworkFailure as exc:
+            record.update(exc.details)
+            self.stopped, self.stop_reason = True, exc.details['error_kind']
         except Paused as exc:
             self.stopped = True
             record.update(error=str(exc), retry_deferred=True, error_kind='cooldown')
-        except (requests.RequestException, ValueError, OSError) as exc:
+        except (requests.RequestException, ValueError) as exc:
             record.update(error=f'{type(exc).__name__}: {exc}'[:700], error_kind='fetch_or_parse_error')
+        except OSError as exc:
+            record.update(failure_details(exc))
+            self.stopped, self.stop_reason = True, 'checkpoint_error'
         except Exception as exc:
             # A malformed DOM/parser failure is durable and distinguishable from HTTP success.
             record.update(error=f'{type(exc).__name__}: {exc}'[:700], error_kind='parser_exception')
         record.update(attempts=len(record['requests']), finished_at=utc(),
-                      elapsed_seconds=round(time.monotonic() - begin, 3))
+                      elapsed_seconds=round(time.monotonic() - begin, 3),
+                      network_requests=self.network_events)
+        self._url_limit = None
+        if record.get('error_kind') in ('dns_error', 'connect_timeout', 'read_timeout',
+                                       'connection_reset', 'connection_error'):
+            self.consecutive_network_errors += 1
+            if self.consecutive_network_errors >= self.config['max_consecutive_network_errors']:
+                self.stopped, self.stop_reason = True, 'consecutive_network_errors'
+        else:
+            self.consecutive_network_errors = 0
+        if self.stopped:
+            record['stop_reason'] = self.stop_reason or record.get('error_kind', 'cooldown')
         if record.get('status') == 'fetched':
             record.update(status='parse_failed', crawl_status='needs_review',
                           parser_flags=['PARSER_EXCEPTION_REVIEW'])
@@ -318,7 +408,7 @@ class Transport:
         return record
 
     def close(self):
-        self.session.close()
+        self.worker.close()
 
 
 def re_html(body):

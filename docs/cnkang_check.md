@@ -1,5 +1,34 @@
 # Cnkang: notebook check và đồng bộ crawl chính
 
+## Thí nghiệm crawl ngày 20/10/2026
+
+F1 đã đưa vào parser production cnkang-v6-spec-3: khôi phục đúng cơ chế
+formattext trong DOM đã xác minh, loại pager cùng bài, giữ charset gốc và provenance.
+Liên kết trang tiếp/cờ phân trang vẫn giữ; chưa ghép toàn bài. Có test HTML thật,
+đối chiếu JS và kiểm audit chống sửa bằng chứng. Lượt kiểm 1.000 URL khác lịch sử
+đã biết dừng tại 615 URL do 3 lỗi fetch liên tiếp: 611 raw audit khớp, 385 URL chưa chạy.
+Không retry-run. Config/code/output nằm trong cùng notebook local, ở phần **F1 production** cuối file.
+Xem [review F1](reports/cnkang_f1_fix_review_20261020.md) để biết trạng thái và kết quả.
+
+Chỉ dùng một file local:
+[check_cnkang.com.ipynb](../notebooks/check_cnkang.com.ipynb), đã được `.gitignore`.
+Phần cuối giữ sáu cell thí nghiệm có output và một cell chạy 10 test hồi quy,
+với code/helper nhúng sẵn. Có thể chạy riêng phần này trên raw đã lưu mà không
+chạy lại phần lấy 500 URL phía trên. Các notebook/helper rời cũ được lưu trong
+`runs/cnkang_experiments_20261020/consolidation_backup/` thuộc vùng output đã ignore.
+Chọn `EXP_SOURCE_RUNS` tới output đầy đủ có `results.jsonl` và `raw/`;
+bật `EXP_ALLOW_NETWORK=True` để tải JS/trang tiếp khi cache chưa có.
+Mặc định không gọi mạng. Bộ thí nghiệm so sánh DOM tĩnh, khôi phục thứ tự
+`formattext` đã xác minh và trafilatura; pagination kiểm tra cùng bài trước khi ghép.
+Không tự thay parser production. Xem
+[review thí nghiệm](reports/cnkang_experiments_review_20261020.md).
+Kế hoạch tích hợp crawler chính:
+[cnkang_main_crawler_rollout_20261020.md](plans/cnkang_main_crawler_rollout_20261020.md).
+Kế hoạch lỗi còn lại sau review 611 trang:
+[cnkang_remaining_fixes_20261020.md](plans/cnkang_remaining_fixes_20261020.md).
+Build lại một notebook check, giữ nguyên các cell thí nghiệm local đã có, bằng
+`python scripts/build_cnkang_notebooks.py --check-only`.
+
 Notebook mới: [check_cnkang.com.ipynb](../notebooks/check_cnkang.com.ipynb).
 Mặc định 500 URL, seed 20261020, một worker và khoảng nghỉ tối thiểu 1,5 giây
 sau mỗi request, gồm robots, redirect và retry. Không tự chạy toàn corpus.
@@ -71,6 +100,14 @@ bố cục mơ hồ cần đọc lại raw. Không tự đảo đoạn, đoán n
 link bài liên quan như phần tiếp theo.
 
 ## Xác minh
+
+R1 ngày 20/10/2026 bổ sung deadline 45 giây/request và 120 giây/URL, dùng worker
+mạng có thể terminate thay cho timeout thread. DNS/read/robots giữ đúng stage và
+exception; source và snapshot worker/supervisor cùng được kiểm hash khi resume.
+Xem [review R1](reports/cnkang_r1_deadline_review_20261020.md): 47/47 test đạt,
+live bản cuối 50/50 URL, audit 50/50; 15 trang còn cờ parser/nội dung.
+Các cell thí nghiệm và output ở một file notebooks/check_cnkang.com.ipynb đã được
+gitignore. R2 xử lý khóa checkpoint chưa triển khai.
 
 Chạy:
 

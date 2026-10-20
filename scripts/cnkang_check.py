@@ -170,6 +170,8 @@ def prepare(config, out, bundled_history=None):
     identity = {**config, 'parser_sha256': parser.sha(Path(parser.__file__).read_bytes()),
                 'check_sha256':parser.sha(Path(__file__).read_bytes()),
                 'transport_sha256':parser.sha(Path(transport_module.__file__).read_bytes()),
+                'network_sha256':parser.sha(Path(transport_module.NETWORK.__file__).read_bytes()),
+                'network_worker_sha256':parser.sha(transport_module.NETWORK.WORKER_PATH.read_bytes()),
                 'bundled_history_sha256':parser.sha(Path(bundled_history).read_bytes()) if bundled_history else None}
     if manifest.exists() and manifest.stat().st_size:
         if not saved_path.exists() or json.loads(saved_path.read_text(encoding='utf-8')) != identity:

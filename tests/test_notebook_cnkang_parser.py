@@ -158,15 +158,21 @@ class CnkangParserTests(unittest.TestCase):
             'source':str(source),'source_sha256':self.crawler.file_hash(source)})
         self.crawler.write_json(self.out / 'source_profile.json', {
             'rows': 1, 'host_counts': {'www.cnkang.com': 1}, 'sample_host_counts': {'www.cnkang.com': 1}})
-        def response(url, **kwargs):
+        def response(url, *args, **kwargs):
             result = requests.Response()
             result.status_code = 200
             result._content = b'User-agent: *\nAllow: /\n' if url.endswith('/robots.txt') else disease_page()
             result._content_consumed = True
             result.headers['Content-Type'] = 'text/plain' if url.endswith('/robots.txt') else 'text/html; charset=UTF-8'
+            result.network = {'worker_pid': 123, 'elapsed_seconds': 0.001}
             return result
 
-        with patch('requests.Session.get', side_effect=response), patch('time.sleep'), \
+        cnkang = load_module('cnkang_test_transport', self.root / 'cnkang_transport_snapshot.py')
+        original_load = self.runner.load_module
+        def load(name, path):
+            return cnkang if name == 'corpus_cnkang' else original_load(name, path)
+        with patch.object(self.runner, 'load_module', side_effect=load), \
+                patch.object(cnkang.NETWORK.NetworkWorker, 'get', side_effect=response), patch('time.sleep'), \
                 patch.object(self.probe, 'browser_preflight') as preflight, \
                 patch.object(self.probe, 'create_browser') as browser, redirect_stdout(io.StringIO()):
             summary = self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)

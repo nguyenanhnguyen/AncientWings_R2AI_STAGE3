@@ -1,5 +1,6 @@
 """Build standalone cnkang check; synchronize parser/transport with corpus."""
 import base64
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -19,7 +20,8 @@ def write(nb, path):
     for cell in nb['cells']:
         if cell['cell_type'] == 'code':
             compile(''.join(cell['source']), str(path), 'exec')
-            cell.update(execution_count=None, outputs=[])
+            if 'cnkang-local-experiments' not in cell.get('metadata', {}).get('tags', []):
+                cell.update(execution_count=None, outputs=[])
     path.write_text(json.dumps(nb, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 
 
@@ -61,6 +63,8 @@ def synchronize():
         'crawler_snapshot.py': core_upgrade(zlib.decompress(base64.b85decode(pack['EMBEDDED_FILES']['crawler_snapshot.py']))),
         'cnkang_snapshot.py': (ROOT / 'scripts/cnkang.py').read_bytes(),
         'cnkang_transport_snapshot.py': (ROOT / 'scripts/cnkang_transport.py').read_bytes(),
+        'cnkang_network_snapshot.py': (ROOT / 'scripts/cnkang_network.py').read_bytes(),
+        'cnkang_request_worker_snapshot.py': (ROOT / 'scripts/cnkang_request_worker.py').read_bytes(),
         'corpus_runner_snapshot.py': (ROOT / 'scripts/corpus_runner.py').read_bytes(),
         'audit_snapshot.py': (ROOT / 'scripts/corpus_audit.py').read_bytes(),
     }
@@ -88,6 +92,11 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
 
 '''
         setup = setup.replace('HAS_ASK120_SAMPLE = False', guard + 'HAS_ASK120_SAMPLE = False', 1)
+    if "('cnkang_network_snapshot.py','cnkang_network_sha256')" not in setup:
+        setup = setup.replace("('cnkang_transport_snapshot.py','cnkang_transport_sha256'),",
+            "('cnkang_transport_snapshot.py','cnkang_transport_sha256'),\n"
+            "                      ('cnkang_network_snapshot.py','cnkang_network_sha256'),\n"
+            "                      ('cnkang_request_worker_snapshot.py','cnkang_network_worker_sha256'),")
     put(6, setup)
     config = get(2)
     if 'CNKANG_REQUEST_GAP =' not in config:
@@ -95,6 +104,10 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
             "CNKANG_REQUEST_GAP = 1.5  # 1 worker, robots luôn bật, không chạy Selenium\n"
             "CNKANG_ATTEMPTS = 2\nCNKANG_CONNECT_TIMEOUT = 10.0\nCNKANG_READ_TIMEOUT = 30.0\n"
             "CNKANG_USER_AGENT = 'ViBioMIR-CnkangCheck/1.0'\n\nBROWSER_TEST_MODE =", 1)
+    if 'CNKANG_REQUEST_DEADLINE =' not in config:
+        config = config.replace('CNKANG_ATTEMPTS =',
+            'CNKANG_REQUEST_DEADLINE = 45.0  # DNS + connect + headers + body\n'
+            'CNKANG_URL_DEADLINE = 120.0  # robots + gap + redirects + retries\nCNKANG_ATTEMPTS =', 1)
     put(2, config)
     crawl = get(12)
     if "'cnkang':" not in crawl:
@@ -103,6 +116,11 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
             "            'cnkang': {'gap': CNKANG_REQUEST_GAP, 'attempts': CNKANG_ATTEMPTS,\n"
             "                       'timeout': [CNKANG_CONNECT_TIMEOUT, CNKANG_READ_TIMEOUT],\n"
             "                       'user_agent': CNKANG_USER_AGENT, 'trust_env': REQUESTS_TRUST_ENV},", 1)
+    if "'request_deadline': CNKANG_REQUEST_DEADLINE" not in crawl:
+        crawl = crawl.replace("'timeout': [CNKANG_CONNECT_TIMEOUT, CNKANG_READ_TIMEOUT],",
+            "'timeout': [CNKANG_CONNECT_TIMEOUT, CNKANG_READ_TIMEOUT],\n"
+            "                       'request_deadline': CNKANG_REQUEST_DEADLINE,\n"
+            "                       'url_deadline': CNKANG_URL_DEADLINE,", 1)
     put(12, crawl)
     note = ('\n\nCnkang dùng chung parser và Requests transport với check_cnkang.com.ipynb: '
             'một worker, gap tối thiểu 1,5 giây, HTTPS trước, robots từng origin, retry/cooldown hữu hạn; '
@@ -189,6 +207,8 @@ RANDOM_SEED = 20261020
 REQUEST_GAP_SECONDS = 1.5
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 30.0
+REQUEST_DEADLINE = 45.0
+URL_DEADLINE = 120.0
 MAX_ATTEMPTS_PER_URL = 2
 REQUESTS_TRUST_ENV = False
 OUTPUT_DIR = Path('/kaggle/working/check_cnkang_com')
@@ -196,6 +216,8 @@ RESUME_FROM = None  # Thư mục run đầy đủ dưới Kaggle Input, copy khi
 ''')
     files = {name:(ROOT/'scripts'/source).read_bytes() for name,source in (
         ('cnkang_snapshot.py','cnkang.py'),('cnkang_transport_snapshot.py','cnkang_transport.py'),
+        ('cnkang_network_snapshot.py','cnkang_network.py'),
+        ('cnkang_request_worker_snapshot.py','cnkang_request_worker.py'),
         ('cnkang_check_snapshot.py','cnkang_check.py'))}
     payloads = {name:encode(body) for name,body in files.items()}
     hashes = {name:hashlib.sha256(body).hexdigest() for name,body in files.items()}
@@ -230,6 +252,7 @@ CONFIG = {'parquet_path':str(PARQUET_PATH) if PARQUET_PATH else None,
     'allow_incomplete_history':ALLOW_INCOMPLETE_HISTORY,
     'target':TARGET_URLS, 'seed':RANDOM_SEED}
 NETWORK = {'gap':REQUEST_GAP_SECONDS,'timeout':[CONNECT_TIMEOUT,READ_TIMEOUT],
+    'request_deadline':REQUEST_DEADLINE,'url_deadline':URL_DEADLINE,
     'attempts':MAX_ATTEMPTS_PER_URL,'trust_env':REQUESTS_TRUST_ENV,
     'user_agent':'ViBioMIR-CnkangCheck/1.0'}
 CONFIG['network'] = NETWORK
@@ -281,13 +304,22 @@ for path in [OUTPUT_DIR/'review_report.md', OUTPUT_DIR/'review.csv',
     display(FileLink(str(path)))
 print('ZIP đầy đủ:',archive)
 ''')
+    # Keep optional experiments local to the ignored check, including saved outputs.
+    local_path = ROOT/'notebooks/check_cnkang.com.ipynb'
+    if local_path.exists():
+        previous = json.loads(local_path.read_text(encoding='utf-8'))
+        cells.extend(c for c in previous['cells']
+                     if 'cnkang-local-experiments' in c.get('metadata', {}).get('tags', []))
     nb = {'cells':cells,'metadata':{'kernelspec':{'display_name':'Python 3','language':'python','name':'python3'},
          'language_info':{'name':'python','version':'3.11'}},'nbformat':4,'nbformat_minor':5}
     write(nb, ROOT/'notebooks/check_cnkang.com.ipynb')
 
 
 def main():
-    synchronize()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--check-only', action='store_true', help='Build the single local check without changing crawl notebooks')
+    args = ap.parse_args()
+    if not args.check_only: synchronize()
     build_check()
 
 
