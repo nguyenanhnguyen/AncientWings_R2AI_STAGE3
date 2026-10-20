@@ -1,0 +1,242 @@
+{
+  "schema": "cnkang-q3-fixtures-1",
+  "label_source": "agent_proposed_from_source_language_and_DOM_not_expert_clinical_gold",
+  "split": "dev_regression_seen",
+  "independent_validation": false,
+  "cases": [
+    {
+      "id": 1716739,
+      "file": "1716739.html",
+      "url": "https://www.cnkang.com/fuke/ruxianyan/589084.html",
+      "content_type": "text/html",
+      "raw_sha256": "8811b5ec42c84f05c7de61c74981b0cd83baf432c2fdd741de9260d61399bb1c",
+      "text_sha256": "56ac601da37255980484c6e113f8cd7698b1467a453dd432961a122df4a829a2",
+      "expected": {
+        "short_state": "very_short_context_required"
+      }
+    },
+    {
+      "id": 1792421,
+      "file": "1792421.html",
+      "url": "https://www.cnkang.com/jibing/yayinyan/684962.html",
+      "content_type": "text/html",
+      "raw_sha256": "ca4cb396a5d24924027b3da5ea4b008c24dac658417180345ba56adf1a5690e8",
+      "text_sha256": "34cbf21b96fb323abee761f18da576cd6b7ff34092de7ee1a7f0eda7ac76c93c",
+      "expected": {
+        "short_state": "very_short_context_required"
+      }
+    },
+    {
+      "id": 1889767,
+      "file": "1889767.html",
+      "url": "https://www.cnkang.com/nkwk/naogongxue/701784.html",
+      "content_type": "text/html",
+      "raw_sha256": "34dfb6383677c2a665707e8fbdf8b6bce758d77d6e4b43ab46ebcf1afee18011",
+      "text_sha256": "ac51d209c1f97fee8a3d05be6fcb678fac77d8b11f9dab22ef75bcd5e8a0c703",
+      "expected": {
+        "short_state": "very_short_context_required"
+      }
+    },
+    {
+      "id": 1606857,
+      "file": "1606857.html",
+      "url": "https://www.cnkang.com/dise/593/497460.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "b5778a448a471d3e947802c29c12e3789b79f4d28eae90f9973e2dd6142ad133",
+      "text_sha256": "9ad81292d9e0bc89d316efc61444a5444b6fd6076639fa1a922d10b71d0e4d54",
+      "expected": {
+        "short_state": "question_only_or_unattributed_answer"
+      }
+    },
+    {
+      "id": 1622860,
+      "file": "1622860.html",
+      "url": "https://www.cnkang.com/dise/629/977078.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "746322c899aa957b3c35b05d3a757a6ebf3ca5d1f76f03b5616e3dbe381847fe",
+      "text_sha256": "0ad170d4c57ba8eff8042df9e28d047f194e7e2bc5f9703dd37770660c36c130",
+      "expected": {
+        "short_state": "short_source_requires_review"
+      }
+    },
+    {
+      "id": 1544618,
+      "file": "1544618.html",
+      "url": "https://www.cnkang.com/dise/440/326968.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "9ccc4746216f850e74f1a308d26bf1c7e6bc7eede581551da19c3890ebc6f37e",
+      "text_sha256": "e263bacb078df5e01e37ef8add880cb79c92db12ab3094e20c2d057e0992bc98",
+      "expected": {
+        "respondent": "陈勇",
+        "author": null
+      }
+    },
+    {
+      "id": 1827470,
+      "file": "1827470.html",
+      "url": "https://www.cnkang.com/myjk/201203/421005.html",
+      "content_type": "text/html",
+      "raw_sha256": "9ad7d397d26008a6b9cb6ecc4b63d09eaddc00b7248f1fab0f8b96dac9bf4764",
+      "text_sha256": "03932ae393cf7a85e92d63d2d552e7bd497faa32d22dca58f580c02ee932bedb",
+      "expected": {
+        "respondent": "胡孟彩",
+        "author": null
+      }
+    },
+    {
+      "id": 1782034,
+      "file": "1782034.html",
+      "url": "https://www.cnkang.com/jibing/shizhen/668626.html",
+      "content_type": "text/html",
+      "raw_sha256": "19c9e470e2dbb464a882f4eeb9e05add847d067a6063b3b63b3d13cfb08b1fe2",
+      "text_sha256": "b4563fad68f7c97bc08f3d79f3397d5610f3a5ecd38314b70203f0ca386f1cef",
+      "expected": {
+        "alignment": "related_lexical"
+      }
+    },
+    {
+      "id": 1740065,
+      "file": "1740065.html",
+      "url": "https://www.cnkang.com/jibing/doudou/670975.html",
+      "content_type": "text/html",
+      "raw_sha256": "58db7a759378631118ced8e9ac76c72f80004b0314e2c961c489b2cce4efd604",
+      "text_sha256": "dfe38aa4696798a8d0c9ca7423e6f80e700a73c6dfb195c1ed3d04cf3cc6d546",
+      "expected": {
+        "decision": "REVIEW"
+      }
+    },
+    {
+      "id": 1516530,
+      "file": "1516530.html",
+      "url": "https://www.cnkang.com/dise/38/592620.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "c5518166ed5aeafb4daa666b79083a9b50cbc61c5313542bd96f835e1c008b37",
+      "text_sha256": "65235994c5b36169b5ce3e3c728ed8bc3408d377172d7bfd2feb18ffcde9dc40",
+      "expected": {
+        "claim_stance": "conditional",
+        "not_exclude": true
+      }
+    },
+    {
+      "id": 1441624,
+      "file": "1441624.html",
+      "url": "https://www.cnkang.com/dise/187/359830.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "87cb807adf7859c3bd52bfa107ef9588c61052805cbc0d6d754945df570066e4",
+      "text_sha256": "85cbca95df728aa2e8b92c801ec43e065b9828bd9e049617d0b98bce36230157",
+      "expected": {
+        "claim_stance": "negated"
+      }
+    },
+    {
+      "id": 1524726,
+      "file": "1524726.html",
+      "url": "https://www.cnkang.com/dise/392/291678.html",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "70d2aea57502d696d57f10de86d66501d88d37a619ba2a45d73b82c44cc86feb",
+      "text_sha256": "887c0fd7abfa5abc18f3d0038fdc4fe3f45b3915b745fde11631a0cadee0767b",
+      "expected": {
+        "claim_stance": "negated"
+      }
+    },
+    {
+      "id": 1836347,
+      "file": "1836347.html",
+      "url": "https://www.cnkang.com/myjk/201207/475389.html",
+      "content_type": "text/html",
+      "raw_sha256": "ce266376071dd655ac4eb10dd0402bc6f097d455504fbd442ccb79246825c8fb",
+      "text_sha256": "d6be12fb3917c006ff1ebca894dfb415c547113397628d91dcef4ca7ccf1a6a0",
+      "expected": {
+        "claim_stance": "negated"
+      }
+    },
+    {
+      "id": 1946477,
+      "file": "1946477.html",
+      "url": "https://www.cnkang.com/nrjk/nxjb/nmnjb/xinbin/200812/118869.html",
+      "content_type": "text/html",
+      "raw_sha256": "890b42e5b6bbdda47fa37e1b5b456bbf9609437ffa308fc370149d2244154f34",
+      "text_sha256": "3bb7185d4bafbb4128a8467564ad9dc655cf00a6dbd632756230172997030472",
+      "expected": {
+        "claim_stance": "negated"
+      }
+    },
+    {
+      "id": 1759215,
+      "file": "1759215.html",
+      "url": "https://www.cnkang.com/jibing/kouyan/515394.html",
+      "content_type": "text/html",
+      "raw_sha256": "4b4dd0c7e655982e4c79cf277c47e2ebae0ca43a8f6cec253eebb856e0c226ab",
+      "text_sha256": "4c9961f0259f4e18a26ade2881c09cd75c7e68629164d00e0cff27c3c64433ad",
+      "expected": {
+        "claim_kind": "herb_name_boundary"
+      }
+    },
+    {
+      "id": 1998448,
+      "file": "1998448.html",
+      "url": "https://www.cnkang.com/yxzs/yxzx/yxzs/szxt/200701/55046.html",
+      "content_type": "text/html",
+      "raw_sha256": "468af5102c14da5755b6566a03b6a6d911742f7a123bc0e2a685f976ab6b386c",
+      "text_sha256": "cf67501db16fdb01e041c848c165bc6933a4df7afee0d0be04fbbfce4db594d8",
+      "expected": {
+        "claim_kind": "procedure_term"
+      }
+    },
+    {
+      "id": 1758280,
+      "file": "1758280.html",
+      "url": "https://www.cnkang.com/jibing/kouchou/306462.html",
+      "content_type": "text/html",
+      "raw_sha256": "ac413722c8d37d753fdb170876c2b95a8b73bdf4b1f9439c8c7baa9bb098850c",
+      "text_sha256": "9a18c245f77c3135dfe20a73df44a1b87fcf5b5723cdb30fffb88263c742325f",
+      "expected": {
+        "claim_kind": "treatment_outcome_description"
+      }
+    },
+    {
+      "id": 1833833,
+      "file": "1833833.html",
+      "url": "https://www.cnkang.com/myjk/201206/441267.html",
+      "content_type": "text/html",
+      "raw_sha256": "e1d321997bceab6027f0625ba9fb189d68332e79ab2b36112d966c1ab0989274",
+      "text_sha256": "ee0d70f92fac7dd24c7463ea6ebf42f9994a909f1edbe5ab41a0863e0768b614",
+      "expected": {
+        "flag": "SOURCE_UI_CONTAMINATION_REVIEW"
+      }
+    },
+    {
+      "id": 1735833,
+      "file": "1735833.html",
+      "url": "https://www.cnkang.com/jibing/buya/204550.html",
+      "content_type": "text/html",
+      "raw_sha256": "f6df0188d8827679203a2f9eb11bee17d9a220931e3ee588337085b45da54e6b",
+      "text_sha256": "6ce8e0520c0147b561c464a17484705bccf340984a436781b0eb8aae93433e62",
+      "expected": {
+        "claim_stance": "question"
+      }
+    },
+    {
+      "id": 1879446,
+      "file": "1879446.html",
+      "url": "https://www.cnkang.com/nkwk/jiagan/698713.html",
+      "content_type": "text/html",
+      "raw_sha256": "0a402b0d85203401772e83f1a293e25db3195157b7fb45a934b53d49aa373515",
+      "text_sha256": "2df42780f6ffb1ab0fda5fdb23f7ffc9a090ac91585645fdc928c29e71f9acf6",
+      "expected": {
+        "claim_stance": "asserted"
+      }
+    },
+    {
+      "id": 1667000,
+      "file": "1667000.html",
+      "url": "https://www.cnkang.com/dzjk/201012/33939.html",
+      "content_type": "text/html",
+      "raw_sha256": "8692e31016568d58b485431e5c3c4ed9746ce703bbbf97baf35494ef27dd20dd",
+      "text_sha256": "54a9c1dacb802d3e09e22e69feeac355509cf2fdf382b8f98677dc4c31f536de",
+      "expected": {
+        "claim_stance": "asserted"
+      }
+    }
+  ]
+}

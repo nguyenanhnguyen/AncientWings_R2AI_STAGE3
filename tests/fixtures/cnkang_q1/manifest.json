@@ -1,0 +1,174 @@
+[
+  {
+    "id": 1782034,
+    "url": "https://www.cnkang.com/jibing/shizhen/668626.html",
+    "file": "1782034.html",
+    "raw_sha256": "19c9e470e2dbb464a882f4eeb9e05add847d067a6063b3b63b3d13cfb08b1fe2",
+    "text_sha256": "b4563fad68f7c97bc08f3d79f3397d5610f3a5ecd38314b70203f0ca386f1cef",
+    "content_type": "text/html",
+    "expected_target_flags": [],
+    "reason": "Parent 1)/2)/3)/4), child 1./2.; preserve nesting."
+  },
+  {
+    "id": 1544618,
+    "url": "https://www.cnkang.com/dise/440/326968.html",
+    "file": "1544618.html",
+    "raw_sha256": "9ccc4746216f850e74f1a308d26bf1c7e6bc7eede581551da19c3890ebc6f37e",
+    "text_sha256": "e263bacb078df5e01e37ef8add880cb79c92db12ab3094e20c2d057e0992bc98",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Strong patient and hospital respondent labels start another turn."
+  },
+  {
+    "id": 1759215,
+    "url": "https://www.cnkang.com/jibing/kouyan/515394.html",
+    "file": "1759215.html",
+    "raw_sha256": "4b4dd0c7e655982e4c79cf277c47e2ebae0ca43a8f6cec253eebb856e0c226ab",
+    "text_sha256": "4c9961f0259f4e18a26ade2881c09cd75c7e68629164d00e0cff27c3c64433ad",
+    "content_type": "text/html",
+    "expected_target_flags": [],
+    "reason": "Same examination paragraph under four numbered syndrome headings; source review."
+  },
+  {
+    "id": 1461617,
+    "url": "https://www.cnkang.com/dise/226/1105963.html",
+    "file": "1461617.html",
+    "raw_sha256": "c5f45ca42f038977203caa4c53003cc97f9b878d32d8d546a92f3e95256ee5e3",
+    "text_sha256": "83e5538758ad035b95bb0e2745c242e5b9edcde89195e3b4df077029958b1087",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Chinese parent headings separate Arabic child lists."
+  },
+  {
+    "id": 1488947,
+    "url": "https://www.cnkang.com/dise/297/986071.html",
+    "file": "1488947.html",
+    "raw_sha256": "48c0f8a5a3b27020d71f6e6d0d55b417ce185b729a2e82ffba0bb2ebf60409d7",
+    "text_sha256": "0459bb8c5c23a5c5433429d5824bd36613a586507a1a6f88fa25542ff15f0122",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Whole strong paragraph introduces another topic/list."
+  },
+  {
+    "id": 1512877,
+    "url": "https://www.cnkang.com/dise/360/304397.html",
+    "file": "1512877.html",
+    "raw_sha256": "376aca06753c1a8c577c52bec21262466cd1ea408a6635630bdd34d2b3d30821",
+    "text_sha256": "2b45b53bc133291aa3061af711f2927e04cc7ad9bb355cee67335068f9b82d68",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Decimal outline 6.2.4 -> (1)/(2) -> 6.3 is hierarchical."
+  },
+  {
+    "id": 1541173,
+    "url": "https://www.cnkang.com/dise/430/323618.html",
+    "file": "1541173.html",
+    "raw_sha256": "d0f067e56f7756722a08191e056a0b2d4168f3a116b4a2ce79c1c631c1eea2cc",
+    "text_sha256": "0dae7350df61321d09210f8cb5f1a433ee4d154490dc46296818c25ba2a8b954",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Descending decimal measurements in a table are not list ordering."
+  },
+  {
+    "id": 1468122,
+    "url": "https://www.cnkang.com/dise/241/501169.html",
+    "file": "1468122.html",
+    "raw_sha256": "8d0c7af50d28e3fd2e459ad08701f11514f0e79cc7b7200ef06e0ce47f2660d2",
+    "text_sha256": "26c96b996b830d3c068d46c2f5575bad47521f52604922933e98828782806c4c",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [],
+    "reason": "Repeated punctuation-only separators are not repeated prose."
+  },
+  {
+    "id": 1871903,
+    "url": "https://www.cnkang.com/nkwk/gaoxuezhi/707546.html",
+    "file": "1871903.html",
+    "raw_sha256": "e8675a62a5800e5e3d59ce7ebd54d6ee1ed441b3dcb8253b41793820b69ee55c",
+    "text_sha256": "ffe19b3da0d3fd2be47defa54fcf91fd13eb63785b6ac97ee9021ba132922c66",
+    "content_type": "text/html",
+    "expected_target_flags": [],
+    "reason": "Repeated dotted separator; source quality remains unassessed."
+  },
+  {
+    "id": 1902464,
+    "url": "https://www.cnkang.com/nkwk/tnbzz/902730.html",
+    "file": "1902464.html",
+    "raw_sha256": "634bedec7b2e04d4d7e7be8af191c0f4cb7cd59818c1698e742c9d74f97397c9",
+    "text_sha256": "2dc4c770f4b4180c4eb77ab560603706e589ba298fa4fdd8fc7d86c112111efb",
+    "content_type": "text/html",
+    "expected_target_flags": [
+      "REPEATED_PARAGRAPH_REVIEW"
+    ],
+    "reason": "Six source paragraphs repeated as a block; retain flag, never delete."
+  },
+  {
+    "id": 1874785,
+    "url": "https://www.cnkang.com/nkwk/guzhe/710421.html",
+    "file": "1874785.html",
+    "raw_sha256": "748a5b87e951d6977acde2679215e222903caff4b10a16b9c883409da16bd0fa",
+    "text_sha256": "abdb7d4bee581d0e6db08567b1f9a00625e58af191428d5684cc77ac3ddcd4ba",
+    "content_type": "text/html",
+    "expected_target_flags": [
+      "DESCENDING_NUMBERING_REVIEW"
+    ],
+    "reason": "6 -> 1 without verified section boundary; keep review."
+  },
+  {
+    "id": 1739129,
+    "url": "https://www.cnkang.com/jibing/dianji/13446.html",
+    "file": "1739129.html",
+    "raw_sha256": "484642c273d97fb38f0f93b45c5fd73f798e82d209a78d1baeb6bbe86ec5d895",
+    "text_sha256": "ffa73cced82089e3d8c5b51370e1f9d2c21c45e4213e7648d1afc4d984b06db7",
+    "content_type": "text/html",
+    "expected_target_flags": [
+      "DESCENDING_NUMBERING_REVIEW"
+    ],
+    "reason": "Plain repeated label has no verified heading markup; conservative review."
+  },
+  {
+    "id": 1503459,
+    "url": "https://www.cnkang.com/dise/34/17794.html",
+    "file": "1503459.html",
+    "raw_sha256": "342c953d6b583558a2fc1e7d214dd1f280c2bc3f4173c7e1db08f6a9ef45a8c2",
+    "text_sha256": "bb2a40ad80140097acd65d754d0e9745b66362c559cfa0d52fa9643f6e91198c",
+    "content_type": "text/html; charset=UTF-8",
+    "expected_target_flags": [
+      "DESCENDING_NUMBERING_REVIEW"
+    ],
+    "reason": "Section title fused to inline item 1; ambiguous without a mapped heading."
+  },
+  {
+    "id": 1690503,
+    "url": "https://www.cnkang.com/dzjk/mrbj/hfyy/mljf/qdqy/200804/107572.html",
+    "file": "1690503.html",
+    "raw_sha256": "f8191413b12443aafce0a4e4c79312fd593bfb769e7336bc0efc6d77d73367eb",
+    "text_sha256": "ffdd44ae3697310cd80df382d3ec7478b9f8417e65ec4f6efa16f1546beeea4e",
+    "content_type": "text/html",
+    "expected_target_flags": [
+      "DESCENDING_NUMBERING_REVIEW"
+    ],
+    "reason": "Unknown layout, cannot establish body scope."
+  },
+  {
+    "id": 1769931,
+    "url": "https://www.cnkang.com/jibing/qiuzhen/919243.html",
+    "file": "1769931.html",
+    "raw_sha256": "75b8c5225cc0a8cf7e38e9b9c7563a348dcf8c552988edde2f00b05f6888be76",
+    "text_sha256": "22e03606861a17fc2f0aef77bb72b7460f09940a024d600b8750d4144ed271ce",
+    "content_type": "text/html",
+    "expected_target_flags": [
+      "REPEATED_PARAGRAPH_REVIEW"
+    ],
+    "reason": "First repeated paragraph lacks a verified heading scope."
+  },
+  {
+    "id": 1669081,
+    "url": "https://www.cnkang.com/dzjk/201012/57053.html",
+    "file": "1669081.html",
+    "raw_sha256": "d8b39cd9d846ca53520a477260b5289e1a1fe60a404ebec7b95ad914b8a31f22",
+    "text_sha256": "3f1fe79fd6d8a63363be387ea67c38b73a682f05cf62529084c710fd00c8d2f6",
+    "content_type": "text/html",
+    "expected_target_flags": [],
+    "reason": "One paragraph reused under distinct numbered injury headings; source review."
+  }
+]

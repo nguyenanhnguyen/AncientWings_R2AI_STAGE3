@@ -1,10 +1,20 @@
 # Kế hoạch sửa các vấn đề cnkang còn lại — 20/10/2026
 
-Trạng thái: **R1 đã triển khai và kiểm lại: 47/47 test, live 50/50 URL, audit 50/50, không lỗi mạng hoặc vượt deadline trong mẫu**. Xem [review R1](../reports/cnkang_r1_deadline_review_20261020.md). R2, F2/F3 và Q1–Q3 chưa triển khai trong lượt này. F1 giữ nguyên bản cnkang-v6-spec-3 đã đạt audit 611/611 và đối chiếu JS 122/122.
+Trạng thái: **R1, R2, F2/F3, Q1, Q2 và Q3 report_only đã triển khai.**
+Parser cnkang-v6-spec-7, helper cnkang-article-4, policy cnkang-source-1.
+Kiểm cuối Q3: 179/179 test đạt, audit/raw/text 611/611 giữ nguyên so với Q2,
+9 chuỗi/26 trang và 122 oracle JS F1 khớp. 57 short text có nhận xét theo ID;
+còn tập nhãn độc lập 80/40 trước enforce mặc định. 5 bài vẫn incomplete/review.
+Xem [review Q3](../reports/cnkang_q3_review_20261021.md); các phần dưới giữ kết
+quả theo từng mốc triển khai, không cộng chúng thành số URL mới đã crawl.
 
 Cơ sở: [review 615 URL/F1](../reports/cnkang_f1_fix_review_20261020.md). Đã xử lý 615 URL: 611 parse được, 4 lỗi vận hành; 119 trang có cờ parser. 492 trang sạch parser vẫn có 14 trang mang tín hiệu nguồn cần đọc lại. Các nhóm cờ chồng nhau và chưa có nhãn độc lập cho toàn bộ 611 trang.
 
 Không đặt mục tiêu xóa hết 119 cờ hoặc ép tỷ lệ accepted tăng. Mỗi thay đổi phải sửa đúng nguyên nhân, có bằng chứng và test trước/sau.
+
+Trước triển khai Q3, kiểm ngày 21/10/2026: **155/155 test đạt**, audit 611/611 record,
+9/9 chuỗi và 122/122 oracle JS F1 khớp. Q3 khi đó chưa triển khai; 5 bài incomplete
+và các cờ chưa đủ bằng chứng còn giữ review. Xem [báo cáo kiểm toàn bộ](../reports/cnkang_full_verification_20261021.md).
 
 ## Thứ tự triển khai
 
@@ -59,6 +69,13 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 
 ## R2 / P0 — Ghi checkpoint chịu được khóa file Windows
 
+**Đã làm:** temp riêng, flush/fsync, replace tối đa 3 lần trong budget 2 giây;
+giữ file cũ và bản .recovery khi hết retry; một writer; state/cooldown hợp nhất
+bảo thủ; raw/text theo content hash; phục hồi response/record trước khi GET.
+66/66 test đạt, gồm khóa Windows thật, process exit và recovery qua ZIP.
+Replay offline cùng 50 raw đạt 50/50 sau 80 sự kiện lỗi chèn, không GET lần hai;
+text hash/audit đều 50/50 khớp. Không chạy mạng trong R2. Chi tiết ở review R2.
+
 **Điểm sửa:** scripts/cnkang_transport.py:write_json/append và các chỗ cập nhật state/record; cập nhật adapter/runner để phân biệt lỗi lưu với fetch.
 
 **Cách sửa:**
@@ -76,6 +93,15 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 - Test crash sau ghi temp/raw/manifest/record và resume: không mất dữ liệu, không lặp text/ID, không reset cooldown.
 
 ## F2 + F3 / P1 — Toàn văn phân trang kèm audit/recovery
+
+**Đã làm:** cùng bài/số trang/title/template/date/body được xác minh; checkpoint
+và raw từng phần; manifest bất biến; audit tái dựng toàn chuỗi trước export;
+resume/recovery không GET lại phần đã lưu, offline không gọi mạng.
+Mặc định 6 trang và deadline chuỗi 360 giây. Replay 9/9 chuỗi/26 trang và 611/611
+raw F1 đạt. Ba bài thiếu trang tiếp, unknown 1690503 và pager mâu thuẫn 1405611
+giữ incomplete/review; chưa nghiệm thu live ba chuỗi mới. Chi tiết ở review F2/F3.
+Kiểm cuối: 128/128 test đạt, gồm 88 test cnkang và 40 test tích hợp/hồi quy liên quan;
+snapshot main/domain/check khớp production. Lượt F2/F3 không gọi mạng bên ngoài.
 
 **Điểm sửa:** scripts/cnkang_transport.py, scripts/corpus_runner.py, scripts/cnkang.py:audit, scripts/corpus_audit.py, scripts/cnkang_check.py và builder. Chi tiết kiến trúc đã có trong [plan tích hợp](cnkang_main_crawler_rollout_20261020.md).
 
@@ -97,6 +123,15 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 
 ## Q1 / P1 — QC theo cấu trúc danh sách và lượt trả lời
 
+**Đã làm:** QC theo scope DOM/danh sách/marker/lượt trả lời; bỏ nhầm do phân cấp,
+outline và số đo trong bảng; phân biệt câu lặp theo nhóm với khối lặp chưa rõ.
+Giữ nguyên toàn bộ text/số/bảng/provenance F1 trên 611 raw. 31/47 cờ đánh số và
+5/7 cờ lặp được gỡ/phân loại lại; 16 và 2 cờ còn lại giữ review. Parser sạch
+492→526, không clean→review. Hai ca lặp theo nhóm thêm tín hiệu nguồn để đọc lại.
+13 test Q1 với 16 raw fixture và ca âm; bộ kiểm cuối 141/141 đạt.
+Đây là hồi quy đã biết, chưa nghiệm thu tập nhãn độc lập 80/40 để hiệu chuẩn
+ngưỡng. Không tự gỡ các cờ còn lại theo suy đoán ngữ nghĩa; Q2/Q3 vẫn tách riêng.
+
 **Điểm sửa:** scripts/cnkang.py:node_text/review_text và sidecar/provenance; audit và test production tương ứng.
 
 **Cách sửa:**
@@ -114,6 +149,17 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 - Báo bảng giữ/gỡ cờ theo ID và lý do, không chỉ tổng số accepted.
 
 ## Q2 / P2 — PUA, encoding và bố cục chưa hỗ trợ
+
+**Đã làm:** 24 glyph được chuẩn hóa theo ngữ cảnh, giữ 5 glyph chưa rõ ở 3 record;
+giải thích được uncertain của 1708607, giữ cả PUA/uncertain cho 1772904.
+1850128/1906646 giữ PUA. Chặn chọn decoder khác chỉ để giảm PUA và bảo vệ ký hiệu
+trong ô bảng. Xác minh legacy_table của 1690503 bằng ID/title/date và cột header/body;
+F2 nhận next nhưng recovery offline vẫn incomplete. 14 test Q2 với 9 raw fixture
+và ca âm; raw, charset/candidates và formatter F1 giữ nguyên trên toàn mẫu.
+Kiểm cuối 155/155 test đạt; audit/raw 611/611, text đổi đúng whitelist ở 7 record,
+604 record còn lại giữ nguyên. 9 chuỗi/26 trang vẫn khớp 9.723 ký tự.
+Đây là nghiệm thu những rule đủ bằng chứng, không phải gỡ mọi glyph chưa rõ hoặc
+xác nhận toàn văn của 1690503. Q3 vẫn tách riêng.
 
 **Điểm sửa:** scripts/cnkang.py:decode_bytes/clean_node/choose_body/review_text; fixture và audit.
 
@@ -133,6 +179,15 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 
 ## Q3 / P1 — Short text, metadata và gate nguồn
 
+**Cập nhật 21/10/2026 — đã triển khai report_only:** xem [review Q3](../reports/cnkang_q3_review_20261021.md)
+và [kế hoạch Q3 chi tiết](cnkang_q3_source_gate_20261021.md) để đối chiếu điểm sửa,
+fixture/tiêu chí và phần nhãn độc lập còn lại. Baseline Q2 trước triển khai:
+531 parser accepted/80 review, 57 short text (2 incomplete), 611 thiếu meta author,
+368 cờ title–body và 16 parser accepted có claim/experience flag. Mốc 14 ở phần
+cơ sở F1 là số lịch sử. Sau Q3, title–body còn 185 cờ, claim 9, experience 13;
+source KEEP/REVIEW 399/212 và corpus KEEP/REVIEW 384/227 đều là đề xuất. Parser
+vẫn 531 accepted/80 review; không đổi text hoặc tăng accepted để nghiệm thu.
+
 **Điểm sửa:** metadata/source signals trong scripts/cnkang.py; một policy module production riêng nếu cần; chỗ quyết định export ở runner/audit. Giữ hợp đồng cột corpus, trường chẩn đoán có thể ở sidecar.
 
 **Cách sửa:**
@@ -147,7 +202,7 @@ tiếp trên Kaggle/Linux khi chuyển môi trường. Chi tiết và giới h�
 
 **Nghiệm thu:**
 
-- 14 trang sạch parser nhưng có tín hiệu nguồn được review/phân loại riêng; không đi thẳng vào corpus chuẩn chỉ nhờ parser sạch.
+- 16 trang sạch parser có cờ claim/trải nghiệm ở baseline Q2 được review/phân loại riêng (F1 trước đây là 14); không đi thẳng vào corpus chuẩn chỉ nhờ parser sạch. Đây là hợp tín hiệu, chưa phải nhãn nguồn xấu.
 - Có bảng lỗi trước/sau cho author, title/body, claim và short text trên tập kiểm đóng băng; báo cả giữ nhầm và loại nhầm.
 - Không đổi quyết định bằng cách tối ưu số accepted; không biến kết quả heuristic thành nhãn gold.
 

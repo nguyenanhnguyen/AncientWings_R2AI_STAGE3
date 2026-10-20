@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import zlib
@@ -150,6 +151,15 @@ class CnkangParserTests(unittest.TestCase):
         self.assertTrue(original['domain_parser_fallback'])
 
     def test_correct_disease_page_reaches_accepted_corpus_without_selenium(self):
+        self.check_corpus()
+
+    def test_full_article_reaches_corpus_and_audit_requires_every_raw(self):
+        self.check_corpus(paginated=True)
+
+    def test_source_gate_enforce_filters_main_and_domain_exports_but_keeps_raw(self):
+        self.check_corpus(source_enforce=True)
+
+    def check_corpus(self, paginated=False, source_enforce=False):
         source = self.out / 'source.parquet'
         pq.write_table(pa.Table.from_pylist([{'id':1,'url':URL}]),source)
         self.crawler.jsonl(self.out / 'sample.jsonl', [self.sample])
@@ -161,33 +171,73 @@ class CnkangParserTests(unittest.TestCase):
         def response(url, *args, **kwargs):
             result = requests.Response()
             result.status_code = 200
-            result._content = b'User-agent: *\nAllow: /\n' if url.endswith('/robots.txt') else disease_page()
+            first = disease_page()
+            if source_enforce:
+                first = first.replace(b'</div><div class="detaile">',
+                    '<p>本品百分之百有效，请立即购买。</p></div><div class="detaile">'.encode())
+            if paginated:
+                first = first.replace(b'<div class="detaile">',
+                    '<div class="pageStyle"><a href="1123729_2.html">下一页</a></div><div class="detaile">'.encode())
+            body = disease_page().replace('段落'.encode(), '后续段落'.encode()) if '_2.html' in url else first
+            result._content = b'User-agent: *\nAllow: /\n' if url.endswith('/robots.txt') else body
             result._content_consumed = True
             result.headers['Content-Type'] = 'text/plain' if url.endswith('/robots.txt') else 'text/html; charset=UTF-8'
             result.network = {'worker_pid': 123, 'elapsed_seconds': 0.001}
             return result
 
         cnkang = load_module('cnkang_test_transport', self.root / 'cnkang_transport_snapshot.py')
+        original_replace, publication_locks = cnkang.STORAGE.os.replace, []
+        def replace(source, target):
+            if Path(target) == self.out / 'records/1.json' and len(publication_locks) < 2:
+                publication_locks.append(str(target))
+                raise PermissionError(13, 'canonical cnkang checkpoint locked')
+            return original_replace(source, target)
         original_load = self.runner.load_module
         def load(name, path):
             return cnkang if name == 'corpus_cnkang' else original_load(name, path)
         with patch.object(self.runner, 'load_module', side_effect=load), \
+                patch.object(cnkang.STORAGE.os, 'replace', side_effect=replace), \
                 patch.object(cnkang.NETWORK.NetworkWorker, 'get', side_effect=response), patch('time.sleep'), \
                 patch.object(self.probe, 'browser_preflight') as preflight, \
                 patch.object(self.probe, 'create_browser') as browser, redirect_stdout(io.StringIO()):
-            summary = self.runner.run(self.crawler, self.probe, self.out, {'attempts': 1, 'delay': 0}, workers=1)
+            config = {'attempts':1,'delay':0}
+            if source_enforce: config['cnkang']={'source_policy_mode':'enforce'}
+            summary = self.runner.run(self.crawler, self.probe, self.out, config, workers=1)
         browser.assert_not_called()
         preflight.assert_not_called()
+        self.assertEqual(len(publication_locks), 2)
         self.assertEqual(summary['accessible'], 1)
         accepted = [json.loads(line) for line in (self.out / 'corpus.accepted.jsonl').read_text(encoding='utf-8').splitlines()]
-        self.assertEqual(len(accepted), 1)
-        self.assertEqual(accepted[0]['title'], '正文标题')
+        self.assertEqual(len(accepted), 0 if source_enforce else 1)
+        if accepted: self.assertEqual(accepted[0]['title'], '正文标题')
+        if source_enforce:
+            record=self.crawler.load_json(self.out/'records/1.json')
+            self.assertEqual(record['source_decision'],'EXCLUDE')
+            self.assertTrue((self.out/record['raw_path']).exists())
+            with redirect_stdout(io.StringIO()): self.domain_crawler.report(SimpleNamespace(out=str(self.out)))
+            self.assertFalse((self.out/'corpus.accepted.jsonl').read_text().strip())
         (self.out/'cnkang_snapshot.py').write_bytes((self.root/'cnkang_snapshot.py').read_bytes())
+        (self.out/'cnkang_article_snapshot.py').write_bytes((self.root/'cnkang_article_snapshot.py').read_bytes())
+        (self.out/'cnkang_source_gate_snapshot.py').write_bytes((self.root/'cnkang_source_gate_snapshot.py').read_bytes())
         auditor = load_module('cnkang_test_audit',self.root/'audit_snapshot.py')
         with patch('sys.argv',['audit','--out',str(self.out)]), redirect_stdout(io.StringIO()):
             auditor.main()
         audit_summary=json.loads((self.out/'audit_summary.json').read_text(encoding='utf-8'))
         self.assertEqual(audit_summary['cnkang_raw_records_verified'],1)
+        if paginated:
+            self.assertEqual(audit_summary['cnkang_article_records_verified'], 1)
+            self.assertEqual(audit_summary['cnkang_article_pages_verified'], 2)
+            record = self.crawler.load_json(self.out/'records/1.json')
+            self.assertTrue(record['article_complete'])
+            self.assertEqual(record['article_page_count'], 2)
+            self.assertIn('后续段落', accepted[0]['text'])
+            self.assertEqual(summary['cnkang_articles_complete'], 1)
+            manifest = self.crawler.load_json(self.out/record['article_manifest_path'])
+            (self.out/manifest['parts'][1]['raw_path']).unlink()
+            with self.assertRaises(FileNotFoundError):
+                cnkang.audit_saved(self.out, record)
+            with self.assertRaises(FileNotFoundError), redirect_stdout(io.StringIO()):
+                self.crawler.report(SimpleNamespace(out=str(self.out)))
 
     def test_quality_reviews_are_batched_and_not_counted_as_access_failures(self):
         samples = [dict(self.sample, id=i, url=URL + f'?test={i}') for i in range(1, 302)]

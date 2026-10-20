@@ -1,16 +1,23 @@
 # Kế hoạch áp dụng kết quả cnkang vào crawler chính — 20/10/2026
 
-Trạng thái: **F1 đã triển khai vào parser production cnkang-v6-spec-3, 37/37 test pass;
-kiểm live dừng ở 615/1.000 URL vì 3 fetch lỗi liên tiếp**. Trong 611 raw nhận được:
-audit 611/611 khớp, oracle JS 122/122 khớp; 385 URL chưa kiểm tra. Không chạy lại
-hoặc tiếp tục sau lỗi theo yêu cầu. Chỉ áp dụng khôi phục formattext và loại pager.
-F2–F4 vẫn là kế hoạch; transport/runner chưa triển khai ghép toàn bài. Xem
-[review F1](../reports/cnkang_f1_fix_review_20261020.md) để biết kết quả của lượt kiểm.
+Trạng thái: **F1, R1, R2, F2/F3, Q1, Q2 và Q3 report_only đã triển khai**,
+parser cnkang-v6-spec-7, helper cnkang-article-4, policy cnkang-source-1.
+F2/F3 replay 9/9 chuỗi, 26 raw, 9.723 ký tự khớp; 611/611 raw F1 giữ nguyên
+text/hash và audit. Xem [review F2/F3](../reports/cnkang_f2_f3_review_20261020.md).
+Lượt live F1 trước đó dừng ở 615/1.000 URL, có 611 raw và oracle JS 122/122 khớp;
+Q1 QC theo cấu trúc: 47→16 cờ đánh số, 7→2 cờ lặp; 611 text/hash giữ nguyên,
+141/141 test đạt. Xem [review Q1](../reports/cnkang_q1_review_20261020.md).
+Q2: chuẩn hóa có bằng chứng 24 glyph, giữ 3 record PUA/1 encoding uncertain;
+template legacy 1690503 đã có anchor, vẫn incomplete khi thiếu raw tiếp.
+Xem [review Q2](../reports/cnkang_q2_review_20261020.md).
+385 URL chưa chạy. Không tiếp tục run cũ. Q3: 179/179 test đạt, đủ 57 short text
+có nhận xét, body 611/611 giữ nguyên. Còn nhãn độc lập trước enforce mặc định;
+các chuỗi chưa đủ raw tiếp giữ incomplete/review. Xem [review Q3](../reports/cnkang_q3_review_20261021.md).
 
 **Kế hoạch còn lại sau review 611 trang:** [cnkang_remaining_fixes_20261020.md](cnkang_remaining_fixes_20261020.md).
 Đây là thứ tự ưu tiên hiện tại: R1 deadline mạng → R2 checkpoint → F2 kèm F3 →
 Q1 cấu trúc danh sách/lặp đoạn → Q2 PUA/bố cục → Q3 metadata và gate nguồn.
-Các phần F2–F4 bên dưới giữ mô tả kiến trúc, không thay thế kế hoạch cập nhật này.
+Các phần F2–F4 bên dưới giữ mô tả kiến trúc; trạng thái nghiệm thu xem plan cập nhật và review.
 
 Hướng đã chọn: **Requests tuần tự → parser DOM riêng → khôi phục `formattext` có bằng chứng → ghép trang có xác minh → audit toàn bài → gate nguồn riêng**.
 
@@ -84,6 +91,11 @@ Sau F1, ưu tiên R1/R2 vận hành như plan cập nhật trước khi mở r�
 **Nghiệm thu:** audit từ raw khớp toàn bộ record mới, mọi test tampering bị chặn; recovery không crawl lại phần đã lưu; hash snapshot khớp code; các domain khác không thay hành vi.
 
 ## F4 — Metadata và gate nguồn
+
+Q3 được cụ thể hóa trong [kế hoạch gate nguồn ngày 21/10/2026](cnkang_q3_source_gate_20261021.md),
+gồm short text, vai trò metadata, title–body, claim theo ngữ cảnh và các đường
+export/audit/resume. Đã triển khai report_only và kiểm các đường enforce bằng
+fixture; còn đánh giá nhãn độc lập trước khi bật enforce mặc định.
 
 **Điểm sửa dự kiến:** metadata/QC trong `scripts/cnkang.py`; record/summary và policy export ở tầng runner/audit hiện có. Có thể tách policy module khi cần; không trộn logic thí nghiệm vào runtime production.
 

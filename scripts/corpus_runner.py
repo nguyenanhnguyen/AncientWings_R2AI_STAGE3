@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 from urllib.parse import urlsplit
 
-VERSION = 'corpus-runner-v8'
+VERSION = 'corpus-runner-v9'
 DEFAULTS = {
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
     'requests_trust_env': True,
@@ -52,15 +52,23 @@ def read_record(crawler, out, folder, sample):
     return record
 
 
-def publish_record(crawler, probe, out, sample):
+def publish_record(crawler, probe, out, sample, checkpoint_writer=None, cnkang_audit=None):
+    host = (urlsplit(sample['url']).hostname or '').lower()
+    write = (checkpoint_writer if checkpoint_writer and (host == 'cnkang.com' or host.endswith('.cnkang.com'))
+             else crawler.write_json)
     api = read_record(crawler, out, 'pubmed_records', sample)
     if api is not None:
         record = dict(api, access_status='VAO_DUOC' if api.get('status') == 'extracted' else 'KHONG_VAO_DUOC')
-        crawler.write_json(out / 'records' / f"{sample['id']}.json", record)
+        write(out / 'records' / f"{sample['id']}.json", record)
         return record
     request = read_record(crawler, out, 'requests_records', sample)
     if request is None:
         return None
+    if host == 'cnkang.com' or host.endswith('.cnkang.com'):
+        if request.get('article_complete') is False and request.get('quality_status') == 'accepted':
+            raise ValueError('Incomplete cnkang article cannot be accepted')
+        if cnkang_audit and request.get('status') == 'extracted':
+            cnkang_audit(request)
     browser = read_record(crawler, out, 'browser_records', sample)
     if request.get('status') == 'skipped_selenium_first' and browser is None:
         return None  # Routing alone is not a completed crawl checkpoint.
@@ -81,7 +89,7 @@ def publish_record(crawler, probe, out, sample):
                       requests=request.get('requests', []), robots=request.get('robots'),
                       started_at=request.get('started_at'),
                       elapsed_seconds=round(request.get('elapsed_seconds', 0) + browser.get('elapsed_seconds', 0), 3))
-    crawler.write_json(out / 'records' / f"{sample['id']}.json", record)
+    write(out / 'records' / f"{sample['id']}.json", record)
     return record
 
 
@@ -96,6 +104,7 @@ def write_access_report(crawler, probe, out, samples):
         row = {key: record.get(key) for key in (
             'id', 'url', 'domain', 'access_status', 'engine', 'status', 'http_status',
             'quality_status', 'quality_flags', 'error', 'error_kind', 'browser_route', 'requests_status',
+            'article_complete', 'article_page_count', 'article_reason',
             'requests_http_status', 'requests_error_kind', 'requests_error',
             'browser_status', 'browser_http_status', 'browser_error', 'pubmed_route', 'pubmed_api_status', 'pubmed_pmid')}
         if row['engine'] not in ('efetch', 'curl_cffi') and not row['browser_status'] and row['access_status'] != 'VAO_DUOC' and setup:
@@ -111,6 +120,9 @@ def write_access_report(crawler, probe, out, samples):
                   for domain, group in errors.items()]
     priorities.sort(key=lambda r: (-r['dataset_url_count'], r['domain']))
     summary = {'selected': len(samples), 'completed': len(rows), 'pending': len(samples) - len(rows),
+               'cnkang_articles_complete': sum(r.get('article_complete') is True for r in rows),
+               'cnkang_articles_incomplete': sum(r.get('article_complete') is False for r in rows),
+               'cnkang_component_pages': sum(r.get('article_page_count') or 0 for r in rows),
                'accessible': sum(r['access_status'] == 'VAO_DUOC' for r in rows),
                'browser_recovered': sum(r['engine'] == 'selenium' and r['access_status'] == 'VAO_DUOC'
                                         and r.get('browser_route') != 'selenium_first' for r in rows),
@@ -123,6 +135,7 @@ def write_access_report(crawler, probe, out, samples):
     crawler.write_json(out / 'access_summary.json', summary)
     crawler.write_json(out / 'uu_tien_fix_domain.json', priorities)
     fields = ['id', 'url', 'domain', 'dataset_url_count', 'access_status', 'engine', 'status', 'http_status',
+              'article_complete', 'article_page_count', 'article_reason',
               'quality_status', 'quality_flags', 'error_kind', 'error', 'browser_route', 'requests_status', 'requests_http_status',
               'requests_error_kind', 'requests_error', 'browser_status', 'browser_http_status', 'browser_error',
               'pubmed_route', 'pubmed_api_status', 'pubmed_pmid']
@@ -191,6 +204,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         if not module_path.exists(): module_path = Path(__file__).with_name('cnkang_transport.py')
         cnkang = load_module('corpus_cnkang', module_path)
         config['cnkang'] = {**cnkang.DEFAULTS, **config.get('cnkang', {})}
+    validate_cnkang = (lambda record: cnkang.audit_saved(out, record)) if cnkang else None
     identity = {'version': VERSION, 'settings': config,
                 'runner_sha256': crawler.file_hash(__file__),
                 'crawler_sha256': crawler.file_hash(crawler.__file__),
@@ -212,6 +226,9 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         identity['cnkang_transport_sha256'] = crawler.file_hash(cnkang.__file__)
         identity['cnkang_network_sha256'] = crawler.file_hash(cnkang.NETWORK.__file__)
         identity['cnkang_network_worker_sha256'] = crawler.file_hash(cnkang.NETWORK.WORKER_PATH)
+        identity['cnkang_checkpoint_sha256'] = crawler.file_hash(cnkang.STORAGE.__file__)
+        identity['cnkang_article_sha256'] = crawler.file_hash(cnkang.ARTICLE.__file__)
+        identity['cnkang_source_policy_sha256'] = cnkang.PARSER.SOURCE.POLICY_SHA256
     if efetch:
         identity['pubmed_efetch_sha256'] = crawler.file_hash(efetch.__file__)
     if longchau:
@@ -229,21 +246,25 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         crawler.TRUST_ENV = config['requests_trust_env']
         page_samples = [s for s in samples if not efetch or crawler.host(s['url']) != 'pubmed.ncbi.nlm.nih.gov']
         if recovery_source:
-            probe.seed_successful_requests(crawler, out, page_samples, recovery_source, record_dir='requests_records')
+            generic_recovery = [s for s in page_samples if not cnkang or not cnkang.PARSER.is_host(s['url'])]
+            probe.seed_successful_requests(crawler, out, generic_recovery, recovery_source, record_dir='requests_records')
+            if cnkang:
+                cnkang.seed_recovery(out, cnkang_samples, recovery_source, config['cnkang'],
+                                     record_dir='requests_records')
             old_gate = Path(recovery_source) / 'cnkang_transport_state.json'
-            if cnkang and old_gate.exists():
+            if cnkang and (old_gate.exists() or cnkang.STORAGE.pending_paths(old_gate)):
                 current_gate = out / 'cnkang_transport_state.json'
-                previous_gate = crawler.load_json(old_gate)
-                current_state = crawler.load_json(current_gate) if current_gate.exists() else {}
+                previous_gate = cnkang.STORAGE.load_state(old_gate)
+                current_state = cnkang.STORAGE.load_state(current_gate)
                 for key in ('not_before', 'last_request'):
                     current_state[key] = max(previous_gate.get(key, 0), current_state.get(key, 0))
-                crawler.write_json(current_gate, current_state)
+                cnkang.STORAGE.save_state(current_gate, current_state)
         elif (out / 'recovery_manifest.json').exists():
             # Resume a recovered run without requiring its old source to remain mounted.
             pass
         # Repair canonical output after an interruption between the engine checkpoint and publication.
         for sample in samples:
-            publish_record(crawler, probe, out, sample)
+            publish_record(crawler, probe, out, sample, cnkang.write_json if cnkang else None, validate_cnkang)
         # The checkpoint belongs to the whole invocation, including website/browser work.
         helper_path = Path(__file__).parent / 'checkpoint_snapshot.py'
         if not helper_path.exists(): helper_path = Path(__file__).parent / 'corpus_checkpoint.py'
@@ -287,7 +308,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
 
         def publish_request(record):
             nonlocal deferred
-            canonical = publish_record(crawler, probe, out, record)
+            canonical = publish_record(crawler, probe, out, record, cnkang.write_json if cnkang else None, validate_cnkang)
             if canonical is None: return
             id_ = canonical['id']
             if fingerprint(canonical) == previous_fingerprints.get(id_): return  # Resume replay is not new work.
@@ -383,7 +404,7 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
         finally:
             try:
                 for sample in samples:
-                    publish_record(crawler, probe, out, sample)
+                    publish_record(crawler, probe, out, sample, cnkang.write_json if cnkang else None, validate_cnkang)
                 if efetch:
                     efetch.write_reports(crawler, out, [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov'])
                 if longchau:

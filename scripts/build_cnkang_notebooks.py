@@ -50,6 +50,44 @@ def cnkang_module():
             "def quality(doc):\n"
             "    if doc.get('extractor') == 'cnkang_v6_spec_dom':\n"
             "        return {key: doc[key] for key in ('quality_status', 'quality_flags', 'char_count', 'text_sha256')}\n", 1)
+    if '# cnkang full article audit' not in text:
+        start = text.index('def report(')
+        before, report = text[:start], text[start:]
+        report = report.replace('            rows.append(r)',
+            "            # cnkang full article audit, including POSTPROCESS_ONLY exports.\n"
+            "            if (host(r['url']) == 'cnkang.com' or host(r['url']).endswith('.cnkang.com')) and r.get('status') == 'extracted':\n"
+            "                if r.get('article_complete') is False and r.get('quality_status') == 'accepted':\n"
+            "                    raise ValueError('Incomplete cnkang article cannot be accepted')\n"
+            "                cnkang_module().audit(gzip.decompress((out/r['raw_path']).read_bytes()),\n"
+            "                    r.get('final_url') or r['url'], r, r.get('content_type') or 'text/html', base_dir=out)\n"
+            "            rows.append(r)", 1)
+        text = before + report
+    if '# cnkang source gate' not in text:
+        helper = '''
+def corpus_eligible(record, out):
+    # cnkang source gate: report_only preserves provisional parser acceptance.
+    if host(record['url']) == 'cnkang.com' or host(record['url']).endswith('.cnkang.com'):
+        return cnkang_module().SOURCE.export_eligible(record, cnkang_module().SOURCE.mode_for_run(out))
+    return record.get('quality_status') == 'accepted'
+
+'''
+        text = text.replace('\ndef report(args):', '\n' + helper + '\ndef report(args):',1)
+        start = text.index('def report(args):')
+        before, report = text[:start], text[start:]
+        report = report.replace("r.get('quality_status') == 'accepted'", 'corpus_eligible(r, out)')
+        report = report.replace("r.get('quality_status') != 'accepted'", 'not corpus_eligible(r, out)')
+        report = report.replace('base_dir=out)\n',
+            "base_dir=out)\n"
+            "                r = cnkang_module().SOURCE.publish(r, cnkang_module().SOURCE.mode_for_run(out))\n",1)
+        report = report.replace("    jsonl(out / 'documents.jsonl', extracted)",
+            "    jsonl(out / 'source_decisions.jsonl', [r for r in extracted if r.get('source_policy_version')])\n"
+            "    jsonl(out / 'documents.jsonl', extracted)",1)
+        report = report.replace("'extracted': len(extracted), 'accepted': len(accepted),",
+            "'extracted': len(extracted), 'accepted': len(accepted),\n"
+            "               'cnkang_source_policy_mode': cnkang_module().SOURCE.mode_for_run(out) if any(host(r['url']).endswith('cnkang.com') for r in rows) else None,\n"
+            "               'cnkang_source_decisions': dict(Counter(r['source_decision'] for r in rows if r.get('source_policy_version'))),\n"
+            "               'cnkang_corpus_decisions': dict(Counter(r['corpus_decision'] for r in rows if r.get('source_policy_version'))),",1)
+        text = before + report
     return text.encode('utf-8')
 
 
@@ -65,6 +103,9 @@ def synchronize():
         'cnkang_transport_snapshot.py': (ROOT / 'scripts/cnkang_transport.py').read_bytes(),
         'cnkang_network_snapshot.py': (ROOT / 'scripts/cnkang_network.py').read_bytes(),
         'cnkang_request_worker_snapshot.py': (ROOT / 'scripts/cnkang_request_worker.py').read_bytes(),
+        'cnkang_checkpoint_snapshot.py': (ROOT / 'scripts/cnkang_checkpoint.py').read_bytes(),
+        'cnkang_article_snapshot.py': (ROOT / 'scripts/cnkang_article.py').read_bytes(),
+        'cnkang_source_gate_snapshot.py': (ROOT / 'scripts/cnkang_source_gate.py').read_bytes(),
         'corpus_runner_snapshot.py': (ROOT / 'scripts/corpus_runner.py').read_bytes(),
         'audit_snapshot.py': (ROOT / 'scripts/corpus_audit.py').read_bytes(),
     }
@@ -97,6 +138,18 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
             "('cnkang_transport_snapshot.py','cnkang_transport_sha256'),\n"
             "                      ('cnkang_network_snapshot.py','cnkang_network_sha256'),\n"
             "                      ('cnkang_request_worker_snapshot.py','cnkang_network_worker_sha256'),")
+    if "('cnkang_checkpoint_snapshot.py','cnkang_checkpoint_sha256')" not in setup:
+        setup = setup.replace("('cnkang_transport_snapshot.py','cnkang_transport_sha256'),",
+            "('cnkang_transport_snapshot.py','cnkang_transport_sha256'),\n"
+            "                      ('cnkang_checkpoint_snapshot.py','cnkang_checkpoint_sha256'),", 1)
+    if "('cnkang_article_snapshot.py','cnkang_article_sha256')" not in setup:
+        setup = setup.replace("('cnkang_transport_snapshot.py','cnkang_transport_sha256'),",
+            "('cnkang_transport_snapshot.py','cnkang_transport_sha256'),\n"
+            "                      ('cnkang_article_snapshot.py','cnkang_article_sha256'),", 1)
+    if "('cnkang_source_gate_snapshot.py','cnkang_source_policy_sha256')" not in setup:
+        setup = setup.replace("('cnkang_transport_snapshot.py','cnkang_transport_sha256'),",
+            "('cnkang_transport_snapshot.py','cnkang_transport_sha256'),\n"
+            "                      ('cnkang_source_gate_snapshot.py','cnkang_source_policy_sha256'),",1)
     put(6, setup)
     config = get(2)
     if 'CNKANG_REQUEST_GAP =' not in config:
@@ -108,7 +161,13 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
         config = config.replace('CNKANG_ATTEMPTS =',
             'CNKANG_REQUEST_DEADLINE = 45.0  # DNS + connect + headers + body\n'
             'CNKANG_URL_DEADLINE = 120.0  # robots + gap + redirects + retries\nCNKANG_ATTEMPTS =', 1)
+    if 'CNKANG_MAX_PAGES =' not in config:
+        config = config.replace('CNKANG_ATTEMPTS =',
+            'CNKANG_MAX_PAGES = 6\nCNKANG_ARTICLE_DEADLINE = 360.0\nCNKANG_ATTEMPTS =', 1)
     put(2, config)
+    if 'CNKANG_SOURCE_POLICY_MODE =' not in config:
+        config += "\nCNKANG_SOURCE_POLICY_MODE = 'report_only'  # independent labelled evaluation pending\n"
+        put(2, config)
     crawl = get(12)
     if "'cnkang':" not in crawl:
         crawl = crawl.replace("'longchau_use_curl': LONGCHAU_USE_CURL,",
@@ -121,6 +180,13 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
             "'timeout': [CNKANG_CONNECT_TIMEOUT, CNKANG_READ_TIMEOUT],\n"
             "                       'request_deadline': CNKANG_REQUEST_DEADLINE,\n"
             "                       'url_deadline': CNKANG_URL_DEADLINE,", 1)
+    if "'max_pages': CNKANG_MAX_PAGES" not in crawl:
+        crawl = crawl.replace("'url_deadline': CNKANG_URL_DEADLINE,",
+            "'url_deadline': CNKANG_URL_DEADLINE,\n"
+            "                       'max_pages': CNKANG_MAX_PAGES, 'article_deadline': CNKANG_ARTICLE_DEADLINE,", 1)
+    if "'source_policy_mode': CNKANG_SOURCE_POLICY_MODE" not in crawl:
+        crawl = crawl.replace("'user_agent': CNKANG_USER_AGENT,",
+            "'source_policy_mode': CNKANG_SOURCE_POLICY_MODE, 'user_agent': CNKANG_USER_AGENT,",1)
     put(12, crawl)
     note = ('\n\nCnkang dùng chung parser và Requests transport với check_cnkang.com.ipynb: '
             'một worker, gap tối thiểu 1,5 giây, HTTPS trước, robots từng origin, retry/cooldown hữu hạn; '
@@ -132,6 +198,10 @@ if not POSTPROCESS_ONLY and HAS_CNKANG_SAMPLE and (RUN_DIR / 'corpus_config.json
     write(nb, path)
     path = ROOT / 'notebooks/crawl_domain_samples.ipynb'
     nb = json.loads(path.read_text(encoding='utf-8'))
+    domain_config = ''.join(nb['cells'][3]['source'])
+    if 'CNKANG_SOURCE_POLICY_MODE =' not in domain_config:
+        domain_config += "\nCNKANG_SOURCE_POLICY_MODE = 'report_only'  # source labels not independently validated\n"
+        nb['cells'][3]['source'] = domain_config.splitlines(keepends=True)
     setup = ''.join(nb['cells'][7]['source'])
     values = literals(setup)
     core = core_upgrade(zlib.decompress(base64.b85decode(values['CRAWLER_PAYLOAD'])))
@@ -149,7 +219,60 @@ if cnkang_path.exists() and cnkang_path.read_bytes() != cnkang_body:
     raise ValueError('cnkang parser changed; use a new run and RECOVERY_RUN_DIR')
 cnkang_path.write_bytes(cnkang_body)
 '''
+    if 'CNKANG_ARTICLE_PAYLOAD =' not in setup:
+        setup += "\nCNKANG_ARTICLE_PAYLOAD = " + repr(encode(updates['cnkang_article_snapshot.py'])) + "\n"
+    else:
+        setup = replace(setup, {'CNKANG_ARTICLE_PAYLOAD': encode(updates['cnkang_article_snapshot.py'])})
+    if 'cnkang_article_body =' not in setup:
+        setup += '''
+cnkang_article_body = zlib.decompress(base64.b85decode(CNKANG_ARTICLE_PAYLOAD))
+cnkang_article_path = RUN_DIR / 'cnkang_article_snapshot.py'
+if cnkang_article_path.exists() and cnkang_article_path.read_bytes() != cnkang_article_body:
+    raise ValueError('cnkang article code changed; use a new run')
+cnkang_article_path.write_bytes(cnkang_article_body)
+'''
+    runtime_files = {name: encode(body) for name, body in updates.items()
+                     if name.startswith('cnkang_') and name != 'cnkang_snapshot.py'}
+    if 'CNKANG_RUNTIME_PAYLOADS =' not in setup:
+        setup += '\nCNKANG_RUNTIME_PAYLOADS = ' + repr(runtime_files) + '\n'
+        setup += '''
+import importlib.util
+for cnkang_name, cnkang_payload in CNKANG_RUNTIME_PAYLOADS.items():
+    cnkang_code = zlib.decompress(base64.b85decode(cnkang_payload))
+    cnkang_target = RUN_DIR / cnkang_name
+    if cnkang_target.exists() and cnkang_target.read_bytes() != cnkang_code:
+        raise ValueError('cnkang runtime changed; use a new run and recovery')
+    cnkang_target.write_bytes(cnkang_code)
+cnkang_spec = importlib.util.spec_from_file_location('domain_cnkang_transport', RUN_DIR/'cnkang_transport_snapshot.py')
+CNKANG_TRANSPORT = importlib.util.module_from_spec(cnkang_spec)
+cnkang_spec.loader.exec_module(CNKANG_TRANSPORT)
+'''
+    else:
+        setup = replace(setup, {'CNKANG_RUNTIME_PAYLOADS': runtime_files})
     nb['cells'][7]['source'] = setup.splitlines(keepends=True)
+    domain_crawl = ''.join(nb['cells'][11]['source'])
+    if 'cnkang_samples = ' not in domain_crawl:
+        domain_crawl = domain_crawl.replace(
+            'recovery = priority_probe.seed_successful_requests(crawler, RUN_DIR, SAMPLES, RECOVERY_RUN_DIR)',
+            "recovery = priority_probe.seed_successful_requests(crawler, RUN_DIR,\n"
+            "                [s for s in SAMPLES if not CNKANG_TRANSPORT.PARSER.is_host(s['url'])], RECOVERY_RUN_DIR)\n"
+            "            CNKANG_TRANSPORT.seed_recovery(RUN_DIR,\n"
+            "                [s for s in SAMPLES if CNKANG_TRANSPORT.PARSER.is_host(s['url'])], RECOVERY_RUN_DIR,\n"
+            "                record_dir='records')")
+        domain_crawl = domain_crawl.replace(
+            '        if DIRECT_PUBLIC_PROBE and BROWSER_TEST_MODE',
+            "        cnkang_samples = [s for s in remaining_samples if CNKANG_TRANSPORT.PARSER.is_host(s['url'])]\n"
+            "        if cnkang_samples and remaining_limit != 0:\n"
+            "            cnkang_new = CNKANG_TRANSPORT.crawl(crawler, priority_probe, RUN_DIR, cnkang_samples,\n"
+            "                {'trust_env': REQUESTS_TRUST_ENV}, max_new=remaining_limit, log_every=LOG_EVERY,\n"
+            "                record_dir='records')\n"
+            "            if remaining_limit is not None: remaining_limit -= cnkang_new\n"
+            "        remaining_samples = [s for s in remaining_samples if not CNKANG_TRANSPORT.PARSER.is_host(s['url'])]\n"
+            "        if DIRECT_PUBLIC_PROBE and BROWSER_TEST_MODE", 1)
+    if "'source_policy_mode': CNKANG_SOURCE_POLICY_MODE" not in domain_crawl:
+        domain_crawl = domain_crawl.replace("{'trust_env': REQUESTS_TRUST_ENV}, max_new=remaining_limit",
+            "{'trust_env': REQUESTS_TRUST_ENV, 'source_policy_mode': CNKANG_SOURCE_POLICY_MODE}, max_new=remaining_limit")
+    nb['cells'][11]['source'] = domain_crawl.splitlines(keepends=True)
     write(nb, path)
 
 
@@ -209,7 +332,10 @@ CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 30.0
 REQUEST_DEADLINE = 45.0
 URL_DEADLINE = 120.0
+MAX_ARTICLE_PAGES = 6
+ARTICLE_DEADLINE = 360.0
 MAX_ATTEMPTS_PER_URL = 2
+SOURCE_POLICY_MODE = 'report_only'  # enforce only after independent labelled evaluation
 REQUESTS_TRUST_ENV = False
 OUTPUT_DIR = Path('/kaggle/working/check_cnkang_com')
 RESUME_FROM = None  # Thư mục run đầy đủ dưới Kaggle Input, copy khi OUTPUT_DIR chưa có.
@@ -218,6 +344,9 @@ RESUME_FROM = None  # Thư mục run đầy đủ dưới Kaggle Input, copy khi
         ('cnkang_snapshot.py','cnkang.py'),('cnkang_transport_snapshot.py','cnkang_transport.py'),
         ('cnkang_network_snapshot.py','cnkang_network.py'),
         ('cnkang_request_worker_snapshot.py','cnkang_request_worker.py'),
+        ('cnkang_checkpoint_snapshot.py','cnkang_checkpoint.py'),
+        ('cnkang_article_snapshot.py','cnkang_article.py'),
+        ('cnkang_source_gate_snapshot.py','cnkang_source_gate.py'),
         ('cnkang_check_snapshot.py','cnkang_check.py'))}
     payloads = {name:encode(body) for name,body in files.items()}
     hashes = {name:hashlib.sha256(body).hexdigest() for name,body in files.items()}
@@ -252,7 +381,9 @@ CONFIG = {'parquet_path':str(PARQUET_PATH) if PARQUET_PATH else None,
     'allow_incomplete_history':ALLOW_INCOMPLETE_HISTORY,
     'target':TARGET_URLS, 'seed':RANDOM_SEED}
 NETWORK = {'gap':REQUEST_GAP_SECONDS,'timeout':[CONNECT_TIMEOUT,READ_TIMEOUT],
+    'source_policy_mode':SOURCE_POLICY_MODE,
     'request_deadline':REQUEST_DEADLINE,'url_deadline':URL_DEADLINE,
+    'max_pages':MAX_ARTICLE_PAGES,'article_deadline':ARTICLE_DEADLINE,
     'attempts':MAX_ATTEMPTS_PER_URL,'trust_env':REQUESTS_TRUST_ENV,
     'user_agent':'ViBioMIR-CnkangCheck/1.0'}
 CONFIG['network'] = NETWORK

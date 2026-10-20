@@ -108,6 +108,10 @@ class DeadlineTests(unittest.TestCase):
         net = transport.Transport(self.root / 'run', {'url_deadline': 1.5, 'request_deadline': 45})
         self.addCleanup(net.close)
         sample = {'id': 1, 'url': 'http://www.cnkang.com/myjk/1.html'}
+        # Focus this case on DNS after the worker is ready. Under concurrent disk
+        # load a cold interpreter may itself consume the 1.5s budget and correctly
+        # report worker_start instead; startup deadlines have separate coverage.
+        net.worker.get('https://www.cnkang.com/ok', net.config, network.deadline(10))
         # robots request stalls in DNS, not in a page fetch.
         original_get = net.worker.get
         def stalled(url, config, limit, **kwargs):
@@ -178,7 +182,7 @@ class DeadlineTests(unittest.TestCase):
 
 
 class SnapshotTests(unittest.TestCase):
-    def test_main_and_check_include_identical_network_workers(self):
+    def test_main_and_check_include_identical_network_and_checkpoint_modules(self):
         packages = []
         for name in ('crawl_corpus_kaggle_hf_upload.ipynb', 'check_cnkang.com.ipynb'):
             values = {}
@@ -190,7 +194,8 @@ class SnapshotTests(unittest.TestCase):
                         if node.targets[0].id in ('PAYLOADS', 'EMBEDDED_FILES'):
                             values.update(ast.literal_eval(node.value))
             packages.append(values)
-        for name in ('cnkang_network_snapshot.py', 'cnkang_request_worker_snapshot.py'):
+        for name in ('cnkang_network_snapshot.py', 'cnkang_request_worker_snapshot.py',
+                     'cnkang_checkpoint_snapshot.py', 'cnkang_article_snapshot.py'):
             self.assertEqual(packages[0][name], packages[1][name])
             body = zlib.decompress(base64.b85decode(packages[0][name]))
             self.assertEqual(body, (ROOT / 'scripts' / name.replace('_snapshot', '')).read_bytes())

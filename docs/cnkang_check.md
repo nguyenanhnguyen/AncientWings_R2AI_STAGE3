@@ -2,13 +2,40 @@
 
 ## Thí nghiệm crawl ngày 20/10/2026
 
-F1 đã đưa vào parser production cnkang-v6-spec-3: khôi phục đúng cơ chế
+F1 đã đưa vào parser production, hiện cnkang-v6-spec-7: khôi phục đúng cơ chế
 formattext trong DOM đã xác minh, loại pager cùng bài, giữ charset gốc và provenance.
-Liên kết trang tiếp/cờ phân trang vẫn giữ; chưa ghép toàn bài. Có test HTML thật,
+F2/F3 đã bổ sung ghép toàn bài và audit từ mọi raw trang thành phần. Có test HTML thật,
 đối chiếu JS và kiểm audit chống sửa bằng chứng. Lượt kiểm 1.000 URL khác lịch sử
 đã biết dừng tại 615 URL do 3 lỗi fetch liên tiếp: 611 raw audit khớp, 385 URL chưa chạy.
 Không retry-run. Config/code/output nằm trong cùng notebook local, ở phần **F1 production** cuối file.
 Xem [review F1](reports/cnkang_f1_fix_review_20261020.md) để biết trạng thái và kết quả.
+
+F2/F3: 9/9 chuỗi, 26 trang, 9.723 ký tự khớp; replay 611/611 raw F1 không đổi
+text/hash, audit đủ. Ba bài thiếu raw tiếp, unknown 1690503 và pager mâu thuẫn
+1405611 giữ incomplete/review. Xem [review F2/F3](reports/cnkang_f2_f3_review_20261020.md).
+Phần thí nghiệm/output F2/F3 cũng nằm cuối file check ignored; mặc định chỉ đọc kết quả.
+
+Q1 đã bổ sung QC theo scope DOM/danh sách/lượt trả lời, không thay text.
+Trên cùng 611 raw: đánh số 47→16, lặp đoạn 7→2, audit/text hash giữ nguyên;
+141/141 test đạt. Câu lặp theo nhóm vẫn được giữ và có tín hiệu nguồn riêng.
+Xem [review Q1](reports/cnkang_q1_review_20261020.md). Thí nghiệm/output Q1 ở
+cùng file check, mặc định chỉ đọc kết quả; không gọi mạng trong lượt này.
+
+Q2 bổ sung chuẩn hóa glyph theo vị trí/DOM và template legacy_table:
+PUA 8→3, encoding uncertain 2→1, unknown layout 1→0. Chỉ 7/611 record đổi text
+theo các thay thế đã xác minh; không đổi encoding/charset candidates hoặc byte
+nguồn. 1690503 đã xác minh body/title/date/pager nhưng vẫn incomplete vì chưa có
+raw trang tiếp. Xem [review Q2](reports/cnkang_q2_review_20261020.md).
+Kiểm cuối Q2: 155/155 test đạt, audit/raw 611/611, 9 chuỗi/26 trang vẫn đúng.
+
+Q3 đã triển khai metadata theo vai trò, title–body và claim theo ngữ cảnh,
+policy cnkang-source-1, helper cnkang-article-4. 179/179 test đạt, 611/611 raw/text
+và parser flags giữ nguyên; đủ 57 short text có nhận xét. Mặc định report_only:
+399 source KEEP/212 REVIEW, corpus decision 384 KEEP/227 REVIEW là ứng viên,
+chưa phải nhãn độc lập. Enforce có đường lọc/test nhưng chưa bật mặc định khi
+thiếu nghiệm thu tập nhãn 80/40. Xem [review Q3](reports/cnkang_q3_review_20261021.md).
+Ô Q3 cuối file check mặc định đọc output pass3, không gọi mạng; bật Q3_RUN_CHECK
+chỉ khi muốn replay offline trong thư mục mới. Không ghi đè run đã hoàn tất.
 
 Chỉ dùng một file local:
 [check_cnkang.com.ipynb](../notebooks/check_cnkang.com.ipynb), đã được `.gitignore`.
@@ -79,13 +106,17 @@ schema và ZIP với trạng thái history_required, không gửi request.
 
 - scripts/cnkang.py: port quy tắc v6 sang parser dùng chung; strict encoding
   candidates, detailc/endText/conmain, đường dẫn DOM, bảng, synopsis có anchor,
-  parser/source flags và tái trích raw để audit.
+  parser/source flags, qc_structure có scope/evidence và tái trích raw để audit.
+  Q2 lưu glyph_normalization, layout_evidence và quyết định encoding riêng;
+  glyph chưa rõ, PUA inline/scientific/trong ô bảng được giữ review.
 - scripts/cnkang_transport.py: Requests tuần tự, robots theo origin, HTTPS trước,
   fallback HTTP chỉ cho lỗi kết nối/server; không fallback để né 403/429.
+- scripts/cnkang_article.py: xác minh chuỗi cùng bài, ghép đoạn, checkpoint/manifest
+  từng trang, tái dựng toàn văn và QC từ raw để audit trước publication/export.
 - scripts/cnkang_check.py: canonical giữ path/query, gom ID, phân tầng đủ nhánh,
   manifest bất biến, checkpoint, báo cáo và schema artifact ổn định.
 - scripts/build_cnkang_notebooks.py: nhúng snapshot/hash vào notebook check và
-  notebook crawl chính. Domain samples dùng cùng parser/QC.
+  notebook crawl chính. Domain samples dùng cùng parser/transport/toàn bài/audit.
 
 Crawl chính có cấu hình CNKANG_* riêng. Cnkang luôn kiểm robots và không dùng
 Selenium, độc lập với cấu hình chung của các domain khác. Source flags giữ riêng;
@@ -99,6 +130,18 @@ Thiếu ngày không biến thành fetch thất bại; short text, thứ tự gi
 bố cục mơ hồ cần đọc lại raw. Không tự đảo đoạn, đoán nội dung y khoa hoặc crawl
 link bài liên quan như phần tiếp theo.
 
+qc_structure lưu dòng/hash/path, scope, marker, quyết định và bằng chứng.
+Unknown/không ánh xạ nguyên dòng được giữ QC bảo thủ; không gỡ cờ chỉ vì dòng
+ngắn hoặc có một từ in đậm. CONTEXTUAL_REPETITION_REVIEW thuộc source_flags,
+không xác nhận câu lặp là nội dung y khoa phù hợp.
+
+Giới hạn toàn bài: CNKANG_MAX_PAGES=6, CNKANG_ARTICLE_DEADLINE=360 giây trong
+crawler chính; MAX_ARTICLE_PAGES/ARTICLE_DEADLINE trong check. Trang phụ nằm ở
+cnkang_pages/, manifest ở cnkang_articles/; không tăng MAX_NEW hoặc tạo ID corpus.
+article_complete=False luôn review/rejected. Giữ đầy đủ raw, checkpoint và
+manifest trong ZIP; thiếu raw bất kỳ trang nào sẽ chặn audit/export. Đổi code dùng
+run mới + recovery; recovery chỉ tái trích raw hiện có, phần thiếu không tự tải.
+
 ## Xác minh
 
 R1 ngày 20/10/2026 bổ sung deadline 45 giây/request và 120 giây/URL, dùng worker
@@ -107,7 +150,14 @@ exception; source và snapshot worker/supervisor cùng được kiểm hash khi 
 Xem [review R1](reports/cnkang_r1_deadline_review_20261020.md): 47/47 test đạt,
 live bản cuối 50/50 URL, audit 50/50; 15 trang còn cờ parser/nội dung.
 Các cell thí nghiệm và output ở một file notebooks/check_cnkang.com.ipynb đã được
-gitignore. R2 xử lý khóa checkpoint chưa triển khai.
+gitignore.
+
+R2 đã bổ sung writer nguyên tử dùng temp riêng, flush/fsync và retry khóa Windows
+tối đa 3 lần trong budget 2 giây. State/cooldown giữ giá trị lớn nhất khi resume;
+raw/text theo hash và response pending giúp phục hồi mà không GET lại.
+Lỗi local dừng với CHECKPOINT_WRITE_FAILED; file cũ và bản recovery được giữ.
+Xem [review R2](reports/cnkang_r2_checkpoint_review_20261020.md): 66/66 test đạt,
+replay offline 50/50 sau các lỗi ghi/crash được chèn, audit/text hash 50/50 khớp.
 
 Chạy:
 

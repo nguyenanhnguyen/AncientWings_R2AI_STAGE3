@@ -318,7 +318,9 @@ class TransportTests(unittest.TestCase):
                      date_candidates=dates,parser_flags=['PARSER_EXCEPTION_REVIEW']
                      if status=='parse_failed' else [],source_flags=[])
             transport.write_json(self.out/f'records/{i}.json',r)
-        summary = check.export(self.out,samples)
+        with patch.object(check.transport_module, 'audit_saved') as audit:
+            summary = check.export(self.out,samples)
+        self.assertEqual(audit.call_count, 2)
         for key,value in dict(responses_received=5,fetched=3,parsed=2,parse_failed=1,
                               fetch_failed=3,date_checked=2,date_missing=1).items():
             self.assertEqual(summary[key],value,key)

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zlib
 
 import pyarrow as pa
@@ -87,6 +88,38 @@ class DomainInventoryTests(unittest.TestCase):
         self.assertEqual(report['verdict_counts'], {'NOT_TESTED': 94})
         self.assertEqual(env['summary']['chua_chay'], 1764)
         self.assertTrue(env['zip_path'].is_file())
+
+    def test_cnkang_route_merges_pages_without_generic_requests_or_browser(self):
+        from test_cnkang_pagination import synthetic, reply
+        from urllib.parse import urlsplit
+        env = self.execute_setup(('www.cnkang.com',))
+        env.update(IP_CHECK_ENABLED=False, MAX_NEW=1, BROWSER_TEST_MODE='off')
+        with redirect_stdout(io.StringIO()):
+            exec(compile(''.join(self.nb['cells'][9]['source']), '<domain-reports>', 'exec'), env)
+        runtime = env['CNKANG_TRANSPORT']
+        sample = env['SAMPLES'][0]
+        basename = urlsplit(sample['url']).path.rsplit('/', 1)[-1].removesuffix('.html')
+        self.assertTrue(basename.isdigit())
+        def response(url, *args, **kwargs):
+            raw = (b'User-agent: *\nAllow: /\n' if url.endswith('/robots.txt') else
+                   synthetic(2) if '_2.html' in url else synthetic(next_href='123_2.html'))
+            result = reply(raw.replace(b'123', basename.encode()))
+            result.network = {'worker_pid': 123, 'elapsed_seconds': 0.001}
+            return result
+        with patch.object(runtime.Transport, 'wait'), \
+                patch.object(runtime.NETWORK.NetworkWorker, 'get', side_effect=response), \
+                patch.object(env['priority_probe'], 'crawl_requests') as generic, \
+                patch.object(env['priority_probe'], 'browser_preflight') as browser, \
+                redirect_stdout(io.StringIO()):
+            exec(compile(''.join(self.nb['cells'][11]['source']), '<domain-crawl>', 'exec'), env)
+        generic.assert_not_called()
+        browser.assert_not_called()
+        records = list((self.out/'records').glob('*.json'))
+        self.assertEqual(len(records), 1)
+        record = json.loads(records[0].read_text(encoding='utf-8'))
+        self.assertTrue(record['article_complete'])
+        self.assertEqual(record['article_page_count'], 2)
+        self.assertTrue(runtime.audit_saved(self.out, record)['cnkang_article_verified'])
 
     def test_sampler_excludes_old_urls_deduplicates_and_is_reproducible(self):
         builder = load_module('domain_sample_builder_test', ROOT / 'scripts/build_domain_samples_notebook.py')
