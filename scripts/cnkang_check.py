@@ -49,11 +49,8 @@ def read_jsonl(path):
 
 
 def jsonl(path, rows):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows), encoding='utf-8')
-    temporary.replace(path)
+    transport_module.STORAGE.write_bytes(path, ''.join(
+        json.dumps(r, ensure_ascii=False) + '\n' for r in rows).encode('utf-8'))
 
 
 def find_source(config):
@@ -170,6 +167,11 @@ def prepare(config, out, bundled_history=None):
     identity = {**config, 'parser_sha256': parser.sha(Path(parser.__file__).read_bytes()),
                 'check_sha256':parser.sha(Path(__file__).read_bytes()),
                 'transport_sha256':parser.sha(Path(transport_module.__file__).read_bytes()),
+                'network_sha256':parser.sha(Path(transport_module.NETWORK.__file__).read_bytes()),
+                'network_worker_sha256':parser.sha(transport_module.NETWORK.WORKER_PATH.read_bytes()),
+                'checkpoint_sha256':parser.sha(Path(transport_module.STORAGE.__file__).read_bytes()),
+                'article_sha256':parser.sha(Path(transport_module.ARTICLE.__file__).read_bytes()),
+                'source_policy_sha256':parser.SOURCE.POLICY_SHA256,
                 'bundled_history_sha256':parser.sha(Path(bundled_history).read_bytes()) if bundled_history else None}
     if manifest.exists() and manifest.stat().st_size:
         if not saved_path.exists() or json.loads(saved_path.read_text(encoding='utf-8')) != identity:
@@ -269,6 +271,7 @@ RESULT_SCHEMA = pa.schema([
 
 def export(out, samples, history_summary=None):
     out = Path(out)
+    source_mode = parser.SOURCE.mode_for_run(out)
     records = []
     for sample in samples:
         path = out / 'records' / f"{sample['id']}.json"
@@ -276,13 +279,23 @@ def export(out, samples, history_summary=None):
             record = json.loads(path.read_text(encoding='utf-8'))
             if record.get('canonical_url') != sample['canonical_url']:
                 raise ValueError('Record differs from manifest')
+            if record.get('status') == 'extracted':
+                transport_module.audit_saved(out, record)
+                record = parser.SOURCE.publish(record, source_mode)
+            if record.get('article_complete') is False and record.get('quality_status') == 'accepted':
+                raise ValueError('Incomplete cnkang article cannot be accepted')
             records.append(record)
     hashes = Counter(r.get('text_sha256') for r in records if r.get('text'))
     for r in records:
         if r.get('text') and hashes[r['text_sha256']] > 1:
             r['parser_flags'] = sorted(set(r.get('parser_flags', []) + ['DUPLICATE_DOCUMENT_REVIEW']))
             r['crawl_status'] = 'needs_review'
+            if r.get('source_policy_version'):
+                parser.SOURCE.apply(r)
+                r.update(parser.SOURCE.publish(r, source_mode))
     jsonl(out / 'results.jsonl', records)
+    jsonl(out / 'source_decisions.jsonl', [r for r in records if r.get('source_policy_version')])
+    jsonl(out / 'corpus.accepted.jsonl', [r for r in records if parser.SOURCE.export_eligible(r,source_mode)])
     parquet_rows = []
     for r in records:
         row = {name:r.get(name) for name in RESULT_SCHEMA.names if name != 'record_json'}
@@ -314,12 +327,19 @@ def export(out, samples, history_summary=None):
         'fetched':sum(r['status'] in ('fetched','parse_failed','extracted') for r in records),
         'parsed':sum(r['status']=='extracted' for r in records),
         'parse_failed':sum(r['status']=='parse_failed' for r in records),
+        'article_complete':sum(r.get('article_complete') is True for r in records),
+        'article_incomplete':sum(r.get('article_complete') is False for r in records),
+        'article_component_pages':sum(r.get('article_page_count', 0) for r in records),
         'parser_clean_pages':sum(r['status']=='extracted' and not r.get('parser_flags') for r in records),
         'fetch_failed':sum(r['crawl_status']=='fetch_failed' for r in records),
         'parser_review_pages':sum(bool(r.get('parser_flags')) for r in records),
         'source_review_pages':sum(bool(r.get('source_flags')) for r in records),
         'parser_flags':dict(Counter(f for r in records for f in set(r.get('parser_flags', [])))),
         'source_flags':dict(Counter(f for r in records for f in set(r.get('source_flags', [])))),
+        'source_policy_mode':source_mode, 'source_policy_version':parser.SOURCE.VERSION,
+        'source_decisions':dict(Counter(r.get('source_decision','NOT_EVALUATED') for r in records)),
+        'corpus_decisions':dict(Counter(r.get('corpus_decision','REVIEW') for r in records)),
+        'source_gate_enforced':source_mode == 'enforce',
         'templates':dict(Counter(r.get('template','not_parsed') for r in records)),
         'date_checked':sum(r['status']=='extracted' for r in records),
         'date_missing':sum(r['status']=='extracted' and not r.get('date_candidates') for r in records),
@@ -383,9 +403,8 @@ def run(out, samples, config):
             print(str(exc), flush=True)
             return
         for index, sample in enumerate(samples, 1):
-            path = Path(out) / 'records' / f"{sample['id']}.json"
-            if path.exists():
-                previous = json.loads(path.read_text(encoding='utf-8'))
+            previous = network.cached_record(sample)
+            if previous is not None:
                 if not previous.get('retry_deferred'): continue
             if network.stopped: break
             record = network.fetch(sample)

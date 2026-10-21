@@ -1,0 +1,30 @@
+[
+  {
+    "id": 1869305,
+    "url": "https://www.cnkang.com/nkwk/ganglie/386336.html",
+    "content_type": "text/html",
+    "raw_sha256": "5abce3fabd761e579cf0255572e31ccc4ca50028f2380b540f406187a97253c5",
+    "encoding": "gb18030"
+  },
+  {
+    "id": 1733228,
+    "url": "https://www.cnkang.com/jibing/biantaotiyan/324306.html",
+    "content_type": "text/html",
+    "raw_sha256": "50b88ccde862ca2848cbe593186b258766eeb3ab57dd648d4601a7db53a2013a",
+    "encoding": "gb18030"
+  },
+  {
+    "id": 1780432,
+    "url": "https://www.cnkang.com/jibing/shengjingxing/401573.html",
+    "content_type": "text/html",
+    "raw_sha256": "c5e143fd764ff157ba47e74408ad9a1cf007033fc1ddc0546a06bd8306e1a423",
+    "encoding": "gb18030"
+  },
+  {
+    "id": 1816933,
+    "url": "https://www.cnkang.com/myjk/201109/84408.html",
+    "content_type": "text/html",
+    "raw_sha256": "66c1dfc372b557d9de1e9895d4af274c567cf0ba8ef62dc6977f5782b71451e6",
+    "encoding": "gb18030"
+  }
+]

@@ -248,7 +248,12 @@ def main():
                     if r.get('extractor') != cnkang_parser.EXTRACTOR:
                         raise ValueError(f"Legacy cnkang extraction: {r['id']}; use a new run and recovery.")
                     case.update(cnkang_parser.audit(body, r.get('final_url') or r['url'], r,
-                                                    r.get('content_type') or 'text/html'))
+                                                    r.get('content_type') or 'text/html', base_dir=out))
+                    source_gate = cnkang_parser.SOURCE
+                    case.update(source_decision=r.get('source_decision'),
+                                corpus_decision=source_gate.decision(r),
+                                cnkang_export_eligible=source_gate.export_eligible(r,source_gate.mode_for_run(out)),
+                                cnkang_source_policy_verified=True)
                     source_views[r['id']] = r.get('text_before', '')
                 else:
                     case['cnkang_http_evidence_only'] = True
@@ -295,6 +300,12 @@ def main():
                'documents_with_intro_preserved': sum(c.get('intro_preserved') is True for c in cases),
                'documents_with_source_tables': sum(c.get('source_table_count', 0) > 0 for c in cases),
                'cnkang_raw_records_verified': sum(c.get('cnkang_raw_reextraction_verified', False) for c in cases),
+               'cnkang_article_records_verified': sum(c.get('cnkang_article_verified', False) for c in cases),
+               'cnkang_article_pages_verified': sum(c.get('cnkang_article_pages_verified', 0) for c in cases),
+               'cnkang_complete_articles_verified': sum(c.get('cnkang_article_complete', False) for c in cases),
+               'cnkang_source_policies_verified': sum(c.get('cnkang_source_policy_verified',False) for c in cases),
+               'cnkang_source_decisions': dict(Counter(c['source_decision'] for c in cases if 'source_decision' in c)),
+               'cnkang_corpus_decisions': dict(Counter(c['corpus_decision'] for c in cases if 'corpus_decision' in c)),
                'pubmed_xml_records_verified': sum(c.get('pubmed_xml_verified', False) for c in cases),
                'pubmed_abstract_sections_verified': sum(c.get('pubmed_abstract_sections', 0) for c in cases),
                'longchau_raw_records_verified': sum(c.get('longchau_raw_reextraction_verified', False) for c in cases),
@@ -309,7 +320,9 @@ def main():
                'human_review_completed': 0}
     (out / 'audit_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     (out / 'audit_cases.jsonl').write_text(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in cases), encoding='utf-8')
-    accepted = sorted((r for r in records if r.get('quality_status') == 'accepted'), key=lambda r: r['id'])
+    cnkang_eligible = {c['id']:c['cnkang_export_eligible'] for c in cases if 'cnkang_export_eligible' in c}
+    accepted = sorted((r for r in records if r.get('quality_status') == 'accepted'
+                       and cnkang_eligible.get(r['id'],True)), key=lambda r: r['id'])
     review_rows = random.Random(42).sample(accepted, min(args.review_size, len(accepted)))
     sheet = out / 'review_100.jsonl'
     if not sheet.exists():
