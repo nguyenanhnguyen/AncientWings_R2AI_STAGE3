@@ -114,16 +114,18 @@ def run(args):
         hf_key = cache_key({'repo': args.hf_repo, 'revision': args.hf_revision,
                             'limit': args.limit, 'seed': args.hf_seed,
                             'mode': args.hf_sample_mode,
-                            'max_shards': args.hf_max_shards})[:16]
+                            'max_shards': args.hf_max_shards,
+                            'language': args.language, 'id_ranges': args.id_range})[:16]
         hf_dir = ROOT / 'nguyen' / 'hf_pipeline' / 'snapshots' / hf_key
         r.step('hf_snapshot', ['hf-snapshot', '--repo', args.hf_repo,
                '--revision', args.hf_revision, '--limit', args.limit,
                '--seed', args.hf_seed, '--sample-mode', args.hf_sample_mode,
-               '--max-shards', args.hf_max_shards,
-               '--out', hf_dir], [], [hf_dir/'input_vi.parquet',
+               '--max-shards', args.hf_max_shards, '--language', args.language,
+               *[item for a, b in args.id_range for item in ('--id-range', f'{a}:{b}')],
+               '--out', hf_dir], [], [hf_dir/f'input_{args.language}.parquet',
                hf_dir/'source_manifest.json', hf_dir/'query.parquet',
                hf_dir/'links_corpus_vi_en_zh.parquet'])
-        source = [str(hf_dir/'input_vi.parquet')]
+        source = [str(hf_dir/f'input_{args.language}.parquet')]
         queries = hf_dir/'query.parquet'
         links = hf_dir/'links_corpus_vi_en_zh.parquet'
     if not args.dry_run and args.device == 'cuda':
@@ -134,11 +136,12 @@ def run(args):
             probe.append('--quantized')
         subprocess.run(probe,
                        cwd=ROOT, check=True)
-    r.step('prepare', ['prepare', '--source', *source, '--limit', args.limit,
+    r.step('prepare', ['prepare', '--source', *source,
+                       *(['--limit', args.limit] if args.limit else []),
                        '--out', corpus.parent], [], [corpus, corpus.with_name('prepare_manifest.json')])
     if not args.dry_run:
         report = storage.read_json(corpus.with_name('prepare_manifest.json'))
-        if report['rows_read'] < args.limit:
+        if args.limit and report['rows_read'] < args.limit:
             raise ValueError(f"Only {report['rows_read']} input rows were available, requested {args.limit}. "
                              'Use a new --out and the actual --limit, or wait for more crawl records.')
     r.step('chunk', ['chunk', '--corpus', corpus, '--out', chunks.parent,
@@ -159,7 +162,8 @@ def run(args):
     batches = {(m['kind'], m['name']): m['batch_size'] for m in report['models']}
     revisions = {(m['kind'], m['name']): m['model'].get('revision') for m in report['models']}
 
-    languages = ['en', 'zh']
+    languages = ([args.language] if args.source == ['hf'] and args.language in ('en', 'zh')
+                 else [] if args.source == ['hf'] and args.language == 'vi' else ['en', 'zh'])
     if not args.dry_run:
         counts = storage.read_json(corpus.with_name('prepare_manifest.json'))['languages']
         languages = [lang for lang in languages if counts.get(lang, 0)]
@@ -248,6 +252,7 @@ def main():
     from .index.embedding import ENCODERS
     from .retrieval.rerank import RERANKERS
     from .retrieval.translate import MODELS
+    from .corpus.hf_snapshot import parse_id_range
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', nargs='+', default=['hf'],
                    help='hf for the private team dataset, or local run/parquet paths.')
@@ -255,12 +260,15 @@ def main():
                    help='Run directory; default is an ignored nguyen/pipeline_runs path keyed by size/source.')
     p.add_argument('--hf-repo', default='AncientWings/AncientWings_R2AI_STAGE3_ds')
     p.add_argument('--hf-revision', default='main')
+    p.add_argument('--language', choices=['vi', 'en', 'zh', 'all'], default='vi')
+    p.add_argument('--id-range', type=parse_id_range, action='append', default=[],
+                   help='HF source ID range START:END, inclusive; repeat for multiple ranges.')
     p.add_argument('--hf-seed', type=int, default=13)
     p.add_argument('--hf-sample-mode', choices=['bounded', 'hash'], default='bounded',
                    help='bounded reads spread-out shards until enough vi rows; hash scans all shards.')
     p.add_argument('--hf-max-shards', type=int, default=48,
                    help='Maximum shards in bounded mode; raise if the sample is not large enough.')
-    p.add_argument('--limit', type=int, default=60000, help='Input rows, before quality filtering.')
+    p.add_argument('--limit', type=int, default=60000, help='Input rows; 0 selects all matching HF records (bounded mode, no shard cap).')
     p.add_argument('--queries', default='data/query.parquet')
     p.add_argument('--links', default='data/links_corpus_vi_en_zh.parquet')
     p.add_argument('--device', choices=['cuda', 'cpu'], default='cuda')
@@ -294,7 +302,8 @@ def main():
         size = f'{args.limit // 1000}k' if args.limit % 1000 == 0 else str(args.limit)
         source_tag = ('' if args.source == ['hf'] and args.hf_sample_mode == 'bounded'
                       else '_hash' if args.source == ['hf'] else '_local')
-        args.out = f'nguyen/pipeline_runs/rtx2050_4b_{size}{source_tag}'
+        range_tag = '_' + cache_key(args.id_range)[:8] if args.id_range else ''
+        args.out = f'nguyen/pipeline_runs/rtx2050_4b_{size}{source_tag}_{args.language}{range_tag}'
     if len(set(args.encoders)) != len(args.encoders) or len(set(args.rerankers)) != len(args.rerankers):
         p.error('Model names must be unique.')
     if 'hf' in args.source and args.source != ['hf']:
@@ -304,8 +313,12 @@ def main():
     if (args.zh_corpus or args.rerank_query != 'original') and args.skip_translation and not args.translations:
         p.error('--zh-corpus/--rerank-query translated_zh cần câu hỏi đã dịch: bỏ --skip-translation '
                 'hoặc truyền --translations.')
-    if args.limit < 1 or not 1 <= args.keep <= args.rerank_k <= 600:
-        p.error('Require positive limit and 1 <= keep <= rerank-k <= 600')
+    if args.limit < 0 or not 1 <= args.keep <= args.rerank_k <= 600:
+        p.error('Require nonnegative limit and 1 <= keep <= rerank-k <= 600')
+    if (args.id_range or args.language != 'vi') and args.source != ['hf']:
+        p.error('Language/ID filtering is supported for --source hf only.')
+    if args.limit == 0 and (args.source != ['hf'] or args.hf_sample_mode != 'bounded' or args.hf_max_shards):
+        p.error('--limit 0 requires --source hf --hf-sample-mode bounded --hf-max-shards 0')
     if args.hf_max_shards < 0:
         p.error('--hf-max-shards must be nonnegative.')
     if args.rerank_k > args.fuse_k or args.top_k < 1 or args.candidate_per_doc < 0:

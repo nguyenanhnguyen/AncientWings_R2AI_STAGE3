@@ -96,10 +96,12 @@ def run(args):
         encoder = dense.load_encoder(manifest['encoder'], device=args.device, fp16=not args.fp32,
                                      max_length=recorded.get('max_length'),
                                      revision=recorded.get('revision'),
-                                     quantize=recorded.get('config', {}).get('quantize', 'none'))
+                                     quantize=recorded.get('config', {}).get('quantize', 'none'),
+                                     cpu_offload=recorded.get('config', {}).get('cpu_offload', False))
         dense_models.append(model_info(encoder))
         started = time.monotonic()
-        vectors = encoder.encode(variant_rows, kind='query', batch_size=args.batch_size)
+        vectors = encoder.encode(variant_rows, kind='query', batch_size=args.batch_size,
+                                 progress=Progress('encode queries'))
         release_model(encoder)
         del encoder
         faiss_index = dense_dir / 'faiss.index'

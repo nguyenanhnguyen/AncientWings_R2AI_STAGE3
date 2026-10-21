@@ -73,7 +73,7 @@ class TransformerEncoder:
     """Hugging Face encoder with the pooling and prefixes each model family expects."""
 
     def __init__(self, name, device=None, fp16=True, max_length=None, revision=None,
-                 quantize='none'):
+                 quantize='none', cpu_offload=False):
         if name not in ENCODERS:
             raise ValueError(f'Unknown encoder {name!r}; choose from {sorted(ENCODERS)}')
         import torch
@@ -90,6 +90,7 @@ class TransformerEncoder:
         if quantize not in ('none', '4bit') or (quantize == '4bit' and not str(self.device).startswith('cuda')):
             raise ValueError('4-bit embedding requires CUDA; quantize must be none or 4bit')
         self.config['quantize'] = quantize
+        self.config['cpu_offload'] = cpu_offload
         kwargs = {'revision': revision}
         if self.config.get('trust_remote_code'):
             kwargs['trust_remote_code'] = True
@@ -102,6 +103,10 @@ class TransformerEncoder:
             self.tokenizer.padding_side = 'left'
         # torch_dtype is accepted by every transformers release this project allows; the newer
         # `dtype` name is silently ignored by older ones, which would load fp32 at twice the VRAM.
+        if cpu_offload:
+            if quantize != 'none' or not str(self.device).startswith('cuda'):
+                raise ValueError('CPU offload requires CUDA and unquantized FP16 weights')
+            kwargs.update(device_map='auto', max_memory={0: '2GiB', 'cpu': '11GiB'})
         if quantize == '4bit':
             from transformers import BitsAndBytesConfig
             kwargs.update(quantization_config=BitsAndBytesConfig(
@@ -112,7 +117,7 @@ class TransformerEncoder:
             self.config['hf_id'],
             torch_dtype=torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32,
             **kwargs)
-        if quantize == 'none':
+        if quantize == 'none' and not cpu_offload:
             self.model.to(self.device)
         self.model.eval()
         if hasattr(self.model.config, 'use_cache'):
@@ -171,11 +176,11 @@ class TransformerEncoder:
 
 
 def load_encoder(name, device=None, fp16=True, max_length=None, revision=None,
-                 quantize='none'):
+                 quantize='none', cpu_offload=False):
     if name == 'hash':
         return HashEncoder(ENCODERS['hash']['dim'])
     return TransformerEncoder(name, device=device, fp16=fp16, max_length=max_length,
-                              revision=revision, quantize=quantize)
+                              revision=revision, quantize=quantize, cpu_offload=cpu_offload)
 
 
 def encode_to_memmap(encoder, texts, path, batch_size=16, shard=20000, progress=None,
