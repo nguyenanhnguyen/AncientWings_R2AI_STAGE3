@@ -169,7 +169,7 @@ class NotebookPostprocessTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.execute(14)
         self.assert_rescue()
-        self.assertIn('Corrupt raw', (self.run / 'logs/crawler_snapshot.log').read_text())
+        self.assertIn('Corrupt raw', (self.run / 'logs/storage_snapshot.log').read_text())
 
     def test_unexpected_record_id_is_fatal_at_audit_and_does_not_export(self):
         self.prepare()

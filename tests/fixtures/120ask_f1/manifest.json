@@ -1,0 +1,114 @@
+{
+  "baseline_run": "ask120_review_20261020T013753043042Z",
+  "review_kind": "AI_extraction_review_not_medical_validation",
+  "cases": [
+    {
+      "source_id": 1029798,
+      "thread_id": "card1:reply756152",
+      "url": "http://www.120ask.com/question/1257060.htm",
+      "final_url": "https://www.120ask.com/question/1257060.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "f4cc1b7b8538c57bc68514b579d4577ce20b9cf534f54cfb20df7b4465ac0dd8",
+      "raw_file": "1029798.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    },
+    {
+      "source_id": 1031179,
+      "thread_id": "card1:reply812987",
+      "url": "http://www.120ask.com/question/1275910.htm",
+      "final_url": "https://www.120ask.com/question/1275910.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "253ae23a9703f36e824cc893fcc7bb36f47266faaa27413ed13938dccfa6bfc8",
+      "raw_file": "1031179.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    },
+    {
+      "source_id": 1159296,
+      "thread_id": "card1:reply879324",
+      "url": "http://www.120ask.com/question/2344367.htm",
+      "final_url": "https://www.120ask.com/question/2344367.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "7b82a8193e9a2a7dd4243564f65451afda9ec76ae1a123f40a3f25bbfd07dcd6",
+      "raw_file": "1159296.html.gz",
+      "expected_text": "转奶可以这样转：先在老的奶粉里添加1/3的新奶粉，这样吃了两三天没什么不适后，再老的、新的奶粉各1/2吃两三天，再老的1/3、新的2/3吃两三天，最后过渡到完全用新的奶粉取代老的奶粉。注意转奶的那几天不要添加其他新的辅食，宝宝生病（感冒、发烧、起皮疹等）及接种疫苗期间不要转奶。",
+      "expected_answer_type": "mixed",
+      "expected_decision": "INCLUDE"
+    },
+    {
+      "source_id": 1053679,
+      "thread_id": "card1:reply1140576",
+      "url": "http://www.120ask.com/question/1390494.htm",
+      "final_url": "https://www.120ask.com/question/1390494.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "fa70775b47eec6fa4373b6cf2976f53bc027e17b858a0b96488294dfe5daad16",
+      "raw_file": "1053679.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    },
+    {
+      "source_id": 1087866,
+      "thread_id": "card1:reply3089947",
+      "url": "http://www.120ask.com/question/15951792.htm",
+      "final_url": "https://www.120ask.com/question/15951792.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "ba6e156efb78ca6b490e8eebc894407b2b64cf546576c3d38ac27ed3a6a86955",
+      "raw_file": "1087866.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    },
+    {
+      "source_id": 1173870,
+      "thread_id": "card2:reply1427884",
+      "url": "http://www.120ask.com/question/2554192.htm",
+      "final_url": "https://www.120ask.com/question/2554192.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "92c91684355a85605c57c08e0f6a336a7e87cf94a077b49dca1a2bf88554caa6",
+      "raw_file": "1173870.html.gz",
+      "expected_text": "伊可新钙尓奇d",
+      "expected_answer_type": "mixed",
+      "expected_decision": "REVIEW"
+    },
+    {
+      "source_id": 1199818,
+      "thread_id": "card1:reply3994",
+      "url": "http://www.120ask.com/question/3001883.htm",
+      "final_url": "https://www.120ask.com/question/3001883.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "e80e6f1210df642dff7d20e4ebc391a32320e8b7f144a8b7f606ed3977874ff2",
+      "raw_file": "1199818.html.gz",
+      "expected_text": "654-2",
+      "expected_answer_type": "mixed",
+      "expected_decision": "REVIEW"
+    },
+    {
+      "source_id": 1404664,
+      "thread_id": "card1:reply3027888",
+      "url": "http://www.120ask.com/question/998819.htm",
+      "final_url": "https://www.120ask.com/question/998819.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "aedae0060e08d8b234481ecffa9b03899a75386de30ad3c3543d8de928a93ada",
+      "raw_file": "1404664.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    },
+    {
+      "source_id": 1025409,
+      "thread_id": "card2:reply617894",
+      "url": "http://www.120ask.com/question/1211988.htm",
+      "final_url": "https://www.120ask.com/question/1211988.htm",
+      "content_type": "text/html; charset=UTF-8",
+      "raw_sha256": "1473c2843717d8461d9a2a8ee12eea2e306627c72cfffb3c5e25b9d5c7472343",
+      "raw_file": "1025409.html.gz",
+      "expected_text": "",
+      "expected_answer_type": "audio",
+      "expected_decision": "EXCLUDE"
+    }
+  ]
+}

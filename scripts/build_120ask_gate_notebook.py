@@ -39,6 +39,17 @@ local tự tìm đúng file trong Downloads nếu còn. Không ghi đè run đ�
 
 Ba lớp độc lập: truy cập, chất lượng parser và quyết định INCLUDE/REVIEW/EXCLUDE theo thread.
 INCLUDE chỉ tạo **candidate**, không xác nhận độ đúng y khoa và không upload/publish.
+V4.2 dùng vai người trả lời trung tính; nghề nghiệp chỉ lấy từ qualification header nguồn.
+Tác giả khác/chưa rõ hoặc không đủ bằng chứng gán cho reply chuyển REVIEW.
+Gate v3.3 xét tín hiệu nguồn theo ngữ cảnh từng lượt người trả lời: quảng bá cơ sở,
+dẫn liên hệ và cam kết điều trị. Mỗi cờ giữ rule, excerpt/span, hash text và DOM locator.
+Từ lâm sàng “根治” đơn lẻ hoặc claim nằm trong lời bệnh nhân không tự gán quảng bá cho người trả lời.
+F5 chuẩn hóa question có giới hạn, giữ paragraph break, raw DOM/text, hash và từng action/span.
+Chỉ bỏ BR> đầu câu hỏi/footer có đúng bằng chứng template; markup/UI chưa xử lý chắc chắn
+đưa các thread liên quan REVIEW. Gene, bất đẳng thức và lời bệnh nhân có từ 投诉 được giữ.
+F4 tách tính hợp lệ DOM khỏi ngữ cảnh title/body đã chuẩn hóa: câu chỉ hỏi cách chữa,
+thời gian, cảm ơn hoặc thông tin chung chuyển REVIEW. Title-only được ghi rõ và REVIEW;
+không thay body bằng title/answer, không dùng độ dài để loại câu ngắn rõ chủ đề.
 Audio-only không vào corpus chữ. Trang có thể INCLUDE_PARTIAL; giữ câu hỏi, người trả lời,
 reply ID và thứ tự follow-up. Document ID luôn là ID nguồn trong sample/Parquet.
 ''')
@@ -154,6 +165,29 @@ print('Manual review:',summary['manual_reviewed'],'/',summary['manual_required']
 print('Đọc report.md và regression_comparison.csv; không chỉ so số accepted.')
 ''')
     add('markdown','''
+## QC cấp câu hỏi — F5 / F4
+
+Packet dưới giữ question raw/clean, DOM, action/span và context title/body, gồm ca BR>, footer,
+escaped formatting và phần chưa đủ bằng chứng để chuẩn hóa. REVIEW ở cấp question
+áp dụng cho mọi thread của trang; không dùng số action để suy độ đúng y khoa.
+''')
+    add('code','''
+from collections import Counter
+question_pages=gate.read_jsonl_bytes((RUN_DIR/'results_reparsed.jsonl').read_bytes())
+question_packet=[{key:p.get(key) for key in ('id','url','ask120_question','ask120_question_raw',
+    'question_provenance','question_qc','question_context','corpus_decision')} for p in question_pages
+    if gate.question_admission_reasons(p) or any(a['rule_id'] not in ('question_label_prefix_v1','question_whitespace_v1')
+        for a in p.get('question_provenance',{}).get('actions',[]))]
+gate.jsonl(RUN_DIR/'question_review_packet.jsonl',question_packet)
+question_summary={'pages':len(question_pages),'packet_pages':len(question_packet),
+    'question_review_pages':sum(bool(gate.question_admission_reasons(p)) for p in question_pages),
+    'context_statuses':dict(Counter(p.get('question_context_status') for p in question_pages)),
+    'context_sources':dict(Counter(p.get('question_context_source') for p in question_pages)),
+    'rules':dict(Counter(a['rule_id'] for p in question_pages for a in p.get('question_provenance',{}).get('actions',[])))}
+gate.write_json(RUN_DIR/'question_qc_summary.json',question_summary)
+display(question_summary)
+''')
+    add('markdown','''
 ## Thí nghiệm A/B — kiểm chứng hướng sửa (20/10/2026)
 
 Các ô dưới chạy **offline**, dùng bản sao và fixture riêng. Baseline là snapshot V3 trước fix,
@@ -235,6 +269,8 @@ nằm trong JSONL/sidecar, Parquet dùng adapter đúng cột production.
 SHORT_MAIN_ANSWER_REVIEW không kết luận câu ngắn sai. Audio có media URL nhưng không tải/phiên âm.
 Ngày là ngày hỏi. Các cờ quảng bá yêu cầu review nguồn, không sửa lời gốc.
 Thiếu ngày đơn lẻ là warning. Không tự tạo nhãn con người đã review.
+Metadata tác giả giữ header/qualification và DOM locator; chức danh là thông tin do nguồn
+công bố. Phiếu INCLUDE không vượt được blocker nghề nghiệp/identity chưa giải quyết.
 
 READY_FOR_FILTERED_PILOT chỉ có nghĩa regression và invariant tự động đạt.
 Muốn READY_FOR_FILTERED_CORPUS, tải phiếu review, đối chiếu raw, ghi reviewer_decision,
@@ -244,7 +280,18 @@ Không suy rộng kết quả thành toàn bộ 98.160 URL. Không upload corpus
 ''')
     nb={'cells':cells,'metadata':{'kernelspec':{'display_name':'Python 3','language':'python','name':'python3'},
         'language_info':{'name':'python','version':'3.11'}},'nbformat':4,'nbformat_minor':5}
-    (ROOT/'notebooks/check_120ask_50.ipynb').write_text(json.dumps(nb,ensure_ascii=False,indent=1)+'\n',encoding='utf-8')
+    from build_120ask_holdout_notebook import integrate_holdout
+    nb=integrate_holdout(nb)
+    destination=ROOT/'notebooks/check_120ask_50.ipynb'
+    if destination.exists():
+        previous=json.loads(destination.read_text(encoding='utf-8'))
+        old={c.get('id'):c for c in previous['cells']}
+        for cell in nb['cells']:
+            prior=old.get(cell.get('id'))
+            if prior and cell['cell_type']=='code' and cell['source']==prior['source']:
+                cell['execution_count']=prior.get('execution_count')
+                cell['outputs']=prior.get('outputs',[])
+    destination.write_text(json.dumps(nb,ensure_ascii=False,indent=1)+'\n',encoding='utf-8')
 
 
 if __name__=='__main__':main()

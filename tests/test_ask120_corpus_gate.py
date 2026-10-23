@@ -33,7 +33,7 @@ def raw(qid):
 def small_page(main,question='这是一个真实且完整的患者问题，包含症状和病情。'):
     return ('<html><meta charset="utf-8"><h1 id="d_askH1">患者问题</h1>'
             f'<div id="d_msCon">健康咨询描述：{question}</div><span>1人回复</span><div class="b_answerbox">'
-            '<div class="b_answerli"><div class="b_answertl"><span class="b_sp1"><a>医生甲</a></span></div>'
+            '<div class="b_answerli"><div class="b_answertl"><span class="b_sp1"><a>医生甲</a> 医师</span></div>'
             f'<div class="b_anscont_cont"><p id="reply123">{main}</p></div></div></div></html>').encode()
 
 
@@ -225,7 +225,16 @@ class ReplayGateTests(unittest.TestCase):
             self.assertEqual(summary['page_decisions'],{'EXCLUDE':1})
 
     def test_source_claim_requires_explicit_provenance_bound_review(self):
-        create_run(self.input)
+        # Isolate source-claim review with an observed qualified author. Some
+        # historical regression cards also have unresolvable per-reply authors.
+        body=small_page('我院采用独家疗法，保证一个月包治所有相关疾病，欢迎联系我院了解治疗。')
+        sample={'id':42,'url':'https://www.120ask.com/question/123.htm'}
+        with zipfile.ZipFile(self.input,'w') as z:
+            z.writestr('manifest.json','{}')
+            z.writestr('sample.jsonl',json.dumps(sample)+'\n')
+            z.writestr('records/42.json',json.dumps(dict(sample,http_status=200,
+                content_type='text/html; charset=utf-8',raw_path='raw/42.gz',raw_sha256=gate.sha(body))))
+            z.writestr('raw/42.gz',gzip.compress(body,mtime=0))
         self.replay()
         first=gate.build_outputs(self.out)
         with (self.out/'manual_review_sheet.csv').open(encoding='utf-8-sig',newline='') as stream:
@@ -239,6 +248,9 @@ class ReplayGateTests(unittest.TestCase):
         after=gate.build_outputs(self.out,manual_review_path=path)
         self.assertGreater(after['manual_reviewed'],0)
         self.assertGreater(after['candidate_threads'],first['candidate_threads'])
+        candidate=gate.read_jsonl_bytes((self.out/'corpus_candidates.jsonl').read_bytes())[0]
+        self.assertTrue(candidate['source_claim_flags'])
+        self.assertTrue(all(f['evidence'] and f['raw_sha256']==gate.sha(body) for f in candidate['source_claim_flags']))
         self.assertNotEqual(after['readiness'],'READY_FOR_FILTERED_CORPUS')
         row['raw_sha256']='stale'
         with path.open('w',encoding='utf-8-sig',newline='') as stream:

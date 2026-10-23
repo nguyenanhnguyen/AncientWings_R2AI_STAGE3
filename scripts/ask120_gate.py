@@ -26,12 +26,47 @@ def _load_parser():
     return module
 
 PARSER = _load_parser()
-POLICY = {'version':'120ask-admission-v2','min_answer_chars':20,'manual_seed':20261020,
-          'manual_include_minimum':50,'promotional_claims_require_review':True}
+SOURCE_RULESET_VERSION = '120ask-source-signals-v1'
+POLICY = {'version':'120ask-admission-v3.3','min_answer_chars':20,'manual_seed':20261020,
+          'manual_include_minimum':50,'promotional_claims_require_review':True,
+          'allowed_source_roles':list(PARSER.ADMISSIBLE_SOURCE_ROLES),
+          'source_signal_ruleset':SOURCE_RULESET_VERSION,
+          'question_normalizer':PARSER.QUESTION_NORMALIZER_VERSION,
+          'question_context_ruleset':PARSER.QUESTION_CONTEXT_VERSION}
 REGRESSIONS = ('1015858','3202910','3530545','3256774','3434509','378338','257785','13753474','77939582')
-PROMO = re.compile(r'包治|根治|无(?:任何)?(?:的)?(?:毒)?副作用|没有(?:任何)?副作用|百分之百|100%\s*治愈|有特效|彻底治愈')
 CORRUPT = re.compile(r'\ufffd|(?:Ã.|Â.){3,}|\?/[A-Za-z]+>')
-GATE_VERSION = '120ask-gate-v2'
+GATE_VERSION = '120ask-gate-v3.3'
+SELF_REFERENCE = re.compile(r'我院|本院|我处|本诊所|本门诊|本中心|我们(?:医院|诊所|中心)')
+PROFILE_CLICK = re.compile(r'(?:点击|点开)(?:我(?:的)?|本人的?)(?:名字|姓名|头像|照片|相片|资料|主页)')
+CONTACT_TARGET = re.compile(r'联系方式|联系我(?:们)?|和我(?:们)?联系|与我(?:们)?联系|微信|QQ|电话',re.I)
+FREE_OFFER = re.compile(r'免费(?:提供|赠送|领取)|(?:提供|赠送).{0,6}免费')
+MARKETING_METHOD = re.compile(r'最先进|国际领先|独家|独创|祖传(?:验方|秘方)|特效(?:系列)?方剂')
+NAMED_CLINIC = re.compile(r'[\u4e00-\u9fff]{2,24}(?:医院|诊所|门诊|眼科|治疗中心)(?=采用|研制|推出|提供|对|擅长|运用|结合|的)')
+SPECIAL_FORMULA = re.compile(r'特效(?:系列)?方剂|祖传(?:验方|秘方)|独家(?:秘方|疗法)')
+NAMED_THERAPY = re.compile(r'[A-Za-z]{2,10}[\u4e00-\u9fff]{2,20}疗法')
+EXCEPTIONAL_OUTCOME = re.compile(r'疗效极佳|复发率极低')
+PRODUCT_NAME = re.compile(r'[\u4e00-\u9fff]{2,12}(?:口服液|胶囊|颗粒)')
+PRODUCT_PITCH = re.compile(r'服用方便|疗效极佳|纯天然|无需(?:手术|化疗)')
+CANCER_PRODUCT_CLAIM = re.compile(r'杀死癌细胞|消灭癌细胞|彻底清除癌细胞')
+TIMED_CURE = re.compile(r'[0-9一二三四五六七八九十两]+(?:(?:到|至|[-~～])[0-9一二三四五六七八九十两]+)?'
+    r'(?:个)?(?:月|周|天)[^，,。！？!?\n;；]{0,10}(?:都能|就能|即可|基本|可以|能)(?:完全|彻底)?(?:治愈|治好|康复)')
+DIRECT_CONTACT = re.compile(r'加我(?:的)?(?:微信|QQ)|(?:直接)?(?:和我(?:们)?联系|与我(?:们)?联系|'
+    r'联系(?:我们(?!的|医院|诊所|中心|急诊)|我(?!们|的|院|处)))',re.I)
+CLAIM_RULES = (
+    ('guaranteed_outcome',re.compile(r'包治(?:百病)?|百分之百(?:的)?(?:有效|治愈|成功|治好|康复)|100%\s*(?:治愈|有效|成功)|'
+        r'保证[^，,。！？!?\n;；]{0,12}(?:根治|治愈|治好|康复)|(?:治愈后)?永不复发')),
+    ('absolute_safety',re.compile(r'无(?:任何)?(?:的)?(?:毒)?副作用|没有(?:任何)?(?:的)?(?:毒)?副作用')),
+    ('special_treatment_efficacy',re.compile(r'(?:治疗|对)[^，,。！？!?\n;；]{0,24}有特效(?=[：:。.!，,\s]|$)')),
+    ('rapid_cure_claim',re.compile(r'(?:快速|迅速|短期内)(?:彻底|完全)?(?:治愈|治好|根治)')),
+)
+PAIR_RULES = (
+    ('profile_contact_cta','SOURCE_CONTACT_CTA_REVIEW',PROFILE_CLICK,CONTACT_TARGET,120),
+    ('self_free_offer','SOURCE_SELF_PROMOTION_REVIEW',SELF_REFERENCE,FREE_OFFER,160),
+    ('self_marketing_method','SOURCE_SELF_PROMOTION_REVIEW',SELF_REFERENCE,MARKETING_METHOD,200),
+    ('clinic_special_formula','SOURCE_SELF_PROMOTION_REVIEW',NAMED_CLINIC,SPECIAL_FORMULA,220),
+    ('self_timed_cure','PROMOTIONAL_CLAIM_REVIEW',SELF_REFERENCE,TIMED_CURE,220),
+    ('named_therapy_outcome','PROMOTIONAL_CLAIM_REVIEW',NAMED_THERAPY,EXCEPTIONAL_OUTCOME,180),
+)
 
 
 def sha(value):
@@ -121,20 +156,108 @@ def parse_source_response(raw_bytes, metadata):
     return dict(metadata,**doc)
 
 
-def source_flags(text):
-    match=PROMO.search(text)
-    return ([{'flag':'PROMOTIONAL_CLAIM_REVIEW','excerpt':text[max(0,match.start()-60):match.end()+100]}]
-            if match else [])
+def _signal_sentences(text):
+    start=0
+    for stop in re.finditer(r'[。！？!?；;\n]+|(?<!\d)\.(?!\d)',text):
+        yield start,stop.end(),text[start:stop.end()]
+        start=stop.end()
+    if start<len(text):yield start,len(text),text[start:]
+
+
+def _asserted_signal(sentence,start,end):
+    if sentence.rstrip(' \t\r\n"”’').endswith(('?','？')):return False
+    # Scope negation to the current clause, not an earlier unrelated warning.
+    before=re.split(r'[，,]|但是|然而|不过|但',sentence[max(0,start-44):start])[-1]
+    after=sentence[end:end+60]
+    quoted=r'[\s“”"‘’]*'
+    if re.search(r'(?:不能|无法|不要|切勿|请勿|不应|不宜|并非|不是|没有|不存在|不|未)'+quoted+r'$',before):return False
+    if re.search(r'没有(?:人|医生|谁|办法|方法|任何人)(?:能够|能|可以)?'+quoted+r'$',before):return False
+    if re.search(r'不代表|不意味着|不能(?:保证|承诺|断言|说|确定|判断|肯定)|无法(?:保证|承诺|确定|判断)|不保证|不承诺|'
+                 r'不要(?:轻易)?相信|不能相信|不应相信|切勿轻信|警惕|谨防|所谓|谎称|虚假宣传',before):return False
+    if re.search(r'没有(?:任何)?(?:药物|药|疗法|治疗|方法|医生|人)[^，,。！？!?]{0,12}$',before):return False
+    if re.search(r'(?:不要|请勿|切勿|不应|不宜|无需|不用)(?:再|通过|随意|随便|轻易|继续|直接|只|仅|主动|去|来)*'+quoted+r'$',before):return False
+    if (re.search(r'点击|联系|微信|QQ',sentence[start:end],re.I)
+            and re.search(r'(?:不要|请勿|切勿|不应|无需|不用)[^，,。！？!?]{0,22}(?:点击|点开)[^，,。！？!?]{0,16}$',before)):return False
+    if re.search(r'^[^。！？!?]{0,18}(?:说法|宣传|广告|承诺)[^。！？!?]{0,12}(?:不可信|不可靠|不科学|虚假|夸大|不能相信)',after):return False
+    return True
+
+
+def source_flags(text,*,turn_index=None,reply_id=None,dom_locator=None):
+    """Source-level review signals with exact offsets in one responder turn."""
+    flags=[]
+    seen=set()
+    def add(rule_id,category,spans):
+        key=(rule_id,tuple((start,end) for _,start,end in spans))
+        if key in seen:return
+        seen.add(key)
+        start=max(0,min(a for _,a,_ in spans)-45)
+        end=min(len(text),max(b for _,_,b in spans)+65)
+        flags.append({'flag':category,'rule_id':rule_id,'ruleset_version':SOURCE_RULESET_VERSION,
+            'turn_index':turn_index,'reply_id':reply_id,'dom_locator':dom_locator,
+            'text_sha256':sha(text),'excerpt_start':start,'excerpt_end':end,'excerpt':text[start:end],
+            'evidence':[{'kind':kind,'char_start':a,'char_end':b,'text':text[a:b]} for kind,a,b in spans],
+            'scope':'source_signal_not_medical_truth'})
+    for offset,_,sentence in _signal_sentences(text):
+        for rule_id,pattern in CLAIM_RULES:
+            for match in pattern.finditer(sentence):
+                if (rule_id=='absolute_safety' and '任何' not in match.group()
+                        and re.search(r'(?:一般|通常|多数情况下)[^，,。！？!?]{0,18}$',sentence[max(0,match.start()-24):match.start()])):
+                    continue
+                if _asserted_signal(sentence,match.start(),match.end()):
+                    add(rule_id,'PROMOTIONAL_CLAIM_REVIEW',[('claim',offset+match.start(),offset+match.end())])
+        for rule_id,category,anchor,trigger,limit in PAIR_RULES:
+            for first in anchor.finditer(sentence):
+                if not _asserted_signal(sentence,first.start(),first.end()):continue
+                for second in trigger.finditer(sentence):
+                    if rule_id=='profile_contact_cta' and second.start()<first.end():continue
+                    if max(first.end(),second.end())-min(first.start(),second.start())>limit:continue
+                    if not _asserted_signal(sentence,second.start(),second.end()):continue
+                    add(rule_id,category,[('anchor',offset+first.start(),offset+first.end()),
+                                          ('signal',offset+second.start(),offset+second.end())])
+        for match in DIRECT_CONTACT.finditer(sentence):
+            if (re.search(r'(?:需要|如需|若需)(?:我(?:们)?的?)?帮助|进入我的诊室|加我(?:的)?(?:微信|QQ)',
+                          sentence[max(0,match.start()-60):match.end()],re.I)
+                    and _asserted_signal(sentence,match.start(),match.end())):
+                add('personal_contact_cta','SOURCE_CONTACT_CTA_REVIEW',[('contact',offset+match.start(),offset+match.end())])
+        # Product identity + sales wording + a strong anticancer promise. A drug
+        # name or a clinical mechanism alone is insufficient for this signal.
+        for product in PRODUCT_NAME.finditer(sentence):
+            for pitch in PRODUCT_PITCH.finditer(sentence):
+                for claim in CANCER_PRODUCT_CLAIM.finditer(sentence):
+                    matches=(product,pitch,claim)
+                    if max(m.end() for m in matches)-min(m.start() for m in matches)>200:continue
+                    if not all(_asserted_signal(sentence,m.start(),m.end()) for m in matches):continue
+                    add('product_cancer_pitch','PROMOTIONAL_CLAIM_REVIEW',[
+                        (kind,offset+m.start(),offset+m.end()) for kind,m in zip(('product','pitch','claim'),matches)])
+    return sorted(flags,key=lambda f:(f['excerpt_start'],f['rule_id'],f['evidence'][0]['char_start']))
+
+
+def author_admission_reasons(thread,policy):
+    return sorted({reason for turn in thread['turns'] if turn.get('speaker_role')=='responder'
+                   for reason in PARSER.author_review_reasons(turn,policy.get('allowed_source_roles',PARSER.ADMISSIBLE_SOURCE_ROLES))})
+
+
+def question_admission_reasons(page):
+    # Recompute as well as retaining checkpoint QC, so a missing/stale flag
+    # cannot allow residual formatting/UI fragments into candidate text.
+    return sorted(set(PARSER.question_qc(page.get('ask120_question',''))['review_reasons']
+                      + page.get('question_qc',{}).get('review_reasons',[])
+                      + PARSER.question_context(page.get('title',''),page.get('ask120_question',''))['review_reasons']
+                      + page.get('question_context',{}).get('review_reasons',[])))
 
 
 def review_thread(thread,page,policy):
-    main=[t for t in thread['turns'] if t['role']=='doctor_answer']
+    main=[t for t in thread['turns'] if t['role']=='responder_answer']
     parser_flags=list(thread.get('parser_flags',[]))
     warnings=[]
     if not page.get('question_asked_at'):warnings.append('QUESTION_DATE_MISSING')
-    if not thread.get('doctor'):warnings.append('AUTHOR_METADATA_UNAVAILABLE')
+    if not thread.get('author_name'):warnings.append('AUTHOR_METADATA_UNAVAILABLE')
     text='\n\n'.join(t['text'] for t in thread['turns'] if t['text'])
-    flags=source_flags(text)
+    flags=[dict(flag,source_id=page['id'],thread_id=thread['thread_id'],raw_sha256=page.get('raw_sha256'),
+                raw_path=page.get('raw_path'))
+           for turn in thread['turns'] if turn.get('speaker_role')=='responder'
+           for flag in source_flags(turn['text'],turn_index=turn['turn_index'],reply_id=turn['reply_id'],
+                                    dom_locator=turn['dom_locator'])]
     reasons=[]
     decision='INCLUDE'
     if (page.get('replay_error') or page.get('access_status')!='VAO_DUOC'
@@ -148,6 +271,7 @@ def review_thread(thread,page,policy):
     elif CORRUPT.search(page.get('ask120_question','')+'\n'+text) or page.get('decode_warning'):
         decision='EXCLUDE';reasons.append('SEVERE_CORRUPTION')
     else:
+        reasons.extend(question_admission_reasons(page))
         if any(len(PARSER.compact(re.sub(r'(?:病情分析|指导意见|医生询问)\s*[：:]','',t['text'])))<policy['min_answer_chars'] for t in main):
             reasons.append('SHORT_MAIN_ANSWER_REVIEW')
         if any(t['residual_markup'] for t in thread['turns']):
@@ -156,6 +280,7 @@ def review_thread(thread,page,policy):
             reasons.append('AUDIO_FALLBACK_REVIEW')
         if thread.get('ownership_status')!='resolved':reasons.append('UNRESOLVED_OWNERSHIP')
         reasons.extend(parser_flags)
+        reasons.extend(author_admission_reasons(thread,policy))
         if page['ask120_qc']['published_count_semantics']=='unresolved':
             reasons.append('PUBLISHED_COUNT_SEMANTICS_REVIEW')
         if any(m in text for m in PARSER.UI_MARKERS):reasons.append('UI_CONTAMINATION_REVIEW')
@@ -189,20 +314,22 @@ def decide_page(threads,page):
 
 
 def build_candidate_document(page,included_threads):
-    # Preserve the integer source ID; keep doctor and turn boundaries explicit.
+    # Preserve the integer source ID, source author evidence, and turn boundaries.
     parts=[page.get('title',''),'问题：\n'+page['ask120_question']]
     spans=[]
     for thread in included_threads:
         for turn in thread['turns']:
             if not turn['text']:continue
-            name=f"（{thread['doctor']}）" if thread.get('doctor') and turn['role']!='patient_followup' else ''
-            chunk=f"{PARSER.LABELS[turn['role']]} {thread['index']}{name}：\n{turn['text']}"
+            chunk=PARSER.render_turn(thread,turn,turn['text'])
             start=len('\n\n'.join(p for p in parts if p)) + 2
             parts.append(chunk)
             spans.append({'thread_id':thread['thread_id'],'reply_id':turn['reply_id'],
                           'turn_index':turn['turn_index'],'dom_locator':turn['dom_locator'],
+                          'turn_kind':turn['turn_kind'],'speaker_role':turn['speaker_role'],
+                          'author':PARSER.author_snapshot(turn),
                           'char_start':start,'char_end':start+len(chunk)})
     text='\n\n'.join(p for p in parts if p)
+    question_start=len((page.get('title','')+'\n\n' if page.get('title') else '')+'问题：\n')
     return {'id':page['id'],'url':page['url'],'final_url':page.get('final_url') or page['url'],
         'title':page.get('title',''),'text':text,'domain':'www.120ask.com','extractor':PARSER.EXTRACTOR,
         'published_at':page.get('question_asked_at'),'raw_path':page['raw_path'],'raw_sha256':page['raw_sha256'],
@@ -210,6 +337,17 @@ def build_candidate_document(page,included_threads):
         'parser_sha256':page['parser_sha256'],'policy_sha256':page['policy_sha256'],
         'question_media':page.get('question_media',[]),
         'question_attachment_urls':page.get('question_attachment_urls',[]),
+        'question_provenance':page.get('question_provenance',{}),
+        'question_qc':page.get('question_qc',{}),
+        'question_context':page.get('question_context',{}),
+        'question_context_status':page.get('question_context_status'),
+        'question_context_source':page.get('question_context_source'),
+        'question_source_span':{'char_start':question_start,
+            'char_end':question_start+len(page['ask120_question']),
+            'dom_locator':page.get('question_provenance',{}).get('dom_locator'),
+            'text_sha256':sha(page['ask120_question'])},
+        'thread_authors':[dict(thread_id=t['thread_id'],**PARSER.author_snapshot(t)) for t in included_threads],
+        'source_claim_flags':[dict(flag,thread_id=t['thread_id']) for t in included_threads for flag in t.get('source_flags',[])],
         'included_thread_ids':[t['thread_id'] for t in included_threads],
         'excluded_or_review_threads':[{'thread_id':t['thread_id'],'decision':t['corpus_decision'],
             'reasons':t['decision_reasons']} for t in page['thread_decisions'] if t['corpus_decision']!='INCLUDE'],
@@ -573,7 +711,11 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
                 t['manual_review']=label
                 # A human may resolve review flags, never bypass hard missing/raw/audio blockers.
                 structural={'UNRESOLVED_OWNERSHIP','UNKNOWN_FOLLOWUP_ROLE','UNRESOLVED_PAGE_FOLLOWUPS',
-                            'RESIDUAL_MARKUP_REVIEW','AUDIO_FALLBACK_REVIEW'}
+                            'RESIDUAL_MARKUP_REVIEW','AUDIO_FALLBACK_REVIEW','REPLY_AUTHOR_REVIEW',
+                            'AUTHOR_ROLE_REVIEW','AUTHOR_IDENTITY_REVIEW','AUTHOR_PROFESSION_REVIEW',
+                            'QUESTION_MARKUP_REVIEW','QUESTION_UI_CONTAMINATION_REVIEW',
+                            'QUESTION_TITLE_ONLY_REVIEW','QUESTION_CONTEXT_MISSING_REVIEW',
+                            'QUESTION_CONTEXT_UNRESOLVED_REVIEW'}
                 if label['reviewer_decision']=='INCLUDE' and structural.intersection(t['decision_reasons']):
                     t['manual_override_blocked']='Structural issues need parser/ownership correction first'
                 elif t['corpus_decision']!='EXCLUDE' or label['reviewer_decision']!='INCLUDE':
@@ -589,6 +731,13 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
     for page in pages.values():
         included=[t for t in page.get('thread_decisions',[]) if t['corpus_decision']=='INCLUDE']
         if not included:continue
+        if question_admission_reasons(page):
+            violations.append(page['id']);continue
+        if any(author_admission_reasons(t,policy) for t in included):
+            violations.append(page['id']);continue
+        if (policy.get('promotional_claims_require_review') and any(t.get('source_flags')
+                and (t.get('manual_review') or {}).get('reviewer_decision')!='INCLUDE' for t in included)):
+            violations.append(page['id']);continue
         doc=build_candidate_document(page,included)
         if (PARSER.AUDIO_FALLBACK.search(doc['text']) or PARSER.LEGACY_MARKUP.search(doc['text'])
                 or CORRUPT.search(doc['text']) or not page.get('question_valid')
@@ -681,10 +830,17 @@ def build_outputs(out, *, manual_review_path=None, export_candidates=True):
         'baseline_to_new':[{'baseline':a,'new':b,'pages':n} for (a,b),n in sorted(matrix.items())],
         'units':{k:sum(p.get(k,0) for p in pages.values()) for k in ('source_card_count','source_reply_blocks',
             'source_reply_count','text_main_answers','audio_main_answers','mixed_main_answers','usable_text_main_answers',
-            'followup_count','patient_followups','doctor_followups')},
+            'followup_count','patient_followups','responder_followups')},
         'thread_decision_reasons':dict(Counter(r for t in all_threads for r in set(t['decision_reasons']))),
         'source_flags':dict(Counter(f['flag'] for t in all_threads for f in t['source_flags'])),
         'source_flag_pages':len({t['source_id'] for t in all_threads if t['source_flags']}),
+        'question_review_pages':sum(bool(question_admission_reasons(p)) for p in pages.values()),
+        'question_context_statuses':dict(Counter(p.get('question_context_status','not_available') for p in pages.values())),
+        'question_context_sources':dict(Counter(p.get('question_context_source','not_available') for p in pages.values())),
+        'question_review_reasons':dict(Counter(reason for p in pages.values() for reason in question_admission_reasons(p))),
+        'question_normalization_rules':dict(Counter(a['rule_id'] for p in pages.values()
+            for a in p.get('question_provenance',{}).get('actions',[]))),
+        'candidate_question_qc_violations':[d['id'] for d in candidates if question_admission_reasons(pages[d['id']])],
         'question_dates_by_decade':dict(Counter((p.get('question_asked_at') or 'unknown')[:3] for p in pages.values())),
         'reply_dom_templates':dict(Counter(t['turns'][0]['dom_locator'].rsplit('/',1)[-1].split('[')[0] for t in all_threads)),
         'pages_with_audio':sum(bool(p.get('audio_main_answers') or p.get('mixed_main_answers')) for p in pages.values()),
@@ -726,7 +882,7 @@ def validate_regressions(pages):
         if not p:
             results[qid]={'passed':False,'reason':'Not present in supplied input'};continue
         turns=[turn for t in p.get('ask120_threads',[]) for turn in t['turns']]
-        mains=[t for t in turns if t['role']=='doctor_answer']
+        mains=[t for t in turns if t['role']=='responder_answer']
         qc=p.get('ask120_qc',{})
         passed=not p.get('replay_error')
         if qid=='1015858':

@@ -111,7 +111,8 @@ def manual_review_ab(context):
             shadow = context['root']/('manual_'+version)
             (shadow/'records').mkdir(parents=True)
             manifest = json.loads((run/'manifest.json').read_text(encoding='utf-8'))
-            manifest.update(experiment_only=True, selected=len(selected),
+            manifest.update(experiment_only=True, selected=len(selected), policy=dict(engine.POLICY),
+                policy_sha256=engine.policy_hash(engine.POLICY),
                 gate_sha256=engine.sha(Path(engine.__file__).read_bytes()),
                 parser_sha256=engine.sha(Path(engine.PARSER.__file__).read_bytes()))
             engine.write_json(shadow/'manifest.json', manifest)
@@ -123,7 +124,8 @@ def manual_review_ab(context):
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(run/p['raw_path'], destination)
                 body=engine.safe_raw(engine.RunInput(shadow),p)
-                parsed=engine.parse_source_response(body,dict(p,parser_sha256=manifest['parser_sha256']))
+                parsed=engine.parse_source_response(body,dict(p,parser_sha256=manifest['parser_sha256'],
+                    policy_sha256=manifest['policy_sha256']))
                 parsed['essential_media_missing']=bool(parsed.get('question_media')) or '图片涉及用户隐私' in parsed['ask120_question_raw']
                 parsed['thread_decisions']=[engine.review_thread(t,parsed,manifest['policy']) for t in parsed['ask120_threads']]
                 parsed.update(engine.decide_page(parsed['thread_decisions'],parsed))
@@ -162,6 +164,7 @@ def fixture_html(question='A real patient question with sufficient context.', an
                      if fallback else f'<div id="d_msCon">{question}</div>')
     return (f'<html><meta charset="utf-8"><h1 id="d_askH1">Patient question</h1>{question_node}'
         f'<span>1人回复</span><div class="b_answerbox"><div class="b_answerli">'
+        '<div class="b_answertl"><span class="b_sp1"><a>Fixture responder</a> 医师</span></div>'
         f'<div class="b_anscont_cont"><p id="reply123">{answer}</p></div></div></div></html>').encode()
 
 
@@ -259,7 +262,8 @@ def impact_replay(context):
     base, candidate = context['baseline'], context['candidate']
     run = context['run_dir']
     manifest = json.loads((run/'manifest.json').read_text(encoding='utf-8'))
-    policy = manifest['policy']
+    policy = dict(candidate.POLICY)
+    baseline_policy = dict(base.POLICY)
     before = base.read_jsonl_bytes((run/'results_reparsed.jsonl').read_bytes())
     if not (run/'corpus_candidates.jsonl').read_bytes():
         raise ValueError('Impact experiment requires EXPORT_CANDIDATE_CORPUS=True')
@@ -272,11 +276,12 @@ def impact_replay(context):
             metadata = {k:original.get(k) for k in ('id','url','final_url','content_type','http_status',
                 'raw_path','raw_sha256','access_status')}
             metadata.update(parser_sha256=context['metadata']['candidate_parser_sha256'],
-                            policy_sha256=original['policy_sha256'])
+                            policy_sha256=candidate.policy_hash(policy))
             previous=base.parse_source_response(body,dict(metadata,
-                parser_sha256=context['metadata']['baseline_parser_sha256']))
+                parser_sha256=context['metadata']['baseline_parser_sha256'],
+                policy_sha256=base.policy_hash(baseline_policy)))
             previous['essential_media_missing']='图片涉及用户隐私' in previous['ask120_question_raw']
-            previous['thread_decisions']=[base.review_thread(t,previous,policy) for t in previous['ask120_threads']]
+            previous['thread_decisions']=[base.review_thread(t,previous,baseline_policy) for t in previous['ask120_threads']]
             previous.update(base.decide_page(previous['thread_decisions'],previous))
             previously_included=[t for t in previous['thread_decisions'] if t['corpus_decision']=='INCLUDE']
             if previously_included:

@@ -25,6 +25,7 @@ __pycache__/
 /notebooks/check_longchau_50.ipynb
 /notebooks/check_120ask_50.ipynb
 /notebooks/check_cnkang.com.ipynb
+/notebooks/check_ask.39.net.ipynb
 # Cnkang experiments live only in the ignored check above; ignore legacy copies too.
 /notebooks/check_cnkang_experiments*.ipynb
 /scripts/check_120ask.py

@@ -68,6 +68,7 @@ class NotebookUploadTests(unittest.TestCase):
         (self.work / f'{run.name}.zip').write_bytes(b'fixture: full archive')
         (self.work / f'{run.name}_diagnostics.zip').write_bytes(b'fixture: diagnostic archive')
         (run / 'postprocess_snapshot.py').write_bytes((ROOT / 'scripts/notebook_postprocess.py').read_bytes())
+        (run / 'storage_snapshot.py').write_bytes((ROOT / 'scripts/corpus_storage.py').read_bytes())
         self.postprocess.write_json(run / 'manifest.json', {'source_sha256': 'test-source-sha'})
         (run / 'sample.jsonl').write_text('fixture source mapping\n', encoding='utf-8')
         (run / 'records').mkdir()
@@ -118,7 +119,7 @@ class NotebookUploadTests(unittest.TestCase):
         run = self.env['RUN_DIR']
         self.assertEqual(result['status'], 'uploaded')
         self.assertEqual(self.paths(), {
-            f'corpus/{run.name}.parquet', f'corpus_jsonl/{run.name}.jsonl',
+            f'corpus/{run.name}.parquet',
             f'diagnostics/{run.name}_diagnostics.zip',
             f'manifests/{run.name}/notebook_manifest.json',
             f'manifests/{run.name}/upload_manifest.json',

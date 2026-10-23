@@ -1,4 +1,4 @@
-"""Embed the 120ask V3 parser in the production and domain-sample notebooks."""
+"""Embed the 120ask V4 parser in the production and domain-sample notebooks."""
 from __future__ import annotations
 
 import base64
@@ -104,8 +104,10 @@ def ask120_module():
         if old_redirect not in source:
             raise ValueError('Crawler redirect marker not found.')
         source = source.replace(old_redirect, new_redirect, 1)
-    source = source.replace("'120ask_qa_dom_v2'", "'120ask_qa_dom_v3'")
+    source = source.replace("'120ask_qa_dom_v2'", "'120ask_qa_dom_v4'")
+    source = source.replace("'120ask_qa_dom_v3'", "'120ask_qa_dom_v4'")
     source = source.replace("VERSION = 'v11'", "VERSION = 'v12'")
+    source = source.replace("VERSION = 'v12'", "VERSION = 'v13'")
     compile(source, 'crawler_snapshot.py', 'exec')
     return source.encode('utf-8')
 
@@ -221,12 +223,12 @@ ask120_path.write_bytes(ask120_body)
                               "crawler.ROBOT_AGENT = USER_AGENT.split('/', 1)[0]\n"
                               "crawler.TRUST_ENV = REQUESTS_TRUST_ENV", 1)
     put(7, setup)
-    put(10, get(10).replace('120ask V2', '120ask V3'))
+    put(10, get(10).replace('120ask V2', '120ask V4').replace('120ask V3', '120ask V4'))
     note = (
-        '\n\n120ask V3 chỉ áp dụng cho `/question/<id>.htm`, giữ thứ tự thread và ghi QC chi tiết '
+        '\n\n120ask V4 chỉ áp dụng cho `/question/<id>.htm`, giữ thứ tự thread và ghi QC chi tiết '
         'trong record JSON. URL khác trên domain dùng route hiện có. Parser đổi thì tạo run mới và recovery raw.\n'
     )
-    if '120ask V3 chỉ áp dụng' not in get(10):
+    if '120ask V4 chỉ áp dụng' not in get(10):
         put(10, get(10).rstrip() + note)
     write(notebook, DOMAIN)
 
@@ -239,7 +241,7 @@ def main():
     _update_domain(ask120_body)
     from build_120ask_gate_notebook import main as build_check
     build_check()
-    print(json.dumps({'parser': '120ask_qa_dom_v3',
+    print(json.dumps({'parser': '120ask_qa_dom_v4',
                       'sha256': hashlib.sha256(ask120_body).hexdigest()}, indent=2))
 
 

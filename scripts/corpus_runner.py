@@ -401,6 +401,10 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     wait_seconds=config['browser_wait_seconds'], attempts=config['browser_attempts'],
                     delay=config['delay'], on_record=publish_request,
                     log_every=log_every)
+        except backup.STORAGE.StoragePressure as exc:
+            deferred = True
+            print(json.dumps({'event': 'storage_pressure', 'error': str(exc),
+                              'action': 'paused_for_resume'}, ensure_ascii=False), flush=True)
         finally:
             try:
                 for sample in samples:
@@ -409,6 +413,8 @@ def run(crawler, probe, out, config, *, workers=4, max_new=None, recovery_source
                     efetch.write_reports(crawler, out, [s for s in samples if crawler.host(s['url']) == 'pubmed.ncbi.nlm.nih.gov'])
                 if longchau:
                     longchau.write_reports(crawler, out, [s for s in samples if longchau.is_host(s['url'])], 'records')
+                backup.STORAGE.prepare_reports(out)
+                crawler.jsonl = backup.STORAGE.write_jsonl
                 crawler.report(argparse.Namespace(out=out))
                 summary = write_access_report(crawler, probe, out, samples)
             finally:
