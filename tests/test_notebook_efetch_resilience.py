@@ -184,7 +184,7 @@ class EFetchResilienceTests(unittest.TestCase):
         protected={str(p.relative_to(self.out)):p.read_bytes() for p in self.out.rglob('*') if p.is_file()
                    and (p.parent.name in ('records','pubmed_records','pubmed_batches') or p.suffix=='.gz'
                         or p.name in ('manifest.json','sample.jsonl','quality_report.json'))}
-        for name in ('pubmed_efetch_snapshot.py','checkpoint_snapshot.py','crawler_snapshot.py',
+        for name in ('pubmed_efetch_snapshot.py','checkpoint_snapshot.py','storage_snapshot.py','crawler_snapshot.py',
                      'corpus_runner_snapshot.py','priority_probe_snapshot.py'):
             (self.out/name).write_bytes((self.root/name).read_bytes())
         identity=self.crawler.load_json(self.out/'corpus_config.json')

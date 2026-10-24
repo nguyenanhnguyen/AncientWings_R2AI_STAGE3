@@ -1,5 +1,6 @@
 """Periodic full checkpoints; publish ZIP and its checksum in one Hugging Face commit."""
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -7,6 +8,12 @@ from pathlib import Path
 import re
 import time
 import zipfile
+
+_storage_path = Path(__file__).with_name('storage_snapshot.py')
+if not _storage_path.exists(): _storage_path = Path(__file__).with_name('corpus_storage.py')
+_storage_spec = importlib.util.spec_from_file_location('checkpoint_storage', _storage_path)
+STORAGE = importlib.util.module_from_spec(_storage_spec)
+_storage_spec.loader.exec_module(STORAGE)
 
 DEFAULTS = {'enabled': False, 'upload': False, 'repo_id': 'AncientWings/AncientWings_R2AI_STAGE3_ds',
     'every_urls': 10000, 'every_seconds': 900., 'upload_attempts': 3, 'failure_retry_seconds': 120.,
@@ -46,6 +53,13 @@ class PeriodicCheckpoint:
         self.crawler, self.out, self.config = crawler, Path(out), validate_config(config)
         self.state_path = self.out / 'checkpoint_upload_state.json'
         self.state = crawler.load_json(self.state_path) if self.state_path.exists() else {}
+        archive_dir = Path(self.config['archive_dir']) if self.config['archive_dir'] else self.out.parent.parent
+        previous = archive_dir / (self.out.name + '_checkpoint.zip')
+        # Reclaim a verified, already committed backup from a previous invocation too.
+        if (self.state.get('upload_status') == 'uploaded' and previous.is_file() and not previous.is_symlink()
+                and self.state.get('archive_sha256') == sha_file(previous)):
+            previous.unlink()
+            self.state['local_status'] = 'removed_after_upload'
         self.observed = (len(list((self.out/'records').glob('*.json'))) if self.config['enabled'] else 0)
         self.last_saved = self.observed
         self.last_time = time.monotonic()
@@ -77,17 +91,26 @@ class PeriodicCheckpoint:
             raise ValueError('Checkpoint ZIP must be outside the run directory.')
         archive = archive_dir / (self.out.name+'_checkpoint.zip')
         temporary = archive.with_suffix('.zip.tmp')
+        temporary.unlink(missing_ok=True)  # Incomplete ZIP from an interrupted prior build.
         counts = self.counts()
+        paths = []
+        for path in sorted(self.out.rglob('*')):
+            if path.is_symlink(): raise ValueError('Checkpoint run contains a symlink.')
+            if (path.is_file() and path.suffix not in ('.tmp', '.lock') and '__pycache__' not in path.parts
+                    and path.name not in STORAGE.REPORTS
+                    and path.name not in ('corpus.jsonl', 'corpus.parquet')):
+                paths.append(path)
+        if not STORAGE.archive_fits(paths, archive):
+            raise STORAGE.StoragePressure('Full checkpoint skipped: reserve disk for Parquet and diagnostics; raw/records retained.')
         progress = {'kind': 'crawl_checkpoint', 'complete': False, 'crawl_complete': counts['pending']==0,
             **counts, 'created_at': self.crawler.utc(), 'run_name': self.out.name,
             'source_manifest_sha256': sha_file(self.out/'manifest.json'), 'sample_sha256': sha_file(self.out/'sample.jsonl')}
         self.crawler.write_json(self.out/'checkpoint_progress.json',progress)
+        if self.out/'checkpoint_progress.json' not in paths:
+            paths.append(self.out/'checkpoint_progress.json')
         try:
             with zipfile.ZipFile(temporary,'w',compression=zipfile.ZIP_DEFLATED,allowZip64=True) as z:
-                for path in sorted(self.out.rglob('*')):
-                    if path.is_symlink(): raise ValueError('Checkpoint run contains a symlink.')
-                    if not path.is_file() or path.suffix in ('.tmp','.lock') or '__pycache__' in path.parts:
-                        continue
+                for path in paths:
                     z.write(path, self.out.name+'/'+path.relative_to(self.out).as_posix())
             with zipfile.ZipFile(temporary) as z:
                 if z.testzip() is not None: raise ValueError('Checkpoint ZIP checksum failure.')
@@ -118,6 +141,10 @@ class PeriodicCheckpoint:
                 time.sleep(min(2**attempt,30))
 
     def maybe_save(self, *, new_completed=0, force=False):
+        if not force and STORAGE.free_bytes(self.out) < STORAGE.RESERVE_BYTES:
+            STORAGE.prepare_reports(self.out)
+            if STORAGE.free_bytes(self.out) < STORAGE.RESERVE_BYTES:
+                raise STORAGE.StoragePressure('Crawl paused: less than 1 GiB free; preserve records for resume and diagnostics.')
         if not self.config['enabled']: return None
         self.observed += new_completed
         now = time.monotonic()
@@ -137,6 +164,13 @@ class PeriodicCheckpoint:
                     self.state.update(upload_status='uploaded',commit_sha=self.upload(archive,proof))
                 except Exception as exc:
                     self.state.update(upload_status='failed',error=safe_error(exc,os.environ.get(self.config['token_env'],'')))
+                else:
+                    # Cleanup failure must not relabel a successful durable commit as failed.
+                    try:
+                        archive.unlink()
+                        self.state['local_status'] = 'removed_after_upload'
+                    except OSError as exc:
+                        self.state['cleanup_error'] = safe_error(exc, '')
             self.crawler.write_json(self.state_path,self.state)
             print(json.dumps({'event':'periodic_checkpoint','completed':proof['completed'],'pending':proof['pending'],
                 'local_archive':str(archive),'upload_status':self.state['upload_status'],

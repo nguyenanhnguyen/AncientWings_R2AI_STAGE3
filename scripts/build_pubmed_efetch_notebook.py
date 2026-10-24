@@ -241,6 +241,8 @@ Tham khảo [NCBI EFetch](https://www.ncbi.nlm.nih.gov/books/NBK25499/).
             cell['outputs'], cell['execution_count'] = [], None
     NOTEBOOK.write_text(json.dumps(nb, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print('Updated:', NOTEBOOK.relative_to(ROOT))
+    from build_storage_notebooks import main as refresh_storage
+    refresh_storage()
 
 
 if __name__ == '__main__':

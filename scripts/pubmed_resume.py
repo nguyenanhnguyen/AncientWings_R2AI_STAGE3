@@ -139,6 +139,9 @@ def upgrade(out, new_body, config, *, enabled=True):
     # validate_config loads checkpoint_snapshot.py relative to the module; use the verified run helper there too.
     helper=out/'checkpoint_snapshot.py'
     atomic(candidate.parent/'checkpoint_snapshot.py',helper.read_bytes())
+    storage = out/'storage_snapshot.py'
+    if storage.exists():
+        atomic(candidate.parent/'storage_snapshot.py', storage.read_bytes())
     api=load_api(candidate)
     config=api.validate_config(config)
     state=validate_data(out,api)

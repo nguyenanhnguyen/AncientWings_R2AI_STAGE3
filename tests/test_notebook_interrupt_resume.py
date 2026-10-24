@@ -48,6 +48,25 @@ class InterruptResumeTests(unittest.TestCase):
                     http_status=200, final_url=sample['url'], raw_path=raw_path,
                     raw_sha256=crawler.digest(body), elapsed_seconds=0)
 
+    def test_low_disk_pauses_after_durable_record_and_resume_finishes(self):
+        self.make_run(3)
+        output = io.StringIO()
+        config = {'attempts': 1, 'delay': 0, 'pubmed_use_efetch': False, 'browser_mode': 'off'}
+        with patch.object(self.crawler.Fetcher, 'request_once',
+                          return_value=(203, {'Content-Type': 'text/html'}, COOKIE_HEADING)), \
+                patch('shutil.disk_usage', return_value=Mock(free=0)), redirect_stdout(output):
+            summary = self.runner.run(self.crawler, self.probe, self.out, config, workers=1)
+        self.assertIn('storage_pressure', output.getvalue())
+        self.assertGreater(summary['pending'], 0)
+        saved = {p.name: p.read_bytes() for p in (self.out/'records').glob('*.json')}
+        self.assertTrue(saved)
+        with patch.object(self.crawler.Fetcher, 'request_once',
+                          return_value=(203, {'Content-Type': 'text/html'}, COOKIE_HEADING)), \
+                redirect_stdout(io.StringIO()):
+            summary = self.runner.run(self.crawler, self.probe, self.out, config, workers=1)
+        self.assertEqual(summary['pending'], 0)
+        for name, data in saved.items(): self.assertEqual((self.out/'records'/name).read_bytes(), data)
+
     def test_requests_interrupt_stops_group_and_resume_skips_committed_url(self):
         samples = self.make_run(4)
         started, finish_current = threading.Event(), threading.Event()

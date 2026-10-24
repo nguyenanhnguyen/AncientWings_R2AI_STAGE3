@@ -1,8 +1,15 @@
 """Offline audit/export and rescue packaging, embedded in the HF upload crawl notebook."""
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
-import shutil
+import zipfile
+
+_storage_path = Path(__file__).with_name('storage_snapshot.py')
+if not _storage_path.exists(): _storage_path = Path(__file__).with_name('corpus_storage.py')
+_storage_spec = importlib.util.spec_from_file_location('postprocess_storage', _storage_path)
+STORAGE = importlib.util.module_from_spec(_storage_spec)
+_storage_spec.loader.exec_module(STORAGE)
 
 
 def read_json(path):
@@ -48,9 +55,12 @@ def verify_export(out, counts):
     exported = read_json(out / 'export_manifest.json')
     if (exported.get('documents') != counts['accepted']
             or any(exported.get(key) is not True for key in (
-                'accepted_source_ids_preserved', 'parquet_round_trip_verified', 'jsonl_round_trip_verified'))):
+                'accepted_source_ids_preserved', 'parquet_round_trip_verified'))
+            or ('corpus.jsonl' in exported.get('files', {}) and exported.get('jsonl_round_trip_verified') is not True)):
         raise RuntimeError('Export chưa xác minh đủ bản ghi accepted và round-trip.')
     for name in ('corpus.parquet', 'corpus.jsonl'):
+        if name == 'corpus.jsonl' and name not in exported.get('files', {}):
+            continue
         proof = exported.get('files', {}).get(name, {})
         target = out / name
         if (not target.is_file() or target.stat().st_size != proof.get('bytes')
@@ -105,11 +115,15 @@ def run_postprocess(out, source, execute):
     state = invalidate(out, status='running')
     step = 'report'
     try:
-        execute(out / 'crawler_snapshot.py', 'report', '--out', out)
+        STORAGE.prepare_reports(out)
+        execute(out / 'storage_snapshot.py', 'report', '--out', out)
         counts = read_json(out / 'quality_report.json')
         state['counts'] = {key: counts[key] for key in ('selected', 'completed', 'pending', 'accepted')}
         if counts['pending']:
             state['status'] = 'incomplete'
+            if counts['accepted'] > 0:
+                # Useful output on a storage pause; never present unaudited data as final corpus.
+                execute(out / 'export_snapshot.py', '--out', out, '--partial')
             return counts
         step = 'audit'
         execute(out / 'audit_snapshot.py', '--out', out, '--source', source)
@@ -171,7 +185,8 @@ def package_run(out, workdir, *, id_from, id_to, dataset_revision, source_sha256
         'dataset_revision': dataset_revision, 'source_sha256': source_sha256,
         **counts, 'complete': complete, 'audit_passed': complete, 'export_passed': complete,
         'packages': packages,
-        'exported_files': ['corpus.parquet', 'corpus.jsonl'] if complete and counts['accepted'] > 0 else [],
+        'exported_files': [name for name in ('corpus.parquet', 'corpus.jsonl') if (out/name).exists()]
+                          if complete and counts['accepted'] > 0 else [],
     }
     if failed_step:
         manifest.update(failed_step=failed_step, error=str(error))
@@ -185,16 +200,35 @@ def package_run(out, workdir, *, id_from, id_to, dataset_revision, source_sha256
         manifest['complete'] = False
         write_json(out / 'notebook_manifest.json', manifest)
     archive = workdir / f'{out.name}.zip'
-    temporary = workdir / f'.{out.name}_checkpoint'
+    temporary = archive.with_suffix('.zip.tmp')
+    temporary.unlink(missing_ok=True)
+    all_paths = [p for p in out.rglob('*') if p.is_file() and not p.is_symlink()
+                 and p.suffix not in ('.tmp', '.lock') and '__pycache__' not in p.parts]
+    # Successful runs need a results bundle, not another full raw/checkpoint copy.
+    compact = complete or not STORAGE.archive_fits(all_paths, archive)
+    manifest['archive_kind'] = 'results' if compact else 'resume_checkpoint'
+    write_json(out / 'notebook_manifest.json', manifest)
+    paths = [p for p in all_paths if p.parent == out and
+             (p.suffix in ('.parquet', '.csv', '.md') or p.name in (
+                 'notebook_manifest.json', 'export_manifest.json', 'audit_summary.json',
+                 'postprocess_status.json', 'quality_report.json', 'audit_cases.jsonl',
+                 'review_100.jsonl', 'review_100.html'))] if compact else all_paths
     try:
-        built = Path(shutil.make_archive(str(temporary), 'zip', root_dir=out.parent, base_dir=out.name))
-        built.replace(archive)
+        if not STORAGE.archive_fits(paths, archive):
+            # Parquet and diagnostics already exist independently; skip an optional duplicate ZIP.
+            print('Skipping results ZIP: reserve disk for corpus.parquet and diagnostics.', flush=True)
+            if diagnostic_error is not None: raise diagnostic_error
+            return None
+        with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED, allowZip64=True) as bundle:
+            for path in sorted(paths):
+                bundle.write(path, out.name + '/' + path.relative_to(out).as_posix())
+        temporary.replace(archive)
     except BaseException:
         manifest['complete'] = False
         write_json(out / 'notebook_manifest.json', manifest)
         raise
     finally:
-        Path(str(temporary) + '.zip').unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
     if diagnostic_error is not None:
         raise diagnostic_error
     return archive

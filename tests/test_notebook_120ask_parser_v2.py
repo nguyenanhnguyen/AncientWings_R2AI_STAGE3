@@ -87,27 +87,28 @@ class Ask120ParserV2Tests(unittest.TestCase):
                 self.assertEqual(doc['main_answer_count'], counts['main_answers'])
                 self.assertEqual(doc['followup_count'], counts['followups'])
                 self.assertEqual(doc['patient_followups'], counts['patient_followups'])
-                self.assertEqual(doc['doctor_followups'], counts['doctor_followups'])
-                self.assertEqual(doc['ask120_review_reasons'], [])
-                self.assertTrue(doc['ask120_access_pass'])
+                self.assertEqual(doc['responder_followups'], counts['doctor_followups'])
+                # These historic synthetic headers contain only nicknames.
+                self.assertIn('AUTHOR_ROLE_REVIEW', doc['ask120_review_reasons'])
+                self.assertFalse(doc['ask120_access_pass'])
                 self.assertEqual(doc['ask120_qc']['scope'], 'observable_html_only')
                 totals['main'] += doc['main_answer_count']
                 totals['followups'] += doc['followup_count']
                 totals['patient'] += doc['patient_followups']
-                totals['doctor'] += doc['doctor_followups']
+                totals['doctor'] += doc['responder_followups']
                 totals['tails'] += doc['removed_template_tails']
         self.assertEqual(totals, {'main': 7, 'followups': 10, 'patient': 5, 'doctor': 5, 'tails': 1})
 
     def test_thread_order_doctor_assignment_and_page_furniture_exclusion(self):
         doc = self.parser.extract(fixture('74708648'),
                                   'https://www.120ask.com/question/74708648.htm', 'text/html')
-        self.assertEqual([thread['doctor'] for thread in doc['ask120_threads']], ['陈医生', '孙医生'])
+        self.assertEqual([thread['author_name'] for thread in doc['ask120_threads']], ['陈医生', '孙医生'])
         self.assertEqual([turn['role'] for turn in doc['ask120_threads'][0]['turns']],
-                         ['doctor_answer', 'patient_followup', 'doctor_followup',
-                          'patient_followup', 'doctor_followup'])
+                         ['responder_answer', 'patient_followup', 'responder_followup',
+                          'patient_followup', 'responder_followup'])
         self.assertEqual([turn['role'] for turn in doc['ask120_threads'][1]['turns']],
-                         ['doctor_answer', 'patient_followup', 'doctor_followup',
-                          'patient_followup', 'doctor_followup'])
+                         ['responder_answer', 'patient_followup', 'responder_followup',
+                          'patient_followup', 'responder_followup'])
         first_followup = doc['text'].index('空腹时也会反酸')
         second_doctor = doc['text'].index('少量多餐并记录')
         self.assertLess(first_followup, second_doctor)
@@ -153,18 +154,18 @@ class Ask120ParserV2Tests(unittest.TestCase):
         self.assertIn('ask120_orphan_followup', doc['ask120_review_reasons'])
 
     def test_exact_route_and_short_valid_page_are_accepted_in_both_notebooks(self):
-        body = fixture('104875176')
+        body = fixture('104875176').decode().replace('</a></span>', '</a> 医师</span>').encode()
         for crawler in (self.crawler, self.domain_crawler):
             with self.subTest(crawler=crawler.__name__):
                 doc = crawler.extract(body, 'text/html; charset=utf-8',
                                       'https://www.120ask.com/question/104875176.htm')
-                self.assertEqual(doc['extractor'], '120ask_qa_dom_v3')
+                self.assertEqual(doc['extractor'], '120ask_qa_dom_v4')
                 self.assertLess(len(doc['text']), 300)
                 self.assertEqual(crawler.quality(doc)['quality_status'], 'accepted')
         other_path = self.crawler.extract(body, 'text/html', 'https://www.120ask.com/article/104875176.htm')
         other_host = self.crawler.extract(body, 'text/html', 'https://ask.120ask.com/question/104875176.htm')
-        self.assertNotEqual(other_path['extractor'], '120ask_qa_dom_v3')
-        self.assertNotEqual(other_host['extractor'], '120ask_qa_dom_v3')
+        self.assertNotEqual(other_path['extractor'], '120ask_qa_dom_v4')
+        self.assertNotEqual(other_host['extractor'], '120ask_qa_dom_v4')
 
     def test_challenge_missing_content_and_home_redirect_do_not_become_accepted(self):
         challenge = b'<html><head><title>Just a moment...</title></head><body><h1>Checking your browser</h1></body></html>'
