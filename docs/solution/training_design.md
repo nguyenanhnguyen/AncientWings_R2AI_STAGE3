@@ -1,5 +1,11 @@
 # Thiết kế pipeline A2 → E (tiền xử lý, chunk, index, retrieval, bài nộp, đánh giá)
 
+> Tài liệu này giữ các lựa chọn thiết kế và tham số thí nghiệm. Cấu hình code
+> hiện tại ngày 24/10/2026 nằm trong [run_guide.md](run_guide.md): một embedding
+> Qwen3 4B FP16, một reranker Qwen3 4B FP16, không chạy pilot mặc định và có
+> đường dùng lại embedding corpus đã hoàn tất. Những profile cũ bên dưới không
+> nhất thiết là giá trị mặc định đang chạy.
+
 Tài liệu mô tả phần pipeline đã soạn sau khi corpus được crawl xong: mỗi khâu nhận gì, trả gì, có những tham số nào, dùng kỹ thuật gì và đóng vai trò gì với cả hệ thống. Khung block lấy từ [nguyen/pipeline.txt](../../nguyen/pipeline.txt). Block A1 (crawl) nằm ở crawler của nhóm, ngoài phạm vi tài liệu này; pipeline bắt đầu từ đầu ra của crawler. Lệnh chạy từng bước: [run_guide.md](run_guide.md).
 
 Mọi con số dưới đây là giá trị mặc định trong code tại thời điểm viết, không phải kết quả đã tối ưu.

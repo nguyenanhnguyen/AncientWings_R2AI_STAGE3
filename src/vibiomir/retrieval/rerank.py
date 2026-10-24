@@ -9,8 +9,8 @@ rerankers published before 2026-08-01 and at or under 15B are listed.
     bge-reranker-base       BAAI/bge-reranker-base, 278M, 2023-09. Cheaper, weaker on Chinese.
     qwen3-reranker-0.6b     Qwen/Qwen3-Reranker-0.6B, 0.6B, 2025-06. Scores by comparing the
                             yes/no token logits of a causal model, so it needs its own prompt.
-    qwen3-reranker-4b       Qwen/Qwen3-Reranker-4B, 4B, 2025-06. The local 4 GB
-                            profile uses NF4 and a pilot before full reranking.
+    qwen3-reranker-4b       Qwen/Qwen3-Reranker-4B, 4B, 2025-06. Main pipeline uses
+                            FP16; CPU offload and NF4 are optional memory modes.
     identity                No model: keeps the fused order. For offline runs and tests.
 
 Scores are in [0, 1] but are NOT calibrated relevance probabilities and are not comparable
@@ -45,7 +45,7 @@ class IdentityReranker:
 
 class CrossEncoderReranker:
     def __init__(self, name, device=None, fp16=True, max_length=None, revision=None,
-                 quantize='none'):
+                 quantize='none', cpu_offload=False):
         if name not in RERANKERS:
             raise ValueError(f'Unknown reranker {name!r}; choose from {sorted(RERANKERS)}')
         import torch
@@ -62,9 +62,14 @@ class CrossEncoderReranker:
         if quantize not in ('none', '4bit') or (quantize == '4bit' and not str(self.device).startswith('cuda')):
             raise ValueError('4-bit reranking requires CUDA; quantize must be none or 4bit')
         self.config['quantize'] = quantize
+        self.config['cpu_offload'] = cpu_offload
         dtype = torch.float16 if (fp16 and str(self.device).startswith('cuda')) else torch.float32
         self.tokenizer = AutoTokenizer.from_pretrained(self.config['hf_id'], revision=revision)
         kwargs = dict(torch_dtype=dtype, revision=revision, attn_implementation='sdpa')
+        if cpu_offload:
+            if quantize != 'none' or not str(self.device).startswith('cuda') or dtype != torch.float16:
+                raise ValueError('CPU offload requires CUDA and unquantized FP16 weights.')
+            kwargs.update(device_map='auto', max_memory={0: '2GiB', 'cpu': '11GiB'})
         if quantize == '4bit':
             from transformers import BitsAndBytesConfig
             kwargs.update(quantization_config=BitsAndBytesConfig(
@@ -90,7 +95,7 @@ class CrossEncoderReranker:
 
             self.model = AutoModelForSequenceClassification.from_pretrained(
                 self.config['hf_id'], **kwargs)
-        if quantize == 'none':
+        if quantize == 'none' and not cpu_offload:
             self.model.to(self.device)
         self.model.eval()
         if hasattr(self.model.config, 'use_cache'):
@@ -158,12 +163,12 @@ class CrossEncoderReranker:
 
 
 def load_reranker(name, device=None, fp16=True, max_length=None, revision=None,
-                  quantize='none'):
+                  quantize='none', cpu_offload=False):
     if name == 'identity':
         return IdentityReranker()
     return CrossEncoderReranker(name, device=device, fp16=fp16,
                                max_length=max_length, revision=revision,
-                               quantize=quantize)
+                               quantize=quantize, cpu_offload=cpu_offload)
 
 
 def rerank(query, candidates, reranker, text_of, batch_size=16, limit=None):

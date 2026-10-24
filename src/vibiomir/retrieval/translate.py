@@ -48,6 +48,10 @@ def build(args):
     tokenizer = AutoTokenizer.from_pretrained(hf_id, revision=args.revision)
     kwargs = dict(revision=args.revision, attn_implementation='sdpa',
                   torch_dtype=torch.float16 if args.device.startswith('cuda') else torch.float32)
+    if args.cpu_offload:
+        if args.quantize != 'none' or not args.device.startswith('cuda'):
+            raise ValueError('CPU offload requires CUDA and unquantized FP16 weights.')
+        kwargs.update(device_map='auto', max_memory={0: '2GiB', 'cpu': '11GiB'})
     if args.quantize == '4bit':
         if not args.device.startswith('cuda'):
             raise ValueError('This 4-bit profile requires CUDA.')
@@ -55,7 +59,7 @@ def build(args):
                       bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True,
                       bnb_4bit_compute_dtype=torch.float16), device_map={'': args.device})
     model = AutoModelForCausalLM.from_pretrained(hf_id, **kwargs).eval()
-    if args.quantize == 'none':
+    if args.quantize == 'none' and not args.cpu_offload:
         model.to(args.device)
     info = {'hf_id': hf_id, 'revision': getattr(model.config, '_commit_hash', None),
             'quantize': args.quantize, 'max_input': args.max_input,
@@ -124,6 +128,7 @@ def main():
     parser.add_argument('--model', choices=MODELS, default='qwen3-4b')
     parser.add_argument('--revision', default=None)
     parser.add_argument('--quantize', choices=['4bit', 'none'], default='4bit')
+    parser.add_argument('--cpu-offload', action='store_true')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--languages', nargs='+', choices=['en', 'zh'], default=['en', 'zh'])
     parser.add_argument('--max-input', type=int, default=1024)

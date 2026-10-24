@@ -10,8 +10,8 @@ which is what the rules allow. Sizes are the published parameter counts.
     multilingual-e5-large   intfloat/multilingual-e5-large, 560M, 2024-02, needs query:/passage:.
     gte-multilingual-base   Alibaba-NLP/gte-multilingual-base, 305M, 2024-07, cheapest option.
     qwen3-embedding-0.6b    Qwen/Qwen3-Embedding-0.6B, 0.6B, 2025-06, last-token pooling.
-    qwen3-embedding-4b      Qwen/Qwen3-Embedding-4B, 4B, 2025-06. Local 4 GB runs use NF4,
-                            max_length 512 and batch 1/2; the pilot must check real VRAM.
+    qwen3-embedding-4b      Qwen/Qwen3-Embedding-4B, 4B, 2025-06. Main pipeline uses
+                            FP16 on a GPU with enough memory. CPU offload is optional.
 
 `hash` is not a model. It is a deterministic feature-hashing encoder used to run the whole flow
 offline, in tests and on a machine with no GPU. It proves the plumbing, never retrieval quality.

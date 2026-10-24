@@ -1,3 +1,13 @@
+GHI CHÚ TRIỂN KHAI 24/10/2026
+============================
+Sơ đồ dưới là kiến trúc thiết kế đầy đủ, gồm crawl, teacher/student và đánh giá.
+Luồng truy xuất production hiện chạy qua scripts/vibiomir.py pipeline; cấu hình
+mặc định là một Qwen3 Embedding 4B FP16 và một Qwen3 Reranker 4B FP16.
+Nó đọc corpus đã crawl từ HF, không tự crawl hay huấn luyện teacher. Xem
+docs/solution/run_guide.md để biết lệnh chạy và cách dùng lại embedding.
+Điểm public 0 của corpus English riêng lẻ được ghi ở audit_zero_score_english.md;
+chưa có bằng chứng model lớn hơn tự cải thiện điểm khi độ phủ corpus thiếu.
+
 flowchart TD
     SRC["Nguồn BTC: ID và URL"]
     Q["query.parquet"]

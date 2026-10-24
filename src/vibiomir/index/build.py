@@ -62,7 +62,8 @@ def build_dense(args):
     encoder = dense.load_encoder(args.encoder, device=args.device, fp16=not args.fp32,
                                  max_length=getattr(args, 'max_length', None),
                                  revision=getattr(args, 'revision', None),
-                                 quantize=getattr(args, 'quantize', 'none'))
+                                 quantize=getattr(args, 'quantize', 'none'),
+                                 cpu_offload=getattr(args, 'cpu_offload', False))
     info = model_info(encoder)
     texts = [retrieval_text(chunk) for chunk in chunks]
     path = dense.encode_to_memmap(encoder, texts, out / 'embeddings.npy',
@@ -113,6 +114,7 @@ def main():
         step.add_argument('--revision', default=None, help='Hugging Face commit or tag.')
         step.add_argument('--fp32', action='store_true', help='Disable fp16 on GPU.')
         step.add_argument('--quantize', choices=['none', '4bit'], default='none')
+        step.add_argument('--cpu-offload', action='store_true')
         step.add_argument('--faiss', action='store_true', help='Also write a faiss index if installed.')
         step.add_argument('--faiss-lists', type=int, default=4096)
         step.set_defaults(func=function)

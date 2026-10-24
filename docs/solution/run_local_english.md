@@ -1,5 +1,9 @@
 # Local English corpus run from team HF
 
+> Lưu ý 24/10/2026: lượt chỉ có 79.721 tài liệu PubMed English đã nhận 0 điểm
+> public. Hướng dẫn này ghi lại thí nghiệm cũ; entry point hiện tại và cách dùng
+> lại vector nằm ở [run_guide.md](run_guide.md).
+
 Run from the repository root in PowerShell. This reads corpus text from
 `AncientWings/AncientWings_R2AI_STAGE3_ds`, validates ID/URL pairs against the
 pinned official mapping, and keeps English records in the eight intervals below.

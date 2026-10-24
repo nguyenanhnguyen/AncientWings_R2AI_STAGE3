@@ -47,7 +47,7 @@ def run(args):
     if not chunks:
         raise ValueError(f'No chunks in {args.chunks}')
     index_dir = Path(args.index)
-    _check_pair(args.chunks, index_dir)
+    _check_pair(args.chunks, index_dir, names=('dense_manifest.json',))
     queries = load_queries(args.queries)
     translations = load_translations(args.translations, queries) if args.translations else None
     doc_ids = np.array([chunk['doc_id'] for chunk in chunks], dtype=np.int64)
@@ -55,7 +55,9 @@ def run(args):
 
     bm25 = None
     if not args.no_bm25:
-        bm25_path = index_dir / 'bm25.npz'
+        bm25_dir = Path(getattr(args, 'bm25_index', None) or index_dir)
+        _check_pair(args.chunks, bm25_dir, names=('bm25_manifest.json',))
+        bm25_path = bm25_dir / 'bm25.npz'
         if not bm25_path.exists():
             raise FileNotFoundError(f'{bm25_path} missing; run scripts/index.py bm25 first.')
         bm25 = BM25.load(bm25_path)
@@ -160,7 +162,8 @@ def run(args):
                                    max_length=getattr(args, 'rerank_max_length', None),
                                    revision=(getattr(args, 'reranker_revision', None)
                                              if name == args.reranker else None),
-                                   quantize=getattr(args, 'reranker_quantize', 'none'))
+                                   quantize=getattr(args, 'reranker_quantize', 'none'),
+                                   cpu_offload=getattr(args, 'reranker_cpu_offload', False))
             info = model_info(scorer)
             reranker_models.append(info)
             progress = Progress(f'rerank {name}')
@@ -248,6 +251,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--chunks', default='work/chunks/chunks.parquet')
     parser.add_argument('--index', default='work/index')
+    parser.add_argument('--bm25-index', default=None,
+                        help='BM25 directory when it is separate from the dense index.')
     parser.add_argument('--extra-index', nargs='*', default=[], help='Additional dense index directories.')
     parser.add_argument('--extra-reranker', nargs='*', default=[], help='Sequential score ensemble.')
     parser.add_argument('--candidate-per-doc', type=int, default=0,
@@ -269,6 +274,7 @@ def main():
     parser.add_argument('--reranker-revision', default=None,
                         help='Pinned Hugging Face commit for the primary reranker.')
     parser.add_argument('--reranker-quantize', choices=['none', '4bit'], default='none')
+    parser.add_argument('--reranker-cpu-offload', action='store_true')
     parser.add_argument('--weights', default=None,
                         help='JSON of RRF weights, by channel or family, e.g. \'{"bm25":0.7}\'')
     parser.add_argument('--keyword-variant', action='store_true',
