@@ -125,3 +125,26 @@ Các lệnh `scripts/vibiomir.py` ở mức `prepare`, `chunk`, `index`, `retrie
 chính điều phối chúng. `benchmark` là công cụ đo thủ công, không nằm trong luồng
 chạy mặc định. Các script crawler, notebook builder và `teach` phục vụ quy trình
 khác, không phải code thừa của pipeline truy xuất.
+
+
+## Th? nghi?m chunk theo tokenizer (2026-10-25)
+
+Local v? `notebooks/embedding_kaggle_hf.ipynb` d?ng chung `chunk_document`:
+320 token m?c ti?u, overlap 80; ?u ti?n cu?i c?u/xu?ng d?ng, ki?m tra ng?n s?ch
+encoder bao g?m ti?u ??, gi? ch?nh x?c char_start/char_end. Notebook gi? Qwen3
+Embedding 8B, local gi? 4B. C?u h?nh notebook version=2 t?o namespace HF m?i:
+kh?ng d?ng l?i vector c? c?ch chunk c?. Kh?ng s?a v?n b?n b?ng LLM.
+
+??y l? gi? thuy?t c?i thi?n retrieval, ch?a c? ?i?m Codabench x?c nh?n. So s?nh
+tr?n c?ng t?p ID v? c?ng query; gi? nguy?n reranker/selection. Corpus b? gi?i
+h?n c? th? kh?ng ch?a t?i li?u ??p ?n n?n ?i?m th?p kh?ng t? ch?ng minh model k?m.
+Token tokenizer v? token c?a h? th?ng ch?m kh?ng nh?t thi?t gi?ng nhau.
+
+Ngu?n: https://huggingface.co/Qwen/Qwen3-Embedding-8B (last-token pooling,
+normalize, instruction cho query); https://arxiv.org/abs/2409.04701 (late
+chunking d?ng mean pooling, ch?a ?p d?ng tr?c ti?p cho Qwen3).
+LegalQA tham kh?o c?u tr?c v? gi? ng? c?nh, kh?ng chuy?n regex ?i?u/Kho?n sang y khoa.
+
+12.800 c?a archive c? l? s? vector, kh?ng ph?i ID. Ph?i x?c ??nh ID cu?i t?
+h?ng 12.799 trong chunks.parquet c?a archive tr??c khi ch?n kho?ng k? ti?p.
+N?u thay chunk/model th? c?n encode l?i to?n b? t?p th? nghi?m v?o output m?i.

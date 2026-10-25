@@ -222,7 +222,8 @@ def run(args):
     if not args.reuse_run:
         r.step('chunk', ['chunk', '--corpus', corpus, '--out', chunks.parent,
                      '--target-tokens', args.chunk_target, '--overlap-tokens', args.chunk_overlap,
-                     '--max-tokens', 768],
+                     '--max-tokens', args.model_max_length,
+                     '--tokenizer', args.chunk_tokenizer],
            [corpus], [chunks, chunks.with_name('chunk_manifest.json')])
 
     languages = ([args.language] if args.source == ['hf'] and not args.reuse_run and args.language in ('en', 'zh')
@@ -362,6 +363,7 @@ def main():
     p.add_argument('--cpu-offload', action='store_true',
                    help='Split FP16 4B weights between GPU and CPU for a small GPU; much slower.')
     p.add_argument('--model-max-length', type=int, default=512)
+    p.add_argument('--chunk-tokenizer', default='Qwen/Qwen3-Embedding-4B')
     p.add_argument('--chunk-target', type=int, default=320)
     p.add_argument('--chunk-overlap', type=int, default=80)
     p.add_argument('--top-k', type=int, default=300)
