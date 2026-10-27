@@ -266,11 +266,13 @@ def run(args):
         r.step('bm25', ['index', 'bm25', '--chunks', chunks, '--out', bm25_index], [chunks],
                [bm25_index/'bm25.npz', bm25_index/'bm25_manifest.json'])
     for name, index in ([] if args.precomputed_embeddings else zip(args.encoders, indices)):
+        encoder_offload = args.cpu_offload and not args.embedding_on_gpu
         r.step('dense_'+name, ['index', 'dense', '--chunks', chunks, '--out', index,
                 '--encoder', name, '--device', args.device, '--max-length', args.model_max_length,
                 '--quantize', args.quantize,
-                *(['--cpu-offload'] if args.cpu_offload else []),
-                '--batch-size', 1 if args.cpu_offload or args.quantize == '4bit' else 4,
+                '--embedding-text', args.embedding_text,
+                *(['--cpu-offload'] if encoder_offload else []),
+                '--batch-size', 1 if encoder_offload or args.quantize == '4bit' else 4,
                 '--shard', 512, '--resume'], [chunks],
                [index/'embeddings.npy', index/'dense_manifest.json'])
 
@@ -356,14 +358,17 @@ def main():
     p.add_argument('--queries', default='data/query.parquet')
     p.add_argument('--links', default='data/links_corpus_vi_en_zh.parquet')
     p.add_argument('--device', choices=['cuda', 'cpu'], default='cuda')
-    p.add_argument('--encoders', nargs='+', choices=sorted(ENCODERS), default=['qwen3-embedding-4b'])
-    p.add_argument('--rerankers', nargs='+', choices=sorted(RERANKERS), default=['qwen3-reranker-4b'])
+    p.add_argument('--encoders', nargs='+', choices=sorted(ENCODERS), default=['qwen3-embedding-0.6b'])
+    p.add_argument('--embedding-text', choices=['baseline', 'contextual', 'adjacent'], default='baseline')
+    p.add_argument('--rerankers', nargs='+', choices=sorted(RERANKERS), default=['qwen3-reranker-0.6b'])
     p.add_argument('--quantize', choices=['none', '4bit'], default='none',
                    help='FP16 by default; 4bit is an optional lower-memory mode.')
     p.add_argument('--cpu-offload', action='store_true',
                    help='Split FP16 4B weights between GPU and CPU for a small GPU; much slower.')
     p.add_argument('--model-max-length', type=int, default=512)
-    p.add_argument('--chunk-tokenizer', default='Qwen/Qwen3-Embedding-4B')
+    p.add_argument('--embedding-on-gpu', action='store_true',
+                   help='Keep encoder on GPU even when --cpu-offload is enabled for translation/reranker.')
+    p.add_argument('--chunk-tokenizer', default='Qwen/Qwen3-Embedding-0.6B')
     p.add_argument('--chunk-target', type=int, default=320)
     p.add_argument('--chunk-overlap', type=int, default=80)
     p.add_argument('--top-k', type=int, default=300)

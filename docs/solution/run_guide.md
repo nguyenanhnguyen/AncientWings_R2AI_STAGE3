@@ -1,19 +1,83 @@
+> C?p nh?t encoder local: Qwen3 Embedding 0.6B, FP16 tr?n GPU, v?n chia theo
+> token th?t v? ranh gi?i c?u. Notebook Kaggle gi? 8B. C?c v? d? 4B b?n d??i l?
+> c?u h?nh tr??c; mu?n ch?y 4B ph?i ch? ??nh `--encoders qwen3-embedding-4b`.
+>
+> Ch?y embedding local ID 0?50000:
+>
+> ```powershell
+> .\env\Scripts\python.exe scripts/vibiomir.py pipeline --source hf --id-range 0:50000 --language all --limit 0 --encoders qwen3-embedding-0.6b --chunk-tokenizer Qwen/Qwen3-Embedding-0.6B --chunk-target 320 --chunk-overlap 80 --model-max-length 768 --quantize none --cpu-offload --embedding-on-gpu --stop-after dense --out nguyen/pipeline_runs/ids_0_50000_qwen06b
+> ```
+>
+> B? `--stop-after dense` ?? ti?p t?c ??n submission v?i c?ng output. Reranker
+> v?n l? 4B CPU offload. Kh?ng tr?n vector 0.6B (1024 chi?u) v?i 4B (2560 chi?u).
+> Ch?a c? ph?p ?o ??m b?o 0.6B gi? nguy?n ?i?m; c?n Codabench tr?n c?ng corpus.
+
 # Pipeline truy xuất chính
 
-Entry point duy nhất cho lượt chạy mới là `scripts/vibiomir.py pipeline`. Mặc định:
-đọc toàn bộ dữ liệu hợp lệ từ dataset HF của nhóm, chuẩn hóa và chia chunk, dựng
-BM25, tạo embedding bằng **Qwen3 Embedding 4B FP16**, mã hóa câu hỏi bằng đúng model
-đó, tìm kiếm dense + BM25, chấm lại bằng **Qwen3 Reranker 4B FP16**, rồi tạo hai file
-ZIP `submission` và `submission_balanced`. Mỗi model chạy trong subprocess riêng;
-corpus và index được lưu với manifest/checksum để tiếp tục sau khi ngắt.
-Reranker mặc định chấm tối đa 100 ứng viên mỗi câu hỏi, giữ tối đa 50 ứng viên
-cho bước chọn bằng chứng; đổi bằng `--rerank-k` và `--keep` khi có phép đo.
+## Thử nghiệm embedding có ngữ cảnh — 26/10/2026
 
-Đây là cấu hình mạnh về model, **chưa được chứng minh cho điểm cao**. Lượt chỉ dùng
-79.721 tài liệu PubMed tiếng Anh đã cho điểm public bằng 0; xem
-`audit_zero_score_english.md`. Trước một lượt GPU dài, cần kiểm tra độ phủ corpus
-và đánh giá trên tập có nhãn độc lập. `pipeline.txt` mô tả cả kiến trúc thiết kế,
-bao gồm teacher/student và khâu đánh giá; teacher không nằm trong lệnh này.
+Lượt tiếp theo `adjacent`: bỏ 48 token mở đầu bài, chỉ thêm tối đa 48 token
+ngay trước chunk (loại overlap). Giữ corpus, chunk 320/80, embedding/reranker
+0.6B, top 50/keep 25 và profile submission như `contextual`. Đây là phép đo
+tác động của phần mở đầu bài, chưa có bằng chứng sẽ tăng điểm.
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --arms adjacent
+```
+
+ZIP: `nguyen/pipeline_runs/embedding_comparison_0_50000/adjacent/submission/submission.zip`.
+Kết quả `contextual` đã được người dùng báo: FINAL_SCORE 0.0093, DOCS_F2MACRO
+0.0138, CHUNKS_F2MACRO 0.0049, DOCS_PRECISION 0.0721, DOCS_RECALL 0.0119,
+CHUNKS_PRECISION 0.0231, CHUNKS_RECALL 0.0043. Đây là điểm do người dùng cung cấp,
+chưa đối chiếu ID submission trên Codabench. Giữ ZIP/log cũ để so sánh.
+
+Chỉ giữ hai phương pháp trong luồng thử nghiệm: `baseline` gần nhất (tiêu đề +
+chunk 320/80 theo tokenizer) và `contextual` mới. Bộ thử ba cỡ chunk đã được
+thay bằng `scripts/compare_embeddings.py`; không tạo thêm bản pipeline riêng.
+
+Phương pháp mới đưa tối đa 48 token đầu bài và 48 token ngay trước chunk vào
+đầu vào dense encoder. Chỉ trích từ cùng tài liệu, bỏ phần overlap/trùng, giảm
+ngữ cảnh nếu vượt 768 token; không cắt thân chunk để nhường chỗ cho ngữ cảnh.
+Chunk gốc, offsets, BM25, reranker và đoạn nộp bài giữ nguyên. Không gọi LLM,
+không sinh câu hỏi giả, không fine-tune. Giả thuyết: thông tin đầu bài và câu
+trước giúp giải nghĩa những đoạn mất chủ ngữ/ngữ cảnh khi đứng riêng.
+Rủi ro: mở đầu bài có thể chứa nội dung chung hoặc chủ đề khác, làm vector kém
+tập trung. Chưa có bằng chứng điểm cuộc thi tăng.
+
+Nghiên cứu tham khảo:
+- [Contextual Retrieval của Anthropic](https://www.anthropic.com/research/contextual-retrieval)
+  bổ sung ngữ cảnh do LLM sinh trước khi lập chỉ mục. Code này là biến thể
+  **trích xuất nhẹ**, chỉ thử dense; không áp dụng con số cải thiện của nghiên cứu
+  cho biến thể này.
+- [Qwen3 Embedding](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B): last-token
+  pooling, chuẩn hóa L2, instruction cho query. Không đổi pooling sang mean để
+  ghép late chunking khi chưa có phép đo phù hợp.
+
+Local chạy embedding **0.6B** và reranker **0.6B FP16**, không CPU offload;
+top-k 300, fuse-k 600, rerank 50, keep 25. Notebook giữ model 8B và dùng chung
+hàm ngữ cảnh; trường `EMBEDDING_TEXT` quyết định baseline/contextual.
+
+Chạy phương pháp mới trên HF ID 0–50000 đến ZIP:
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --arms contextual
+```
+
+Chạy bản đối chứng gần nhất cùng cấu hình nếu cần đo lại:
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --arms baseline
+```
+
+Kết quả: `nguyen/pipeline_runs/embedding_comparison_0_50000/<arm>/submission/submission.zip`.
+Gửi cùng profile `submission` lên cùng phase Codabench. `comparison.json` ghi
+hash corpus/chunks/query, revision model, thời gian stage, số chunk và byte vector.
+Nhập 7 metric vào `codabench_scores.csv`. Giữ code và cấu hình cố định khi resume.
+Snapshot HF được dùng chung; script phát hiện khác biệt corpus/chunks/query/model
+giữa hai bản đã hoàn tất. Lịch sử local đã bị xóa khi dọn ổ đĩa: không coi đây là
+phục hồi log cũ. Nếu chỉ có điểm leaderboard cũ mà không có snapshot/config,
+đối chiếu lịch sử chỉ mang tính tham khảo.
+
 
 ## Chạy mới từ dataset HF
 

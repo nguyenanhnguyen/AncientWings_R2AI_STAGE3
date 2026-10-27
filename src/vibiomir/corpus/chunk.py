@@ -116,7 +116,8 @@ def token_spans(text, tokenizer, title='', target=320, overlap=80, maximum=768):
         raise ValueError('Title leaves too little encoder context; inspect this document.')
     target = min(target, budget)
     overlap = min(overlap, target // 3)
-    boundaries = [m.end() for m in re.finditer(r'\n+|(?<=[.!?????])\s*', text)]
+    boundaries = [m.end() for m in re.finditer(r'\n+|(?<=[.!?\u3002\uff01\uff1f\uff1b])\s*', text)]
+    ends = [b for a, b in offsets]
     spans = []
     start = 0
     while start < len(offsets):
@@ -125,7 +126,7 @@ def token_spans(text, tokenizer, title='', target=320, overlap=80, maximum=768):
             candidates = [b for b in boundaries if offsets[start + max(1,target//2)][0] <= b <= offsets[end-1][1]]
             if candidates:
                 boundary = candidates[-1]
-                end = max(start+1, bisect_right([b for a,b in offsets], boundary))
+                end = max(start+1, bisect_right(ends, boundary))
         a, b = offsets[start][0], offsets[end-1][1]
         while len(tokenizer.encode(prefix+text[a:b],add_special_tokens=True)) > maximum:
             end -= 1
@@ -170,6 +171,56 @@ def retrieval_text(chunk):
     """What the indexes embed: title gives a short chunk its topic. Not what D2 submits."""
     title = chunk.get('title') or ''
     return f"{title}\n{chunk['text']}" if title else chunk['text']
+
+
+def contextual_embedding_texts(chunks, tokenizer, maximum=768, include_lead=True):
+    """Add bounded, extractive document context only to dense encoder inputs.
+
+    Original chunks/offsets, BM25 and reranker inputs are unchanged. The lead
+    anchors the topic; preceding non-overlapping text helps resolve references.
+    This is an extractive experiment, not LLM-generated Contextual Retrieval.
+    """
+    def clip(text, limit, tail=False):
+        offsets = tokenizer(text, add_special_tokens=False,
+                            return_offsets_mapping=True)['offset_mapping']
+        if not offsets or limit <= 0:
+            return ''
+        if len(offsets) <= limit:
+            return text
+        return text[offsets[-limit][0]:] if tail else text[:offsets[limit-1][1]]
+
+    lead, previous = {}, {}
+    texts = [None] * len(chunks)
+    augmented = 0
+    for i in sorted(range(len(chunks)), key=lambda j: (chunks[j]['doc_id'], chunks[j]['chunk_order'])):
+        chunk = chunks[i]
+        doc = chunk['doc_id']
+        base = retrieval_text(chunk)
+        if len(tokenizer.encode(base, add_special_tokens=True)) > maximum:
+            raise ValueError(f"Chunk {chunk['chunk_id']} exceeds encoder budget before context")
+        lead.setdefault(doc, clip(chunk['text'], 48))
+        context = []
+        if include_lead and lead[doc] and lead[doc] not in base:
+            context.append(lead[doc])
+        prior = previous.get(doc)
+        if prior:
+            # Remove the portion that overlaps the current source span.
+            end = max(0, min(len(prior['text']), chunk['char_start'] - prior['char_start']))
+            tail = clip(prior['text'][:end], 48, tail=True)
+            if tail and tail not in base and not any(tail in x for x in context):
+                context.append(tail)
+        prefix = '\n'.join(context)
+        budget = 96
+        while prefix and len(tokenizer.encode(prefix + '\n\n' + base, add_special_tokens=True)) > maximum:
+            budget -= 8
+            prefix = clip(prefix, budget)
+        texts[i] = prefix + '\n\n' + base if prefix else base
+        augmented += bool(prefix)
+        previous[doc] = chunk
+    return texts, {'method': 'extractive_context_v1' if include_lead else 'adjacent_context_v1',
+                   'augmented_chunks': augmented,
+                   'lead_tokens': 48 if include_lead else 0,
+                   'preceding_tokens': 48, 'body_truncated': 0}
 
 
 def build(args):
