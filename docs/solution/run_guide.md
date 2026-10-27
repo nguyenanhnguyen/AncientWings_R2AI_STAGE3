@@ -16,6 +16,58 @@
 
 ## Thử nghiệm embedding có ngữ cảnh — 26/10/2026
 
+### Lượt đa ngôn ngữ mới
+
+**Cấu hình đã thống nhất: 20.000 mẫu mỗi ngôn ngữ, không phải hai khoảng đầu.**
+Lệnh mới bên dưới thay ví dụ `mixed20k_each` ở dưới. `--balanced20k` tìm mẫu
+trong Việt 0–766443, Trung 766444–4392214, Anh 4421055–7466161, lọc đúng
+ngôn ngữ và ID/URL chính thức, lấy đủ 20.000 mẫu hợp lệ/ngôn ngữ. Nếu thiếu
+thì dừng, không tự giảm số lượng. Ranh giới ID là phạm vi tìm kiếm; tập thử
+thực tế được chốt bằng `dataset/selected_ids.json`, không phải toàn phạm vi.
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --balanced20k --arms contextual --out nguyen/pipeline_runs/balanced_60k
+```
+
+Lần đầu ghi revision HF, corpus đầu vào 60.000 mẫu và checksum; các lần sau
+dùng lại đúng dữ liệu này. Từng phương pháp chuẩn hóa/chia chunk/index riêng.
+Bộ lọc trùng nội dung/template ở prepare vẫn được áp dụng; số còn lại theo
+ngôn ngữ được ghi trong `comparison.json` và phải cùng corpus hash giữa các bản.
+Không gọi tập sau prepare là đúng 60.000 nếu bộ lọc đã loại mẫu.
+
+Sau khi contextual hoàn tất và đã xem kết quả, chạy:
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --balanced20k --arms adjacent --require-contextual --out nguyen/pipeline_runs/balanced_60k
+```
+
+Không xóa `balanced_60k/dataset` giữa các lượt. Phương pháp thứ hai không tự
+chọn lại mẫu hoặc lấy revision HF mới. Cả hai dùng model 0.6B, rerank 50/keep 25.
+
+`compare_embeddings.py` nhận nhiều `--id-range START:END`. Cấu hình thử nhỏ:
+Việt `0:20000`; Anh `4421055:5174242`, `5174255:5276329`; Trung
+`766444:902757`, `902759:1006674`. Bảng URL chính thức local có 19.418 ID trong
+khoảng Việt và 10.000 ID trong mỗi khoảng Anh/Trung trên; số đã crawl hợp lệ
+trên HF có thể ít hơn. Không coi mỗi khoảng số nguyên là đủ 10.000 tài liệu.
+
+Chạy `--arms contextual` trước và chỉ chạy `--arms adjacent --require-contextual`
+sau khi có ZIP/report của contextual. Giữ cùng các khoảng và `--out` để chốt
+cùng snapshot. Hai model vẫn là Qwen3 0.6B, truy vấn Việt dùng dense đa ngôn ngữ,
+không thêm model dịch trong phép đối chứng này. Hai bài có thể cùng thiếu recall
+xuyên ngôn ngữ; đó là giới hạn cần ghi nhận khi xem điểm.
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --arms contextual `
+  --id-range 0:20000 `
+  --id-range 4421055:5174242 --id-range 5174255:5276329 `
+  --id-range 766444:902757 --id-range 902759:1006674 `
+  --out nguyen/pipeline_runs/mixed20k_each
+```
+
+ZIP ở `<out>/contextual/submission/submission.zip`, log ở `<out>/contextual/logs`.
+`--require-contextual` chỉ xác nhận đã xuất bài thành công, không xác nhận bài
+đã được chấm trên Codabench. Người chạy quyết định thời điểm chạy lượt thứ hai.
+
 Lượt tiếp theo `adjacent`: bỏ 48 token mở đầu bài, chỉ thêm tối đa 48 token
 ngay trước chunk (loại overlap). Giữ corpus, chunk 320/80, embedding/reranker
 0.6B, top 50/keep 25 và profile submission như `contextual`. Đây là phép đo
