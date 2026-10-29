@@ -1,0 +1,20 @@
+{
+  "key": "fc55cd3e97735f9d25312771e80a88bd8ca3f0387954e7117b5e4adea76dad38",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\index.py",
+    "bm25",
+    "--chunks",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\chunks\\chunks.parquet",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\bge-m3"
+  ],
+  "seconds": 129.61108639999293,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\bge-m3\\bm25.npz": "d387cd337047f74c33f3de8596eb1dcef2785baa25248baf630dda800c9caed3",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\bge-m3\\bm25_manifest.json": "18cca58e4fe453e39c6ac7ab958c8ac8f8314cb767b55b74b9e196425ce65650"
+  }
+}

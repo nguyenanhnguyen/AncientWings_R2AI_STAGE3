@@ -1,0 +1,38 @@
+{
+  "rows_read": 79982,
+  "documents_kept": 79982,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 79982
+  },
+  "languages": {
+    "en": 79721,
+    "vi": 244,
+    "zh": 17
+  },
+  "domains": {
+    "pubmed.ncbi.nlm.nih.gov": 79982
+  },
+  "duplicate_groups_kept": 48,
+  "chars_median": 1249,
+  "chars_p95": 2176,
+  "id_min": 4421055,
+  "id_max": 5880573,
+  "options": {
+    "limit": 79982,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_en\\en_a.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 46188497,
+      "sha256": "b79ce19588de2b261fb1dfaa0a59f885b68931ed199e380d3f6d1dcd0ceb026c"
+    }
+  }
+}

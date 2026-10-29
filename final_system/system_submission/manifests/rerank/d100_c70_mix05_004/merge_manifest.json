@@ -1,0 +1,25 @@
+{
+  "inputs": [
+    {
+      "path": "work/rerank/d100_c70_mix05/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "lo_004_win1000/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    }
+  ],
+  "queries": 1200,
+  "docs_mean": 124.66,
+  "docs_max": 139,
+  "chunks_mean": 85.28,
+  "chunks_max": 86,
+  "docs_listed_by_more_than_one_input_pct": 0.0,
+  "max_docs": 0,
+  "max_chunks": 0,
+  "json_mb": 478.3,
+  "zip_mb": 74.9,
+  "zip_mib": 71.39
+}

@@ -1,0 +1,41 @@
+{
+  "rows_read": 33781,
+  "documents_kept": 33781,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 33781
+  },
+  "languages": {
+    "vi": 33780,
+    "en": 1
+  },
+  "domains": {
+    "www.vinmec.com": 25466,
+    "www.vietnamplus.vn": 3691,
+    "www.sggp.org.vn": 1852,
+    "hellobacsi.com": 1587,
+    "benhviennhitrunguong.gov.vn": 1185
+  },
+  "duplicate_groups_kept": 44,
+  "chars_median": 5268,
+  "chars_p95": 9814,
+  "id_min": 97197,
+  "id_max": 759252,
+  "options": {
+    "limit": 33781,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_f\\all.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 69919485,
+      "sha256": "5e64b696932daaf9cdafcb99e030074c38b0649991d17105bc8f429a34cc904b"
+    }
+  }
+}

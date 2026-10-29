@@ -1,0 +1,20 @@
+{
+  "key": "c7d97ece4024427acd27738913593711f3b5909a6275c8a08533e63c8f085d73",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\index.py",
+    "bm25",
+    "--chunks",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\chunks\\chunks.parquet",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\index\\bge-m3"
+  ],
+  "seconds": 209.69402860000264,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\index\\bge-m3\\bm25.npz": "4a657f91239efe8124665792950f9c9fd28eacd0dbf41b5666848b50586633c6",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\index\\bge-m3\\bm25_manifest.json": "9b2073a4a28241762524defa8806de5cefe834c3815eca6d53d11591d8e520ed"
+  }
+}

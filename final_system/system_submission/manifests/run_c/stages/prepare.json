@@ -1,0 +1,21 @@
+{
+  "key": "247f4ed5789430853794b007e842cda7fc62c0502ebcd58d196c478aab6d41e1",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\prepare.py",
+    "--source",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_c\\all.parquet",
+    "--limit",
+    "53272",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_c\\corpus"
+  ],
+  "seconds": 47.11347340000003,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_c\\corpus\\corpus.parquet": "c9a37e7bdccbee8ef63d705c84b2bdab96e92e61bc5bba6e0ec654d02f088bbf",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_c\\corpus\\prepare_manifest.json": "284f866e86bcec89aacb0944341fe9e7de1818b58360e8044add89de2b9a1a94"
+  }
+}

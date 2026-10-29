@@ -1,0 +1,24 @@
+{
+  "base": "work/final_p5ha_arch2/submission.zip",
+  "runs": [
+    "work/run_vi",
+    "work/run_b",
+    "work/run_c",
+    "work/run_d",
+    "work/run_e",
+    "work/run_f",
+    "work/run_g",
+    "work/run_zh_a",
+    "work/run_zh_b",
+    "work/run_zh_c",
+    "work/run_h",
+    "work/run_archive",
+    "work/run_archive2"
+  ],
+  "extra": [
+    "lo_004_win1000/submission.zip"
+  ],
+  "docs_mean_base": 223.3,
+  "docs_mean_pool": 861.8,
+  "zip_mb": 2.9
+}

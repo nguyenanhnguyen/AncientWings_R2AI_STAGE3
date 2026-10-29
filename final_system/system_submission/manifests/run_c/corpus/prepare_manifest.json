@@ -1,0 +1,43 @@
+{
+  "rows_read": 53272,
+  "documents_kept": 53272,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 53272
+  },
+  "languages": {
+    "vi": 53271,
+    "en": 1
+  },
+  "domains": {
+    "suckhoedoisong.vn": 22123,
+    "hellobacsi.com": 10143,
+    "medlatec.vn": 9539,
+    "phuyen.baodaklak.vn": 6250,
+    "phunusuckhoe.giadinhonline.vn": 4789,
+    "nhandan.vn": 426,
+    "mega.vietnamplus.vn": 2
+  },
+  "duplicate_groups_kept": 506,
+  "chars_median": 4381,
+  "chars_p95": 8249,
+  "id_min": 120603,
+  "id_max": 563359,
+  "options": {
+    "limit": 53272,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_c\\all.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 104732643,
+      "sha256": "c9a37e7bdccbee8ef63d705c84b2bdab96e92e61bc5bba6e0ec654d02f088bbf"
+    }
+  }
+}

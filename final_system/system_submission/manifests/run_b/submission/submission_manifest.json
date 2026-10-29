@@ -1,0 +1,59 @@
+{
+  "selection": {
+    "queries": 1200,
+    "settings": {
+      "doc_min": 5,
+      "doc_max": 25,
+      "doc_ratio": 0.25,
+      "chunk_min": 5,
+      "chunk_max": 30,
+      "chunk_ratio": 0.25,
+      "chunk_per_doc": 2,
+      "profile": "recall",
+      "adaptive": false,
+      "sync_docs": true
+    },
+    "docs_total": 24269,
+    "docs_mean": 20.22,
+    "docs_max": 38,
+    "queries_without_docs": 0,
+    "chunks_total": 26866,
+    "chunks_mean": 22.39,
+    "chunks_max": 30,
+    "queries_without_chunks": 0
+  },
+  "validation": {
+    "queries": 1200,
+    "chunks_checked": 26866,
+    "resliced_from_offsets": 26866,
+    "warnings": [],
+    "dropped_chunks": 0,
+    "dropped_docs": 0,
+    "empty_doc_lists": 0,
+    "empty_chunk_lists": 0
+  },
+  "submission": {
+    "queries": 1200,
+    "docs_total": 24269,
+    "docs_mean": 20.22,
+    "chunks_total": 26866,
+    "chunks_mean": 22.39,
+    "chunk_characters": 31756263,
+    "queries_with_empty_docs": 0,
+    "queries_with_empty_chunks": 0
+  },
+  "queries_without_candidates": 0,
+  "doc_id_type": "integer",
+  "candidates_file": "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_b\\retrieval\\candidates.jsonl",
+  "chunks_sha256": "fbb0f227f0954b71200f02f78cf9515ef81ae0ab9296d9f15637f4fafbffb1a4",
+  "files": {
+    "submission.json": {
+      "bytes": 44398193,
+      "sha256": "e5301fdeda63ccd178e4a0ed9454e630ff4a282fa8dee5d1f6ea4be40fd4faf9"
+    },
+    "submission.zip": {
+      "bytes": 11862294,
+      "sha256": "84d12f6d1869ae718879b6f31eadbfae520f82af1e0f90b9aafb0fca115a05f7"
+    }
+  }
+}

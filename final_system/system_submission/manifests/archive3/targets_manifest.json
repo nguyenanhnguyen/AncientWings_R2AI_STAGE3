@@ -1,0 +1,27 @@
+{
+  "pages": 12653,
+  "top": 300,
+  "min_score": 0.05,
+  "excluded_from": [
+    "work/archive/targets.parquet",
+    "work/archive2/targets.parquet",
+    "work/run_h/corpus/corpus.parquet"
+  ],
+  "sites": {
+    "nhathuoclongchau.com.vn": 6800,
+    "laodong.vn": 1296,
+    "youmed.vn": 676,
+    "khoahocphothong.vn": 582,
+    "suckhoecongdongonline.vn": 529,
+    "vov.vn": 462,
+    "pmc-ecm-healthblog.beta.pharmacity.io": 395,
+    "baovinhlong.com.vn": 328,
+    "thaythuocvietnam.vn": 266,
+    "baoquangtri.vn": 261,
+    "nhandan.vn": 190,
+    "baoquangninh.vn": 147,
+    "suckhoedoisong.vn": 115,
+    "dantri.com.vn": 114,
+    "qdnd.vn": 97
+  }
+}

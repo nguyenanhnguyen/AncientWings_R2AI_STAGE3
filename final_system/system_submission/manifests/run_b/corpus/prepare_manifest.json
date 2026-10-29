@@ -1,0 +1,46 @@
+{
+  "rows_read": 79604,
+  "documents_kept": 79604,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 79604
+  },
+  "languages": {
+    "vi": 79507,
+    "en": 97
+  },
+  "domains": {
+    "baohaiphong.vn": 16239,
+    "baonghean.vn": 15771,
+    "baodanang.vn": 14495,
+    "baocantho.com.vn": 12005,
+    "baoangiang.com.vn": 10732,
+    "baogialai.com.vn": 3287,
+    "bachmai.gov.vn": 2701,
+    "baochinhphu.vn": 2211,
+    "baolangson.vn": 1980,
+    "baophutho.vn": 183
+  },
+  "duplicate_groups_kept": 68,
+  "chars_median": 2579,
+  "chars_p95": 6706,
+  "id_min": 603,
+  "id_max": 80603,
+  "options": {
+    "limit": 79604,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_b\\all.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 109822694,
+      "sha256": "f655bfb5a5abcc9bb413258890ad4caf5064685cc18c977a32ca1bb43c74e9eb"
+    }
+  }
+}

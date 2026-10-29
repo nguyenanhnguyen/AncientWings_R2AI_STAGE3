@@ -1,0 +1,25 @@
+{
+  "pairs": "work/rerank_en/pairs.parquet",
+  "scores": [
+    "work/rerank_en/scores.parquet"
+  ],
+  "pairs_scored": 72000,
+  "pairs_total": 72000,
+  "settings": {
+    "mix": 1.0,
+    "docs": 5,
+    "min_score": 0.0,
+    "ratio": 0.0,
+    "min_docs": 10,
+    "max_docs": 0,
+    "chunk_docs": 5,
+    "window_tokens": 1000,
+    "text_runs": []
+  },
+  "docs_mean": 5.0,
+  "chunks_mean": 5.0,
+  "queries_without_docs": 0,
+  "chunk_tokens_median": 200,
+  "zip_mb": 1.9,
+  "zip_mib": 1.84
+}

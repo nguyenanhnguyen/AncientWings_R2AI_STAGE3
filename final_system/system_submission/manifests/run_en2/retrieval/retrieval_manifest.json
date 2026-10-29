@@ -1,0 +1,116 @@
+{
+  "queries": 1200,
+  "chunks_searched": 91129,
+  "channels": [
+    "bm25",
+    "dense"
+  ],
+  "encoder": "bge-m3",
+  "reranker": "bge-reranker-v2-m3",
+  "rerank_query": "translated_en",
+  "dense_models": [
+    {
+      "name": "bge-m3",
+      "hf_id": "BAAI/bge-m3",
+      "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+      "max_length": 1024,
+      "parameters": 567754752,
+      "dtype": "torch.float16",
+      "device": "cuda",
+      "config": {
+        "hf_id": "BAAI/bge-m3",
+        "pooling": "cls",
+        "max_length": 1024,
+        "query_prefix": "",
+        "doc_prefix": "",
+        "dim": 1024
+      }
+    },
+    {
+      "name": "qwen3-embedding-0.6b",
+      "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+      "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
+      "max_length": 1024,
+      "parameters": 595776512,
+      "dtype": "torch.float16",
+      "device": "cuda",
+      "config": {
+        "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+        "pooling": "last",
+        "max_length": 1024,
+        "doc_prefix": "",
+        "dim": 1024,
+        "query_prefix": "Instruct: Given a Vietnamese medical question, retrieve passages that answer it\nQuery: "
+      }
+    }
+  ],
+  "reranker_models": [
+    {
+      "name": "bge-reranker-v2-m3",
+      "hf_id": "BAAI/bge-reranker-v2-m3",
+      "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+      "max_length": 1024,
+      "parameters": 567755777,
+      "dtype": "torch.float16",
+      "device": "cuda",
+      "config": {
+        "hf_id": "BAAI/bge-reranker-v2-m3",
+        "kind": "sequence-classification",
+        "max_length": 1024
+      }
+    },
+    {
+      "name": "qwen3-reranker-0.6b",
+      "hf_id": "Qwen/Qwen3-Reranker-0.6B",
+      "revision": "e61197ed45024b0ed8a2d74b80b4d909f1255473",
+      "max_length": 1024,
+      "parameters": 595776512,
+      "dtype": "torch.float16",
+      "device": "cuda",
+      "config": {
+        "hf_id": "Qwen/Qwen3-Reranker-0.6B",
+        "kind": "causal-yes-no",
+        "max_length": 1024
+      }
+    }
+  ],
+  "score_method": "mean sigmoid/yes-no scores; uncalibrated",
+  "environment": {
+    "python": "3.13.0rc2 (tags/v3.13.0rc2:ec61006, Sep  6 2024, 22:13:49) [MSC v.1940 64 bit (AMD64)]",
+    "packages": {
+      "torch": "2.10.0+cu128",
+      "transformers": "4.57.6",
+      "numpy": "2.5.3",
+      "pyarrow": "25.0.1",
+      "bitsandbytes": "0.50.2",
+      "accelerate": "1.15.0"
+    }
+  },
+  "retrieval_seconds": 13576.588341300001,
+  "translations_sha256": "342210f299d0ff8c59d765e850e44493a4d0723f2e3cdde88dab6bc5a778fc47",
+  "queries_sha256": "ce13508b893bbd6b9169679d540630bc37eb5950cad08b4d5e0e5d7063670c08",
+  "candidate_per_doc": 4,
+  "top_k": 300,
+  "fuse_k": 600,
+  "rerank_k": 100,
+  "keep": 100,
+  "weights": {
+    "bm25:keyword": 0,
+    "bm25:translated_en": 1.0,
+    "bm25:translated_zh": 0.5,
+    "dense:bge-m3:translated_en": 1.0,
+    "dense:bge-m3:translated_zh": 0.5,
+    "dense:qwen3-embedding-0.6b:translated_en": 1.0,
+    "dense:qwen3-embedding-0.6b:translated_zh": 0.5,
+    "bm25:original": 0
+  },
+  "candidates_median": 100,
+  "chunks_file": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\chunks\\chunks.parquet",
+  "chunks_sha256": "bca5291f6473d1ed3bb19ef56d69063de8c2d9e219ef1d0acf1921035e584f99",
+  "files": {
+    "candidates.jsonl": {
+      "bytes": 45195511,
+      "sha256": "a0cbea78c7f788cf43dc4256540e800afa541c2fe6611483843739c52932cb22"
+    }
+  }
+}

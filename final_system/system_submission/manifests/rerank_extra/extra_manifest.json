@@ -1,0 +1,10 @@
+{
+  "pairs": 165331,
+  "per_query": 137.8,
+  "band": [
+    0.8,
+    1.8
+  ],
+  "extra_per_doc": 1,
+  "hours_one_session_at_6_5_per_s": 7.1
+}

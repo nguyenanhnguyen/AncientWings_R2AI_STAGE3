@@ -1,0 +1,40 @@
+{
+  "rows_read": 50636,
+  "documents_kept": 50636,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 50636
+  },
+  "languages": {
+    "zh": 50635,
+    "en": 1
+  },
+  "domains": {
+    "www.cnkang.com": 25322,
+    "ask.39.net": 24413,
+    "www.wujue.com": 708,
+    "www.zydcd.com": 193
+  },
+  "duplicate_groups_kept": 336,
+  "chars_median": 616,
+  "chars_p95": 1906,
+  "id_min": 1666833,
+  "id_max": 2358082,
+  "options": {
+    "limit": 50636,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_zh2\\zh_b.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 55957410,
+      "sha256": "0bdde18542771655d3bae56e50baa7f837324a4fae373676fdc5079ce5644341"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "documents_in": 74260,
+  "documents_with_chunks": 74260,
+  "documents_without_text": 0,
+  "documents_without_text_ids": [],
+  "chunks": 166525,
+  "chunks_per_document": 2.24,
+  "tokens_median": 248,
+  "tokens_p95": 318,
+  "tokens_max": 2054,
+  "chunks_over_1024_tokens": 17,
+  "languages": {
+    "zh": 166504,
+    "en": 20,
+    "unknown": 1
+  },
+  "options": {
+    "target_tokens": 320,
+    "overlap_tokens": 80,
+    "max_tokens": 768,
+    "min_tokens": 24
+  },
+  "text_field": null,
+  "status_filter": "ok",
+  "rows_skipped_by_status": 0,
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\corpus\\corpus.parquet"
+  ],
+  "span_exactness": "char_start/char_end verified against normalised document text",
+  "files": {
+    "chunks.parquet": {
+      "bytes": 58926878,
+      "sha256": "a66a6030edaa129e2274a9c344f59b7e340f4f5b1f8418d4efc71fd1823ddca9"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "documents_in": 62338,
+  "documents_with_chunks": 62338,
+  "documents_without_text": 0,
+  "documents_without_text_ids": [],
+  "chunks": 267774,
+  "chunks_per_document": 4.3,
+  "tokens_median": 287,
+  "tokens_p95": 318,
+  "tokens_max": 764,
+  "chunks_over_1024_tokens": 0,
+  "languages": {
+    "vi": 267739,
+    "en": 35
+  },
+  "options": {
+    "target_tokens": 320,
+    "overlap_tokens": 80,
+    "max_tokens": 768,
+    "min_tokens": 24
+  },
+  "text_field": null,
+  "status_filter": "ok",
+  "rows_skipped_by_status": 0,
+  "sources": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_d\\corpus\\corpus.parquet"
+  ],
+  "span_exactness": "char_start/char_end verified against normalised document text",
+  "files": {
+    "chunks.parquet": {
+      "bytes": 118571535,
+      "sha256": "dcea70909d61c9a3e984a771f499b0601975360e0b265a90706167aaecd9cdc5"
+    }
+  }
+}

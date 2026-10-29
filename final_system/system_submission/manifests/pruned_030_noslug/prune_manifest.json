@@ -1,0 +1,13 @@
+{
+  "submission": "work/merged_c60_noslug/submission.zip",
+  "min_score": 0.3,
+  "keep_top": 0,
+  "drop_chunks": true,
+  "chunk_min_score": null,
+  "docs_before": 197.2,
+  "docs_after": 161.4,
+  "chunks_before": 122.9,
+  "chunks_after": 106.4,
+  "unscored": 20.9,
+  "zip_mb": 87.8
+}
