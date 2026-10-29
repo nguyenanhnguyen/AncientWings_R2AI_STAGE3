@@ -1,0 +1,31 @@
+{
+  "key": "2cd7def6ea0b78effccf54584304a4338bdd50c76e3a66b1589220d4729bcff3",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\submit.py",
+    "--candidates",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\retrieval\\candidates.jsonl",
+    "--chunks",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\chunks\\chunks.parquet",
+    "--corpus",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\corpus\\corpus.parquet",
+    "--queries",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--links",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\links_corpus.parquet",
+    "--profile",
+    "recall",
+    "--require-complete",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\submission"
+  ],
+  "seconds": 35.110865199996624,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\submission\\submission.zip": "cefc697591302744126b8bcced7b8aa05748a40339eacbf62e4b84e2a274ab0f",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\submission\\submission.json": "f0b46448c4e0918583d5c405cc24ad2f62675443b4c12032d928218415fe6c5b",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_e\\submission\\submission_manifest.json": "4b30cf78c94ecc08fa5678b71bea8cb273286d1a919cc5b9833f5e59769cf5de"
+  }
+}

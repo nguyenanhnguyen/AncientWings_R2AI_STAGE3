@@ -1,0 +1,47 @@
+{
+  "stage": "dense",
+  "encoder": "qwen3-embedding-0.6b",
+  "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+  "dim": 1024,
+  "pooling": "last",
+  "vectors": 91129,
+  "note": "",
+  "model": {
+    "name": "qwen3-embedding-0.6b",
+    "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+    "revision": "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
+    "max_length": 1024,
+    "parameters": 595776512,
+    "dtype": "torch.float16",
+    "device": "cuda",
+    "config": {
+      "hf_id": "Qwen/Qwen3-Embedding-0.6B",
+      "pooling": "last",
+      "max_length": 1024,
+      "doc_prefix": "",
+      "dim": 1024,
+      "query_prefix": "Instruct: Given a Vietnamese medical question, retrieve passages that answer it\nQuery: "
+    }
+  },
+  "environment": {
+    "python": "3.13.0rc2 (tags/v3.13.0rc2:ec61006, Sep  6 2024, 22:13:49) [MSC v.1940 64 bit (AMD64)]",
+    "packages": {
+      "torch": "2.10.0+cu128",
+      "transformers": "4.57.6",
+      "numpy": "2.5.3",
+      "pyarrow": "25.0.1",
+      "bitsandbytes": "0.50.2",
+      "accelerate": "1.15.0"
+    }
+  },
+  "embeddings": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\index\\qwen3-embedding-0.6b\\embeddings.npy",
+  "faiss_index": null,
+  "chunks_file": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\chunks\\chunks.parquet",
+  "chunks_sha256": "bca5291f6473d1ed3bb19ef56d69063de8c2d9e219ef1d0acf1921035e584f99",
+  "files": {
+    "embeddings.npy": {
+      "bytes": 186632320,
+      "sha256": "185e8d75903b52c2d4d4a14b99d2ec6ba3b7c2f3bb7d869cfa6ec572f8e8863b"
+    }
+  }
+}

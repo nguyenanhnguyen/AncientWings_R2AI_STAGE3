@@ -1,0 +1,25 @@
+{
+  "inputs": [
+    {
+      "path": "work/final_p4_w2500/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "work/rerank_pool4/d150_c100_w600/submission.zip",
+      "chunk_cap": 100,
+      "doc_cap": 0
+    }
+  ],
+  "queries": 1200,
+  "docs_mean": 198.84,
+  "docs_max": 258,
+  "chunks_mean": 233.37,
+  "chunks_max": 309,
+  "docs_listed_by_more_than_one_input_pct": 40.07,
+  "max_docs": 0,
+  "max_chunks": 0,
+  "json_mb": 1256.0,
+  "zip_mb": 144.9,
+  "zip_mib": 138.19
+}

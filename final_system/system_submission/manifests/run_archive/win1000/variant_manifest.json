@@ -1,0 +1,28 @@
+{
+  "run": "work\\run_archive",
+  "base": "work\\run_archive\\submission\\submission.json",
+  "settings": {
+    "docs": 0,
+    "doc_rank": "pipeline",
+    "chunk_docs": 0,
+    "chunk_per_doc": 1,
+    "window_tokens": 1000,
+    "windows": "covering",
+    "max_windows_per_doc": 0,
+    "chunk_order": "none"
+  },
+  "queries": 1200,
+  "docs_mean": 22.05,
+  "docs_min": 5,
+  "docs_max": 39,
+  "chunks_mean": 20.83,
+  "chunks_max": 28,
+  "docs_added_for_chunks": 0,
+  "base_chunks_still_covered": 32747,
+  "base_chunks_dropped_by_window_cap": 0,
+  "chunk_tokens_median": 852,
+  "chunk_tokens_p95": 991,
+  "chunk_tokens_max": 1000,
+  "json_mb": 127.6,
+  "zip_mb": 31.2
+}

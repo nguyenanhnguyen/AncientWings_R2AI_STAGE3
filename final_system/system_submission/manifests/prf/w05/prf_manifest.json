@@ -1,0 +1,12 @@
+{
+  "weight": 0.5,
+  "seeds": 10,
+  "pool": 600,
+  "docs": 190,
+  "mix": 0.5,
+  "encoder": "bge-m3",
+  "queries_with_topic": 1200,
+  "docs_changed_vs_4b_per_query": 22.7,
+  "zip_mb": 0.67,
+  "minutes": 1.4
+}

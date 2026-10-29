@@ -1,0 +1,9 @@
+{
+  "docs_from": "work/prf/w0/submission.zip",
+  "chunks_from": "work/final_p5ha_arch2_cd/submission.zip",
+  "docs_per_query": 190.0,
+  "chunks_per_query": 185.8,
+  "chunk_docs_not_in_docs_per_query": 16.1,
+  "added_chunk_docs_per_query": 0.0,
+  "zip_mb": 152.3
+}

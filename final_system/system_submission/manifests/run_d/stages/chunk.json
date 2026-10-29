@@ -1,0 +1,25 @@
+{
+  "key": "979e2f43fa90f59d9a9904ad230ca9abd5394efd91db72be1d931e47eea9e936",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\chunk.py",
+    "--corpus",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_d\\corpus\\corpus.parquet",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_d\\chunks",
+    "--target-tokens",
+    "320",
+    "--overlap-tokens",
+    "80",
+    "--max-tokens",
+    "768"
+  ],
+  "seconds": 282.91399549999915,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_d\\chunks\\chunks.parquet": "dcea70909d61c9a3e984a771f499b0601975360e0b265a90706167aaecd9cdc5",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_d\\chunks\\chunk_manifest.json": "4e0124e1e55c122b0f50520b034e89a71b65eb66b288be5c01ddb1b3a32db56d"
+  }
+}

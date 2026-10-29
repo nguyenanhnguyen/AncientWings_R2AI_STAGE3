@@ -1,0 +1,28 @@
+{
+  "key": "134f4f637518827b7e0f4093424191734f372adb09308bc40dc56198ffdd5e91",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\translate.py",
+    "--queries",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\translations",
+    "--device",
+    "cuda",
+    "--model",
+    "qwen3-4b",
+    "--quantize",
+    "4bit",
+    "--languages",
+    "zh",
+    "--allow-partial"
+  ],
+  "seconds": 3169.1424512000012,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\translations\\translations.jsonl": "06dc00917bb0eb66e33d45f4486bb681016879433e1177f60b48e70f5b67bc75",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\translations\\translation_manifest.json": "c2b666307c5301fcd97727b027fc279dc3e8a9b963fe1463f90d8dae686eeff2"
+  }
+}

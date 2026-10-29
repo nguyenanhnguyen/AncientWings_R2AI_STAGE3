@@ -1,0 +1,31 @@
+{
+  "key": "30c0ec1fe84fc070f234434d2252393d33296472ae8b1a6477fbd2b96832326f",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\submit.py",
+    "--candidates",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\retrieval\\candidates.jsonl",
+    "--chunks",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\chunks\\chunks.parquet",
+    "--corpus",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\corpus\\corpus.parquet",
+    "--queries",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--links",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\links_corpus.parquet",
+    "--profile",
+    "balanced",
+    "--require-complete",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\submission_balanced"
+  ],
+  "seconds": 25.614643300010357,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\submission_balanced\\submission.zip": "42b6543b9c42c307d6fb9089ecc8d960d0011861e9639a55f12ac95a7f7131bb",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\submission_balanced\\submission.json": "6274ba5dcfbad653c541cfdc2c7a89f65059edeb2add642f4e31c4198256fa20",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\submission_balanced\\submission_manifest.json": "9be04c7f25bd31e5f9eecac6249a5d20e54e7d95a14a8ed073fcbc4a08d60054"
+  }
+}

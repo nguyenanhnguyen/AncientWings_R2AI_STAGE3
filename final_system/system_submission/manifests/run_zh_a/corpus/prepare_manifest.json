@@ -1,0 +1,61 @@
+{
+  "rows_read": 74415,
+  "documents_kept": 74260,
+  "documents_dropped": 155,
+  "drop_reasons": {
+    "template_text": 155
+  },
+  "quality_status": {
+    "accepted": 74260
+  },
+  "languages": {
+    "zh": 74258,
+    "en": 2
+  },
+  "domains": {
+    "www.120ask.com": 62480,
+    "baby.39.net": 3212,
+    "care.39.net": 1282,
+    "heart.39.net": 1055,
+    "fk.39.net": 928,
+    "nk.39.net": 762,
+    "tnb.39.net": 717,
+    "woman.39.net": 687,
+    "food.39.net": 594,
+    "ek.39.net": 447,
+    "man.39.net": 382,
+    "shen.39.net": 325,
+    "gan.39.net": 294,
+    "wei.39.net": 225,
+    "sj.39.net": 197,
+    "fitness.39.net": 185,
+    "cancer.39.net": 139,
+    "gk.39.net": 90,
+    "pf.39.net": 85,
+    "gc.39.net": 59,
+    "health.people.com.cn": 50,
+    "byby.39.net": 37,
+    "qihuangzhishu.com": 28
+  },
+  "duplicate_groups_kept": 103,
+  "chars_median": 349,
+  "chars_p95": 1747,
+  "id_min": 766468,
+  "id_max": 1404759,
+  "options": {
+    "limit": 74415,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_zh\\zh_a.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 65261951,
+      "sha256": "9ed6d589eb0560816ca365efca4b96f4b97a041aceb806fc09d4859d748addf8"
+    }
+  }
+}

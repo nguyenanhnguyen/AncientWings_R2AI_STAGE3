@@ -1,0 +1,28 @@
+{
+  "key": "079ba1bc8bad2f70e3cdfa4aa413f91e13e7e0a1e0eb6facf04cb28b2fa19277",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\benchmark.py",
+    "--chunks",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\chunks\\chunks.parquet",
+    "--queries",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\pilot.json",
+    "--device",
+    "cuda",
+    "--encoders",
+    "bge-m3",
+    "qwen3-embedding-0.6b",
+    "--rerankers",
+    "bge-reranker-v2-m3",
+    "qwen3-reranker-0.6b"
+  ],
+  "seconds": 146.74744490000012,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_a\\pilot.json": "d043d23bceb930ef4f5d177c325ab8c883e8bbc0756201b80918cd7bc65eb685"
+  }
+}

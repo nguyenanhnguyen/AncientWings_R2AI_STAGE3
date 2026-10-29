@@ -1,0 +1,13 @@
+{
+  "submission": "work/merged_c150_p5_w1000/submission.zip",
+  "min_score": 0.3,
+  "keep_top": 0,
+  "drop_chunks": true,
+  "chunk_min_score": null,
+  "docs_before": 203.1,
+  "docs_after": 166.9,
+  "chunks_before": 175.1,
+  "chunks_after": 152.1,
+  "unscored": 10.8,
+  "zip_mb": 121.2
+}

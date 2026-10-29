@@ -1,0 +1,33 @@
+{
+  "key": "fc01ae4fc4f6513fd15654184491b2e7de6bfdbbdb16babb702bcf7e202afffe",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\index.py",
+    "dense",
+    "--chunks",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_archive2\\chunks\\chunks.parquet",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_archive2\\index\\bge-m3",
+    "--encoder",
+    "bge-m3",
+    "--device",
+    "cuda",
+    "--max-length",
+    "1024",
+    "--batch-size",
+    "4",
+    "--shard",
+    "512",
+    "--resume",
+    "--revision",
+    "5617a9f61b028005a4858fdac845db406aefb181"
+  ],
+  "seconds": 1978.611086799996,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_archive2\\index\\bge-m3\\embeddings.npy": "e9aebadf0770021aa147ee3ce4ad53e89a4f5b77e0f401499461fba0b3f8adc9",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_archive2\\index\\bge-m3\\dense_manifest.json": "44a76a6eb191579f3cd372be43e8b542af4dcec63f558fe789ccdb866d41e8d6"
+  }
+}

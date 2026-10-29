@@ -1,0 +1,39 @@
+{
+  "rows_read": 85862,
+  "documents_kept": 85862,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 85862
+  },
+  "languages": {
+    "vi": 85862
+  },
+  "domains": {
+    "thanhnien.vn": 39950,
+    "phunusuckhoe.giadinhonline.vn": 22731,
+    "giadinhonline.vn": 16701,
+    "laodong.vn": 6480
+  },
+  "duplicate_groups_kept": 246,
+  "chars_median": 2444,
+  "chars_p95": 5514,
+  "id_min": 101003,
+  "id_max": 647452,
+  "options": {
+    "limit": 85862,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_g\\all.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 117155707,
+      "sha256": "6ac37bb8105423056fa943a717029f10c41f49cb9e83e68c161b0b3c6b7953c1"
+    }
+  }
+}

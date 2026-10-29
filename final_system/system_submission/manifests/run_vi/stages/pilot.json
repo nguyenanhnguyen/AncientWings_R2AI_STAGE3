@@ -1,0 +1,28 @@
+{
+  "key": "898a5869b063dd62a1efd3b6e7455627d8ade305cb62a249686ffd365916c1e9",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\benchmark.py",
+    "--chunks",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_vi\\chunks\\chunks.parquet",
+    "--queries",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_vi\\pilot.json",
+    "--device",
+    "cuda",
+    "--encoders",
+    "bge-m3",
+    "qwen3-embedding-0.6b",
+    "--rerankers",
+    "bge-reranker-v2-m3",
+    "qwen3-reranker-0.6b"
+  ],
+  "seconds": 298.9701328000001,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_vi\\pilot.json": "b0895ce09339fa3cc044696bb486b882247d6e0651e5b192cd3168d20efe0aa9"
+  }
+}

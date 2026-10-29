@@ -1,0 +1,34 @@
+{
+  "inputs": [
+    {
+      "path": "work/final_p5_c150/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "work/run_archive/win1000/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "work/run_h/win1000/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    }
+  ],
+  "queries": 1200,
+  "docs_mean": 212.33,
+  "docs_max": 312,
+  "chunks_mean": 183.57,
+  "chunks_max": 235,
+  "docs_listed_by_more_than_one_input_pct": 10.13,
+  "max_docs": 0,
+  "max_chunks": 0,
+  "chunks_from_first": false,
+  "chunk_docs_first": false,
+  "max_chunk_tokens": 0,
+  "dropped_too_long_per_query": 0.0,
+  "json_mb": 898.7,
+  "zip_mb": 150.1,
+  "zip_mib": 143.16
+}

@@ -1,0 +1,31 @@
+{
+  "key": "3be693814d1509287174322c01f579c10cfe2750f18e48f7cb3d5d369afff4e6",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\submit.py",
+    "--candidates",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\retrieval\\candidates.jsonl",
+    "--chunks",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\chunks\\chunks.parquet",
+    "--corpus",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\corpus\\corpus.parquet",
+    "--queries",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\query.parquet",
+    "--links",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\links_corpus.parquet",
+    "--profile",
+    "recall",
+    "--require-complete",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\submission"
+  ],
+  "seconds": 15.055255200015381,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\submission\\submission.zip": "5034ca85a2cfa2ed852f627cd8cb551e9cff99a49cabdb7b080773f63ba9365a",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\submission\\submission.json": "97c177b146958bf11bc259811f27b56dc1ee6a2e0a6d2777ccb6740c00a6815b",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\submission\\submission_manifest.json": "8d70a0462f2a1d65c9962f11ed424a0b9a1cd1b0ad49a8606d20978f52a9063c"
+  }
+}

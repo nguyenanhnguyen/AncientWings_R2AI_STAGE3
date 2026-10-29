@@ -1,0 +1,16 @@
+{
+  "stage": "bm25",
+  "chunks": 244858,
+  "terms": 66647,
+  "k1": 1.5,
+  "b": 0.75,
+  "avg_tokens": 280.1,
+  "chunks_file": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\chunks\\chunks.parquet",
+  "chunks_sha256": "ae2edb76ed1f730fb13a02c961a890fd1ea0f6e20d9f1fde3d744fac2f7a4d78",
+  "files": {
+    "bm25.npz": {
+      "bytes": 317658691,
+      "sha256": "4a657f91239efe8124665792950f9c9fd28eacd0dbf41b5666848b50586633c6"
+    }
+  }
+}

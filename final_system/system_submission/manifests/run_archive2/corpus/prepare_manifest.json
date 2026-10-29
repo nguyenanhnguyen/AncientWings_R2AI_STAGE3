@@ -1,0 +1,66 @@
+{
+  "rows_read": 14219,
+  "documents_kept": 14219,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 14219
+  },
+  "languages": {
+    "vi": 14219
+  },
+  "domains": {
+    "nhathuoclongchau.com.vn": 10792,
+    "youmed.vn": 969,
+    "vov.vn": 583,
+    "laodong.vn": 532,
+    "nhandan.vn": 243,
+    "dantri.com.vn": 191,
+    "thaythuocvietnam.vn": 187,
+    "baovinhlong.com.vn": 115,
+    "www.qdnd.vn": 93,
+    "suckhoedoisong.vn": 92,
+    "khoahocphothong.vn": 88,
+    "baophutho.vn": 85,
+    "benhvienvietduc.org": 47,
+    "baoquangninh.vn": 44,
+    "www.vinmec.com": 43,
+    "baothanhhoa.vn": 35,
+    "hanoimoi.vn": 23,
+    "baoquangtri.vn": 14,
+    "tiemchunglongchau.com.vn": 7,
+    "www.pharmacity.vn": 7,
+    "medlatec.vn": 6,
+    "bachmai.gov.vn": 5,
+    "benhviennhitrunguong.gov.vn": 4,
+    "suckhoecongdongonline.vn": 4,
+    "baochinhphu.vn": 3,
+    "phunusuckhoe.giadinhonline.vn": 2,
+    "baoangiang.com.vn": 1,
+    "baocantho.com.vn": 1,
+    "thanhnien.vn": 1,
+    "tienphong.vn": 1,
+    "vnexpress.net": 1
+  },
+  "duplicate_groups_kept": 7,
+  "chars_median": 5755,
+  "chars_p95": 8336,
+  "id_min": 601,
+  "id_max": 766441,
+  "options": {
+    "limit": 14219,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_archive2\\archive2.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 31668712,
+      "sha256": "c25e809494837c1e34957d20ab312c8ccb839b825231f46dd10ca4352cbbb93b"
+    }
+  }
+}

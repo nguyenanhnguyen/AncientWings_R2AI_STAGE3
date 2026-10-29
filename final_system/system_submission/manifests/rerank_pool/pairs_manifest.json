@@ -1,0 +1,66 @@
+{
+  "runs": {
+    "run_vi": {
+      "path": "work/run_vi",
+      "quota": 25
+    },
+    "run_b": {
+      "path": "work/run_b",
+      "quota": 25
+    },
+    "run_c": {
+      "path": "work/run_c",
+      "quota": 25
+    },
+    "run_d": {
+      "path": "work/run_d",
+      "quota": 25
+    },
+    "run_e": {
+      "path": "work/run_e",
+      "quota": 25
+    },
+    "run_f": {
+      "path": "work/run_f",
+      "quota": 25
+    },
+    "run_g": {
+      "path": "work/run_g",
+      "quota": 25
+    },
+    "run_zh_a": {
+      "path": "work/run_zh_a",
+      "quota": 15
+    },
+    "run_zh_b": {
+      "path": "work/run_zh_b",
+      "quota": 15
+    },
+    "run_zh_c": {
+      "path": "work/run_zh_c",
+      "quota": 40
+    }
+  },
+  "extra": {
+    "lo_004": {
+      "path": "lo_004_win1000/submission.zip",
+      "quota": 40
+    }
+  },
+  "pairs": 310647,
+  "pairs_by_source": {
+    "run_vi": 30000,
+    "run_b": 30000,
+    "run_c": 30000,
+    "run_d": 30000,
+    "run_e": 30000,
+    "run_f": 30000,
+    "run_g": 30000,
+    "run_zh_a": 18000,
+    "run_zh_b": 18000,
+    "run_zh_c": 47999,
+    "lo_004": 16648
+  },
+  "unique_docs_per_query": 258.9,
+  "file_mb": 170.8
+}

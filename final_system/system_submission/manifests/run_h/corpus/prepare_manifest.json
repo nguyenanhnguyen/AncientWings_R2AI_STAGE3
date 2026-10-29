@@ -1,0 +1,42 @@
+{
+  "rows_read": 60418,
+  "documents_kept": 60418,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 60418
+  },
+  "languages": {
+    "vi": 60418
+  },
+  "domains": {
+    "thanhnien.vn": 18988,
+    "suckhoedoisong.vn": 17186,
+    "tiemchunglongchau.com.vn": 13239,
+    "suckhoeviet.org.vn": 5622,
+    "tamanhhospital.vn": 4258,
+    "tienphong.vn": 690,
+    "thaythuocvietnam.vn": 435
+  },
+  "duplicate_groups_kept": 67,
+  "chars_median": 3956,
+  "chars_p95": 8197,
+  "id_min": 504810,
+  "id_max": 676461,
+  "options": {
+    "limit": 60418,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_h\\all.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 109375531,
+      "sha256": "b3f6d4b12e2caa72d98da66d21969a0c1566bcfa5394b54e744744d34c1e1e4d"
+    }
+  }
+}

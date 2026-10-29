@@ -1,0 +1,50 @@
+{
+  "rows_read": 67180,
+  "documents_kept": 67180,
+  "documents_dropped": 0,
+  "drop_reasons": {},
+  "quality_status": {
+    "accepted": 67180
+  },
+  "languages": {
+    "zh": 67174,
+    "en": 6
+  },
+  "domains": {
+    "www.familydoctor.com.cn": 26811,
+    "www.120ask.com": 10182,
+    "ask.39.net": 8249,
+    "www.a-hospital.com": 4607,
+    "www.youlai.cn": 4121,
+    "www.cnkang.com": 3877,
+    "test.pmphai.com": 2973,
+    "zhongyibaodian.net": 2370,
+    "jbk.39.net": 2027,
+    "www.msdmanuals.cn": 826,
+    "cancer.39.net": 597,
+    "jb39.com": 527,
+    "www.baidu.com": 11,
+    "www.familydoctor.cn": 2
+  },
+  "duplicate_groups_kept": 265,
+  "chars_median": 968,
+  "chars_p95": 2836,
+  "id_min": 2358090,
+  "id_max": 4102049,
+  "options": {
+    "limit": 67180,
+    "max_duplicates": 20,
+    "min_chars": 0,
+    "drop_review": false,
+    "text_field": null
+  },
+  "sources": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_zh3\\zh_c.parquet"
+  ],
+  "files": {
+    "corpus.parquet": {
+      "bytes": 98603725,
+      "sha256": "bf0421068dce7dadcdf2a5202cc7562f11d01eb5189a1c6de9d0a1ca59e89abb"
+    }
+  }
+}

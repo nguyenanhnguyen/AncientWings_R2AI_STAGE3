@@ -1,0 +1,27 @@
+{
+  "runs": {
+    "run_vi": "work/run_vi",
+    "run_b": "work/run_b",
+    "run_c": "work/run_c",
+    "run_d": "work/run_d",
+    "run_e": "work/run_e",
+    "run_f": "work/run_f",
+    "run_g": "work/run_g"
+  },
+  "docs_per_query": 100,
+  "passages_per_doc": 1,
+  "pairs": 120000,
+  "queries": 1200,
+  "docs_mean": 100.0,
+  "pairs_by_run": {
+    "run_vi": 5641,
+    "run_b": 10336,
+    "run_c": 26902,
+    "run_d": 31792,
+    "run_e": 10011,
+    "run_f": 19490,
+    "run_g": 15828
+  },
+  "passage_chars_median": 1369,
+  "file_mb": 61.3
+}

@@ -1,0 +1,33 @@
+{
+  "key": "36c6f37ad09ebfc48724829ea23128217c282df3a98d5f182cb8af4315d858f8",
+  "command": [
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\index.py",
+    "dense",
+    "--chunks",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\chunks\\chunks.parquet",
+    "--out",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\qwen3-embedding-0.6b",
+    "--encoder",
+    "qwen3-embedding-0.6b",
+    "--device",
+    "cuda",
+    "--max-length",
+    "1024",
+    "--batch-size",
+    "4",
+    "--shard",
+    "512",
+    "--resume",
+    "--revision",
+    "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+  ],
+  "seconds": 12585.590363399999,
+  "outputs": {
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\qwen3-embedding-0.6b\\embeddings.npy": "af2ed423ebdb1f1efce2d01ddf8faabe3b50a7d885318d94477c9ee4def404e8",
+    "C:\\Users\\ACER\\Downloads\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_f\\index\\qwen3-embedding-0.6b\\dense_manifest.json": "bcad306bf9c2ae80432aef8853102b27820a2932aa1c266f135d2e9972993f16"
+  }
+}

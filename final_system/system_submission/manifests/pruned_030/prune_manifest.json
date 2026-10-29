@@ -1,0 +1,12 @@
+{
+  "submission": "work/merged_pool3_c60/submission.zip",
+  "min_score": 0.3,
+  "keep_top": 0,
+  "drop_chunks": true,
+  "docs_before": 217.2,
+  "docs_after": 181.4,
+  "chunks_before": 122.9,
+  "chunks_after": 106.4,
+  "unscored": 40.9,
+  "zip_mb": 87.9
+}

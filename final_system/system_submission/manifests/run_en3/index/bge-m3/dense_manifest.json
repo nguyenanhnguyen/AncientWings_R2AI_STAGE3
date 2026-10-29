@@ -1,0 +1,47 @@
+{
+  "stage": "dense",
+  "encoder": "bge-m3",
+  "hf_id": "BAAI/bge-m3",
+  "dim": 1024,
+  "pooling": "cls",
+  "vectors": 94098,
+  "note": "",
+  "model": {
+    "name": "bge-m3",
+    "hf_id": "BAAI/bge-m3",
+    "revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "max_length": 1024,
+    "parameters": 567754752,
+    "dtype": "torch.float16",
+    "device": "cuda",
+    "config": {
+      "hf_id": "BAAI/bge-m3",
+      "pooling": "cls",
+      "max_length": 1024,
+      "query_prefix": "",
+      "doc_prefix": "",
+      "dim": 1024
+    }
+  },
+  "environment": {
+    "python": "3.13.0rc2 (tags/v3.13.0rc2:ec61006, Sep  6 2024, 22:13:49) [MSC v.1940 64 bit (AMD64)]",
+    "packages": {
+      "torch": "2.10.0+cu128",
+      "transformers": "4.57.6",
+      "numpy": "2.5.3",
+      "pyarrow": "25.0.1",
+      "bitsandbytes": "0.50.2",
+      "accelerate": "1.15.0"
+    }
+  },
+  "embeddings": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en3\\index\\bge-m3\\embeddings.npy",
+  "faiss_index": null,
+  "chunks_file": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en3\\chunks\\chunks.parquet",
+  "chunks_sha256": "2650dec4ac9255c322f82802da99cdd7cdc19119d34c7a8150fb5d970629eaa8",
+  "files": {
+    "embeddings.npy": {
+      "bytes": 192712832,
+      "sha256": "ca9b698f24d890539ca12182c0261979bac66bdde11ece19186700a37c918e45"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "submission": "work/prf/ad_f2/submission.zip",
+  "lang": [
+    "zh"
+  ],
+  "ids": [],
+  "ranks": null,
+  "freq": null,
+  "docs_per_query_before": 190.0,
+  "docs_per_query_after": 38.9,
+  "share_of_docs_kept": 0.205,
+  "queries_with_docs": 1096,
+  "precision_scale": 1.095,
+  "zip_mb": 0.15
+}

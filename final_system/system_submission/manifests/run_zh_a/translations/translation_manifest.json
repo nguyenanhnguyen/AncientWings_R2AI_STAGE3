@@ -1,0 +1,32 @@
+{
+  "model": {
+    "hf_id": "Qwen/Qwen3-4B",
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+    "quantize": "4bit",
+    "max_input": 1024,
+    "max_new_tokens": 512,
+    "prompt": "Translate the Vietnamese medical question into {language} for document retrieval. Preserve every symptom, negation, duration, age, number, unit and drug name. Do not answer the question or add facts. Output only the translation.",
+    "version": 1
+  },
+  "environment": {
+    "python": "3.13.0rc2 (tags/v3.13.0rc2:ec61006, Sep  6 2024, 22:13:49) [MSC v.1940 64 bit (AMD64)]",
+    "packages": {
+      "torch": "2.10.0+cu128",
+      "transformers": "4.57.6",
+      "numpy": "2.5.3",
+      "pyarrow": "25.0.1",
+      "bitsandbytes": "0.50.2",
+      "accelerate": "1.15.0"
+    }
+  },
+  "accepted": 964,
+  "rejected": 236,
+  "requested": 1200,
+  "queries_sha256": "ce13508b893bbd6b9169679d540630bc37eb5950cad08b4d5e0e5d7063670c08",
+  "files": {
+    "translations.jsonl": {
+      "bytes": 210024,
+      "sha256": "06dc00917bb0eb66e33d45f4486bb681016879433e1177f60b48e70f5b67bc75"
+    }
+  }
+}

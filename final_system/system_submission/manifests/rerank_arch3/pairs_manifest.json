@@ -1,0 +1,15 @@
+{
+  "runs": {
+    "run_archive3": {
+      "path": "work/run_archive3",
+      "quota": 40
+    }
+  },
+  "extra": {},
+  "pairs": 93507,
+  "pairs_by_source": {
+    "run_archive3": 93507
+  },
+  "unique_docs_per_query": 39.9,
+  "file_mb": 45.8
+}

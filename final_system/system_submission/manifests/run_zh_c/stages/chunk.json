@@ -1,0 +1,25 @@
+{
+  "key": "d4b0ed219f082f74588e673fcccd355bd3d6ae1e498faff1f73b4b84dbf96661",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\chunk.py",
+    "--corpus",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\corpus\\corpus.parquet",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\chunks",
+    "--target-tokens",
+    "320",
+    "--overlap-tokens",
+    "80",
+    "--max-tokens",
+    "768"
+  ],
+  "seconds": 130.68508549999387,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\chunks\\chunks.parquet": "ebb7ca3ba04232fe71a0f791badd0beee7a2376273209caec306181910d21fbf",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_zh_c\\chunks\\chunk_manifest.json": "ea82276886eb116c3a09ba687bc57116aebffe798cc76fc1c9c1443bc4cb5796"
+  }
+}

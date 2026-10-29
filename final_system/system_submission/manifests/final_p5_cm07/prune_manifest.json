@@ -1,0 +1,13 @@
+{
+  "submission": "work/final_p5_w1000_arch_h/submission.zip",
+  "min_score": 0.3,
+  "keep_top": 0,
+  "drop_chunks": true,
+  "chunk_min_score": 0.7,
+  "docs_before": 212.3,
+  "docs_after": 208.8,
+  "chunks_before": 166.1,
+  "chunks_after": 133.2,
+  "unscored": 52.6,
+  "zip_mb": 109.6
+}

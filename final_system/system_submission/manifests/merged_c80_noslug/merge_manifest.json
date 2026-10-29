@@ -1,0 +1,25 @@
+{
+  "inputs": [
+    {
+      "path": "work/merged_best_zh_ab_cfull/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "work/rerank_pool3/d150_c80_m05/submission.zip",
+      "chunk_cap": 80,
+      "doc_cap": 150
+    }
+  ],
+  "queries": 1200,
+  "docs_mean": 197.21,
+  "docs_max": 235,
+  "chunks_mean": 128.87,
+  "chunks_max": 157,
+  "docs_listed_by_more_than_one_input_pct": 37.6,
+  "max_docs": 0,
+  "max_chunks": 180,
+  "json_mb": 610.5,
+  "zip_mb": 105.8,
+  "zip_mib": 100.93
+}

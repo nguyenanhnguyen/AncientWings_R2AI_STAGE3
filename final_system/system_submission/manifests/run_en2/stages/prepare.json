@@ -1,0 +1,21 @@
+{
+  "key": "2aa058168dc92b40c6d3c61bb5103fd7b1f965d4035bc752c3c41590c0eca3ff",
+  "command": [
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\env\\Scripts\\python.exe",
+    "-X",
+    "utf8",
+    "-u",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\scripts\\prepare.py",
+    "--source",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\data\\crawl_en2\\en2.parquet",
+    "--limit",
+    "79800",
+    "--out",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\corpus"
+  ],
+  "seconds": 16.324366499999996,
+  "outputs": {
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\corpus\\corpus.parquet": "6dcc9f72e493da14af2ae4babed515982faace4858d818fa9fb7291fe4e4b5fb",
+    "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_en2\\corpus\\prepare_manifest.json": "705a60d561dc2d910353e823d54fbe561d911a8d374526d7a5212fbfaefd8573"
+  }
+}

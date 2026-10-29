@@ -1,0 +1,25 @@
+{
+  "inputs": [
+    {
+      "path": "work/final_p4_w2500/submission.zip",
+      "chunk_cap": 0,
+      "doc_cap": 0
+    },
+    {
+      "path": "work/run_archive/win2500/submission.zip",
+      "chunk_cap": 20,
+      "doc_cap": 0
+    }
+  ],
+  "queries": 1200,
+  "docs_mean": 197.45,
+  "docs_max": 286,
+  "chunks_mean": 160.91,
+  "chunks_max": 170,
+  "docs_listed_by_more_than_one_input_pct": 3.12,
+  "max_docs": 0,
+  "max_chunks": 170,
+  "json_mb": 1060.0,
+  "zip_mb": 147.6,
+  "zip_mib": 140.75
+}

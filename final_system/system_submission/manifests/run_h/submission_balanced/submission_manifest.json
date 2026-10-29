@@ -1,0 +1,59 @@
+{
+  "selection": {
+    "queries": 1200,
+    "settings": {
+      "doc_min": 3,
+      "doc_max": 15,
+      "doc_ratio": 0.45,
+      "chunk_min": 3,
+      "chunk_max": 15,
+      "chunk_ratio": 0.45,
+      "chunk_per_doc": 2,
+      "profile": "balanced",
+      "adaptive": false,
+      "sync_docs": true
+    },
+    "docs_total": 16088,
+    "docs_mean": 13.41,
+    "docs_max": 25,
+    "queries_without_docs": 0,
+    "chunks_total": 16321,
+    "chunks_mean": 13.6,
+    "chunks_max": 15,
+    "queries_without_chunks": 0
+  },
+  "validation": {
+    "queries": 1200,
+    "chunks_checked": 16321,
+    "resliced_from_offsets": 16321,
+    "warnings": [],
+    "dropped_chunks": 0,
+    "dropped_docs": 0,
+    "empty_doc_lists": 0,
+    "empty_chunk_lists": 0
+  },
+  "submission": {
+    "queries": 1200,
+    "docs_total": 16088,
+    "docs_mean": 13.41,
+    "chunks_total": 16321,
+    "chunks_mean": 13.6,
+    "chunk_characters": 20674974,
+    "queries_with_empty_docs": 0,
+    "queries_with_empty_chunks": 0
+  },
+  "queries_without_candidates": 0,
+  "doc_id_type": "integer",
+  "candidates_file": "D:\\AncientWings_R2AI_STAGE3-master (1)\\AncientWings_R2AI_STAGE3-master\\work\\run_h\\retrieval\\candidates.jsonl",
+  "chunks_sha256": "ae2edb76ed1f730fb13a02c961a890fd1ea0f6e20d9f1fde3d744fac2f7a4d78",
+  "files": {
+    "submission.json": {
+      "bytes": 28930736,
+      "sha256": "6b017406895bc5bad74dc7ab379120c65ac33a8d13d59148de1dad93314430af"
+    },
+    "submission.zip": {
+      "bytes": 7392096,
+      "sha256": "23a565e1a509d030d79cdb4cfb2d9e52dfe42abb1aa2cb26407e9ede10ebe4d6"
+    }
+  }
+}

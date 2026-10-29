@@ -1,0 +1,25 @@
+{
+  "runs": {
+    "run_en_a": {
+      "path": "work/run_en_a",
+      "quota": 20
+    },
+    "run_en2": {
+      "path": "work/run_en2",
+      "quota": 20
+    },
+    "run_en3": {
+      "path": "work/run_en3",
+      "quota": 20
+    }
+  },
+  "extra": {},
+  "pairs": 72000,
+  "pairs_by_source": {
+    "run_en_a": 24000,
+    "run_en2": 24000,
+    "run_en3": 24000
+  },
+  "unique_docs_per_query": 60.0,
+  "file_mb": 35.0
+}
