@@ -15,7 +15,7 @@ import numpy as np
 from ..common import storage
 from ..common.console import emit
 from ..common.runtime import model_info, release_model, environment
-from ..corpus.chunk import retrieval_text, contextual_embedding_texts
+from ..corpus.chunk import retrieval_text
 from . import embedding as dense
 from .bm25 import BM25, tokenize
 
@@ -61,35 +61,14 @@ def build_dense(args):
     out.mkdir(parents=True, exist_ok=True)
     encoder = dense.load_encoder(args.encoder, device=args.device, fp16=not args.fp32,
                                  max_length=getattr(args, 'max_length', None),
-                                 revision=getattr(args, 'revision', None),
-                                 quantize=getattr(args, 'quantize', 'none'),
-                                 cpu_offload=getattr(args, 'cpu_offload', False))
+                                 revision=getattr(args, 'revision', None))
     info = model_info(encoder)
     texts = [retrieval_text(chunk) for chunk in chunks]
-    mode = getattr(args, 'embedding_text', 'baseline')
-    text_report = {'method': 'title_and_chunk'}
-    fingerprint = storage.sha256_file(args.chunks)
-    if mode in ('contextual', 'adjacent'):
-        if not hasattr(encoder, 'tokenizer'):
-            raise ValueError('Contextual embedding requires a real model tokenizer')
-        texts, text_report = contextual_embedding_texts(chunks, encoder.tokenizer,
-                                                        encoder.config['max_length'],
-                                                        include_lead=(mode == 'contextual'))
-        import hashlib
-        digest = hashlib.sha256(fingerprint.encode())
-        digest.update(b'extractive_context_v1')
-        if mode == 'adjacent':
-            digest.update(b'no_document_lead')
-        for text in texts:
-            encoded = text.encode('utf-8')
-            digest.update(len(encoded).to_bytes(8, 'big'))
-            digest.update(encoded)
-        fingerprint = digest.hexdigest()
     path = dense.encode_to_memmap(encoder, texts, out / 'embeddings.npy',
                                   batch_size=args.batch_size, shard=args.shard,
                                   progress=_progress('encode'),
                                   resume=getattr(args, 'resume', False),
-                                  fingerprint=fingerprint)
+                                  fingerprint=storage.sha256_file(args.chunks))
     release_model(encoder)
     np.save(out / 'doc_ids.npy', np.array([chunk['doc_id'] for chunk in chunks], dtype=np.int64))
     storage.write_jsonl(out / 'chunk_ids.jsonl',
@@ -101,7 +80,7 @@ def build_dense(args):
         if faiss_path is None:
             emit('faiss không có trong môi trường; bỏ qua, retrieval dùng numpy.')
     summary = {'stage': 'dense', **dense.encoder_report(args.encoder, encoder, len(chunks)),
-               'model': info, 'environment': environment(), 'embedding_text': text_report,
+               'model': info, 'environment': environment(),
                'embeddings': str(path), 'faiss_index': str(faiss_path) if faiss_path else None,
                'chunks_file': str(args.chunks), 'chunks_sha256': storage.sha256_file(args.chunks)}
     storage.write_manifest(out / 'dense_manifest.json', summary, files=[path])
@@ -132,9 +111,6 @@ def main():
         step.add_argument('--max-length', type=int, default=None)
         step.add_argument('--revision', default=None, help='Hugging Face commit or tag.')
         step.add_argument('--fp32', action='store_true', help='Disable fp16 on GPU.')
-        step.add_argument('--quantize', choices=['none', '4bit'], default='none')
-        step.add_argument('--cpu-offload', action='store_true')
-        step.add_argument('--embedding-text', choices=['baseline', 'contextual', 'adjacent'], default='baseline')
         step.add_argument('--faiss', action='store_true', help='Also write a faiss index if installed.')
         step.add_argument('--faiss-lists', type=int, default=4096)
         step.set_defaults(func=function)

@@ -57,7 +57,7 @@ def preflight(device='cuda', quantized=False):
 
 def run(args):
     import torch
-    env = preflight(args.device, getattr(args, 'quantize', 'none') == '4bit')
+    env = preflight(args.device)
     chunks = storage.read_parquet(args.chunks)
     # Stratify by length and include the longest passages to expose padding/OOM/truncation.
     chunks.sort(key=lambda c: len(c['text']))
@@ -71,8 +71,7 @@ def run(args):
     for kind, names in [('encoder', args.encoders), ('reranker', args.rerankers)]:
         for name in names:
             factory = load_encoder if kind == 'encoder' else load_reranker
-            model = factory(name, device=args.device, max_length=args.max_length,
-                            quantize=getattr(args, 'quantize', 'none'))
+            model = factory(name, device=args.device, max_length=args.max_length)
             info = model_info(model)
             trials = []
             def compute(batch):
@@ -123,7 +122,6 @@ def main():
     p.add_argument('--encoders', nargs='+', default=['bge-m3', 'qwen3-embedding-0.6b'])
     p.add_argument('--rerankers', nargs='+', default=['bge-reranker-v2-m3', 'qwen3-reranker-0.6b'])
     p.add_argument('--max-length', type=int, default=1024)
-    p.add_argument('--quantize', choices=['none', '4bit'], default='none')
     p.add_argument('--samples', type=int, default=48)
     p.add_argument('--batches', nargs='+', type=int, default=[2, 4, 8, 16])
     args = p.parse_args()

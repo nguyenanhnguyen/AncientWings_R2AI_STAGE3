@@ -18,6 +18,43 @@
 
 ### Lượt đa ngôn ngữ mới
 
+Kết quả `selection25` do người dùng báo: FINAL_SCORE **0.0078**, DOCS_F2MACRO
+0.0104, CHUNKS_F2MACRO 0.0052, DOCS_PRECISION 0.0423, DOCS_RECALL 0.0091,
+CHUNKS_PRECISION 0.0188, CHUNKS_RECALL 0.0046. Tăng 0.0006 so với contextual
+0.0072 trên cùng tập 60k; chưa phải phép đo có nhãn độc lập.
+
+Lượt tiếp theo `selection25_one_chunk`: giữ cùng danh sách tài liệu và điểm
+reranker, chỉ giảm từ tối đa 2 xuống 1 chunk/tài liệu. Đã xuất ZIP, kiểm tra
+1200 danh sách tài liệu giống hệt selection25, 20914 chunk thay vì 26790;
+không cảnh báo validation. Đây là phép thử precision/recall ở cấp chunk.
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --balanced20k --arms selection25_one_chunk --out nguyen/pipeline_runs/balanced_60k
+```
+
+Nộp `balanced_60k/selection25_one_chunk/submission/submission.zip`.
+Khi có điểm, giữ policy thắng rồi mới đổi ứng viên retrieval/rerank, sau đó
+embedding. Chưa kết luận tối ưu toàn cục: tập 60k có giới hạn độ phủ và việc
+tinh chỉnh lặp trên public leaderboard cần được kiểm chứng trên dev độc lập.
+
+Kết quả contextual 60k do người dùng báo: FINAL_SCORE 0.0072,
+DOCS_F2MACRO 0.0097, CHUNKS_F2MACRO 0.0048, DOCS_PRECISION 0.0598,
+DOCS_RECALL 0.0081, CHUNKS_PRECISION 0.0293, CHUNKS_RECALL 0.0041.
+Không so trực tiếp với 0.0093 của tập Việt cũ vì corpus đã thay đổi.
+
+Thử `selection25` để kiểm tra ngưỡng xuất bài: dùng cùng ứng viên contextual,
+bỏ doc_ratio/chunk_ratio 0.25, giữ tối đa 25 tài liệu/đoạn, tối đa 2 đoạn/tài liệu.
+Không tính lại vector hay reranker. Giả thuyết tăng recall, có thể giảm precision;
+chưa biết FINAL_SCORE có tăng. Đây là thí nghiệm chọn kết quả, không đổi embedding.
+
+```powershell
+.\env\Scripts\python.exe scripts/compare_embeddings.py --balanced20k --arms selection25 --out nguyen/pipeline_runs/balanced_60k
+```
+
+Đã chạy thành công: 1200 truy vấn, 20914 tài liệu, 26790 đoạn; validator không
+cảnh báo/loại mẫu. ZIP ở `balanced_60k/selection25/submission/submission.zip`,
+log ở `balanced_60k/selection25/submit.log`. Điểm Codabench vẫn cần người dùng nộp.
+
 **Cấu hình đã thống nhất: 20.000 mẫu mỗi ngôn ngữ, không phải hai khoảng đầu.**
 Lệnh mới bên dưới thay ví dụ `mixed20k_each` ở dưới. `--balanced20k` tìm mẫu
 trong Việt 0–766443, Trung 766444–4392214, Anh 4421055–7466161, lọc đúng

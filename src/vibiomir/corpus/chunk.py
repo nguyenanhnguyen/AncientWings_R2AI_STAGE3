@@ -103,52 +103,14 @@ def plan_spans(text, target_tokens=320, overlap_tokens=64, max_tokens=1024, min_
     return merged
 
 
-def token_spans(text, tokenizer, title='', target=320, overlap=80, maximum=768):
-    """Sentence-aware windows bounded by actual encoder tokens, including title."""
-    from bisect import bisect_right
-    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)['offset_mapping']
-    if not offsets:
-        return []
-    prefix = title + '\n' if title else ''
-    reserve = len(tokenizer.encode(prefix, add_special_tokens=True)) + 8
-    budget = maximum - reserve
-    if budget < 32:
-        raise ValueError('Title leaves too little encoder context; inspect this document.')
-    target = min(target, budget)
-    overlap = min(overlap, target // 3)
-    boundaries = [m.end() for m in re.finditer(r'\n+|(?<=[.!?\u3002\uff01\uff1f\uff1b])\s*', text)]
-    ends = [b for a, b in offsets]
-    spans = []
-    start = 0
-    while start < len(offsets):
-        end = min(start + target, len(offsets))
-        if end < len(offsets):
-            candidates = [b for b in boundaries if offsets[start + max(1,target//2)][0] <= b <= offsets[end-1][1]]
-            if candidates:
-                boundary = candidates[-1]
-                end = max(start+1, bisect_right(ends, boundary))
-        a, b = offsets[start][0], offsets[end-1][1]
-        while len(tokenizer.encode(prefix+text[a:b],add_special_tokens=True)) > maximum:
-            end -= 1
-            if end <= start: raise ValueError('Cannot fit one token in encoder context')
-            b = offsets[end-1][1]
-        spans.append((a,b))
-        if end == len(offsets): break
-        start = max(start+1, end-overlap)
-    return spans
-
-
-def chunk_document(document, text_field=None, tokenizer=None, **options):
+def chunk_document(document, text_field=None, **options):
     """Chunks for one corpus row. The text is whatever `document_text` derives from the row."""
     text = document_text(document, text_field)
     if not text.strip():
         return []
     title = (document.get('title') or '').strip()
     rows = []
-    spans = (token_spans(text, tokenizer, title, options.get('target_tokens',320),
-                         options.get('overlap_tokens',80), options.get('max_tokens',768))
-             if tokenizer is not None else plan_spans(text, **options))
-    for order, (start, end) in enumerate(spans):
+    for order, (start, end) in enumerate(plan_spans(text, **options)):
         span = text[start:end]
         if not span.strip():
             continue
@@ -173,56 +135,6 @@ def retrieval_text(chunk):
     return f"{title}\n{chunk['text']}" if title else chunk['text']
 
 
-def contextual_embedding_texts(chunks, tokenizer, maximum=768, include_lead=True):
-    """Add bounded, extractive document context only to dense encoder inputs.
-
-    Original chunks/offsets, BM25 and reranker inputs are unchanged. The lead
-    anchors the topic; preceding non-overlapping text helps resolve references.
-    This is an extractive experiment, not LLM-generated Contextual Retrieval.
-    """
-    def clip(text, limit, tail=False):
-        offsets = tokenizer(text, add_special_tokens=False,
-                            return_offsets_mapping=True)['offset_mapping']
-        if not offsets or limit <= 0:
-            return ''
-        if len(offsets) <= limit:
-            return text
-        return text[offsets[-limit][0]:] if tail else text[:offsets[limit-1][1]]
-
-    lead, previous = {}, {}
-    texts = [None] * len(chunks)
-    augmented = 0
-    for i in sorted(range(len(chunks)), key=lambda j: (chunks[j]['doc_id'], chunks[j]['chunk_order'])):
-        chunk = chunks[i]
-        doc = chunk['doc_id']
-        base = retrieval_text(chunk)
-        if len(tokenizer.encode(base, add_special_tokens=True)) > maximum:
-            raise ValueError(f"Chunk {chunk['chunk_id']} exceeds encoder budget before context")
-        lead.setdefault(doc, clip(chunk['text'], 48))
-        context = []
-        if include_lead and lead[doc] and lead[doc] not in base:
-            context.append(lead[doc])
-        prior = previous.get(doc)
-        if prior:
-            # Remove the portion that overlaps the current source span.
-            end = max(0, min(len(prior['text']), chunk['char_start'] - prior['char_start']))
-            tail = clip(prior['text'][:end], 48, tail=True)
-            if tail and tail not in base and not any(tail in x for x in context):
-                context.append(tail)
-        prefix = '\n'.join(context)
-        budget = 96
-        while prefix and len(tokenizer.encode(prefix + '\n\n' + base, add_special_tokens=True)) > maximum:
-            budget -= 8
-            prefix = clip(prefix, budget)
-        texts[i] = prefix + '\n\n' + base if prefix else base
-        augmented += bool(prefix)
-        previous[doc] = chunk
-    return texts, {'method': 'extractive_context_v1' if include_lead else 'adjacent_context_v1',
-                   'augmented_chunks': augmented,
-                   'lead_tokens': 48 if include_lead else 0,
-                   'preceding_tokens': 48, 'body_truncated': 0}
-
-
 def build(args):
     sources = [Path(path) for path in args.corpus]
     documents = []
@@ -245,14 +157,10 @@ def build(args):
         raise ValueError('No documents found in the given corpus files.')
     options = {'target_tokens': args.target_tokens, 'overlap_tokens': args.overlap_tokens,
                'max_tokens': args.max_tokens, 'min_tokens': args.min_tokens}
-    tokenizer = None
-    if getattr(args, 'tokenizer', None):
-        from transformers import AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
     chunks = []
     empty = []
     for document in sorted(documents, key=lambda row: row['id']):
-        rows = chunk_document(document, text_field=args.text_field, tokenizer=tokenizer, **options)
+        rows = chunk_document(document, text_field=args.text_field, **options)
         if not rows:
             empty.append(int(document['id']))
         chunks.extend(rows)
@@ -276,8 +184,6 @@ def build(args):
         'chunks_over_1024_tokens': sum(size > 1024 for size in sizes),
         'languages': dict(languages),
         'options': options,
-        'tokenizer': getattr(args, 'tokenizer', None),
-        'chunk_method': 'sentence_token_budget_v1' if tokenizer else 'paragraph_estimate',
         'text_field': args.text_field,
         'status_filter': args.status,
         'rows_skipped_by_status': skipped_status,
@@ -300,7 +206,6 @@ def main():
     parser.add_argument('--text-field', default=None,
                         help='Column holding the body. Default: text, content or body, else a '
                              'question plus answers.')
-    parser.add_argument('--tokenizer', default=None, help='HF tokenizer for exact encoder input budget including title')
     parser.add_argument('--target-tokens', type=int, default=320)
     parser.add_argument('--overlap-tokens', type=int, default=64)
     parser.add_argument('--max-tokens', type=int, default=1024,
