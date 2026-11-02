@@ -15,6 +15,14 @@ safetensors>=0.4
 sentencepiece>=0.2
 protobuf>=4.25
 
+# Required for 4-bit quantized loading (Qwen3-4B translator, Qwen3-Reranker-4B) and for
+# accelerate's device_map/low-CPU-memory model loading used by the same code paths.
+accelerate>=0.30
+bitsandbytes>=0.43
+
+# Used by prf_rerank.py for the bisection-based adaptive document-count calibration.
+scipy>=1.11
+
 # Optional accelerator for the vector index. Retrieval falls back to a blocked numpy matmul over
 # the memmapped matrix when faiss is absent, so this is a speed choice, not a requirement.
 # faiss-cpu>=1.8

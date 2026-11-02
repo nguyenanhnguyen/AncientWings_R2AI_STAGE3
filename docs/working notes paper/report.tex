@@ -1,0 +1,713 @@
+% ============================================================================
+% Working notes paper -- drafted from docs/working notes paper/backbone.txt
+% and from the artifacts under final_system/ (SYSTEM.md, prf_rerank.py,
+% final_system/system_submission/manifests/INDEX.md).
+%
+% PROVENANCE CONVENTION: every reported number carries an inline LaTeX comment
+% stating exactly where it was read from, so it can be re-verified later
+% without re-reading this whole file. "SYSTEM.md Sx" refers to the numbered
+% section of final_system/SYSTEM.md (identical to the repository-root
+% SYSTEM.md at the time of writing). "INDEX.md:<path>" refers to a row of
+% final_system/system_submission/manifests/INDEX.md, keyed by the manifest
+% path shown in that row. "prf_rerank.py:<def>" refers to a function in
+% final_system/prf_rerank.py.
+%
+% PLACEHOLDER: Section 3.2 (web crawling) is intentionally left blank, as
+% requested -- the crawler description will be supplied separately.
+% ============================================================================
+\documentclass[runningheads]{llncs}
+
+% ================= PACKAGES & SETTINGS =================
+\usepackage[utf8]{inputenc}
+\usepackage[T1,T5]{fontenc}
+\usepackage[vietnamese,english]{babel}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{marvosym}
+
+\begin{document}
+
+% ================= TITLE & AUTHORS =================
+% Working title; replace once the team confirms the final wording.
+\title{A Multi-Run Hybrid Retrieval and Reranking System for Cross-Lingual Biomedical Information Retrieval}
+
+\titlerunning{Multi-Run Hybrid Retrieval for Cross-Lingual Biomedical IR}
+
+\author{
+Author One\inst{1,2} \and
+Author Two\inst{1,2} \and
+Author Three\inst{1,2} \and
+Corresponding Author\inst{1,2}(\Letter)
+}
+\authorrunning{Author One et al.}
+
+\institute{
+University of Information Technology, Ho Chi Minh City, Vietnam
+\and
+Vietnam National University, Ho Chi Minh City, Vietnam\\
+\email{\{student1,student2,student3\}@gm.uit.edu.vn}\\
+\email{\{advisor1,advisor2\}@uit.edu.vn}
+}
+
+\maketitle
+
+% ================= ABSTRACT =================
+\begin{abstract}
+Retrieving biomedical evidence for a query written in a low-resource language,
+from a document collection that spans several languages, poses two coupled
+difficulties: bridging the language gap between the query and a large share of
+the collection, and deciding, for each query independently, how many documents
+and passages are worth returning. We describe a system built for this setting
+that is assembled entirely from openly released components, with no
+task-specific fine-tuning. First, a multi-run hybrid retrieval stage combines
+sparse (BM25) and dense (bi-encoder) retrieval through reciprocal rank fusion
+across several independently prepared document partitions, one of which
+retrieves against a machine-translated query to reach documents in the
+collection's dominant language. Second, a higher-capacity cross-encoder
+reranker rescores the union of candidates surfaced by every partition. Third,
+a pseudo-relevance feedback step re-ranks documents using a per-query topic
+vector estimated from the current top results, and the number of documents
+returned per query is set by directly maximizing an expected-$F_2$ objective
+under a probabilistic reading of the reranker scores, rather than by a fixed
+cutoff. Passages are then cut as token-bounded windows around the
+highest-scoring span of each selected document, so that every submitted
+passage remains a verbatim, contiguous excerpt of the source text. On the
+public leaderboard of the task this pipeline, together with a coverage-recovery
+step that retrieves archived snapshots of pages the crawler could not fetch
+directly, reaches a final score of 0.3060 (document-level $F_2$ 0.3381,
+passage-level $F_2$ 0.2739), with each refinement in the pipeline contributing
+a measurable, monotonic gain over the preceding configuration. We report this
+progression together with several design alternatives that were tried and
+found not to improve the score, and we discuss the main limitations of
+evaluating exclusively against a rate-limited public leaderboard.
+
+\keywords{Cross-lingual information retrieval \and Biomedical text retrieval \and Hybrid dense-sparse retrieval \and Reranking \and Pseudo-relevance feedback \and Adaptive result-set sizing}
+\end{abstract}
+
+% ================= 1. INTRODUCTION =================
+\section{Introduction}
+
+Access to biomedical evidence is unevenly distributed across languages: a
+substantial share of consumer-facing medical content for languages such as
+Vietnamese exists only as translations or summaries of material originally
+published in English or Chinese, while the underlying primary sources remain
+in their original language. A retrieval system that is asked to answer a
+query written in one language from a collection that mixes several languages
+must therefore locate relevant evidence regardless of which language a
+particular document happens to be written in, rather than assuming the query
+and the answer share a language. This setting, together with the practical
+constraint that only openly released models may be used and that no
+model-specific labelled training data is provided, motivates building a
+retrieval pipeline out of general-purpose, pretrained components rather than
+a system trained end-to-end for this task.
+
+A first difficulty is that lexical (sparse) retrieval cannot bridge a
+vocabulary mismatch across scripts: a Vietnamese query and a Chinese document
+share almost no surface tokens, so a system that relies on term overlap alone
+systematically under-retrieves the language in which most of the collection is
+written~\cite{lipton2014thresholding}. Dense bi-encoder retrieval partially
+closes this gap when the encoder was trained on multilingual data, but recent
+reports on multilingual embedding and reranking models still show a
+non-trivial spread in cross-lingual effectiveness depending on the script
+pair and the domain~\cite{qwen3embedding2025}, which suggests that no single
+encoder or reranker should be trusted as sufficient on its own for a
+collection this heterogeneous.
+
+A second difficulty is specific to the evaluation protocol used here: the
+number of relevant documents and passages is not the same for every query, yet
+the official metric rewards returning close to the right number of items
+rather than either a fixed short list or an exhaustive long list. A system
+that always returns, say, the top 50 documents for every query will be
+unnecessarily imprecise on queries with few relevant answers and will miss
+recall on queries with many. Treating the per-query result-set size as a
+decision variable, rather than a global constant, requires a principled way
+to trade expected precision against expected recall using only the scores the
+system itself produces, since no labelled development set matching the
+official judgments is available.
+
+We address these two problems through three component-level contributions
+that compose into a single pipeline. First, a \emph{multi-run hybrid retrieval}
+stage (Sect.~\ref{sec:module1}) runs sparse-dense fusion independently over
+several partitions of the crawled corpus -- including one partition retrieved
+against a machine-translated form of the query -- so that recall is not
+limited by any single encoder, tokenizer, or query language. Second, a
+\emph{higher-capacity reranker rescoring} stage (Sect.~\ref{sec:module2})
+consolidates the candidates surfaced by every partition and rescores them with
+a larger cross-encoder than the one used during first-stage retrieval,
+spending the more expensive model only on the comparatively small candidate
+pool rather than on the full collection. Third, a \emph{pseudo-relevance
+feedback and adaptive selection} stage (Sect.~\ref{sec:fusion}) re-ranks the
+rescored candidates using a per-query topic estimate, and chooses how many
+documents and passages to submit for each query by directly optimizing an
+expected-$F_2$ criterion derived from the reranker scores, subject to
+practical bounds and to an overall submission size limit.
+
+We evaluate the complete pipeline, together with each of the above
+refinements added one at a time, on the public leaderboard of the shared task
+that supplied the queries, the document identifiers, and the official metric
+(Sect.~\ref{sec:dataset}). Starting from a pseudo-relevance-feedback baseline
+that reorders a fixed-size candidate pool, each subsequent refinement that we
+report keeping -- per-query adaptive sizing, per-query passage windowing, a
+second passage window for highly-ranked documents, and a supplementary round
+of reranker scoring near the per-query cutoff -- is associated with a
+further increase in the leaderboard score, reaching 0.3060 overall
+(Sect.~\ref{sec:results}). We also report the alternatives we tried and did
+not keep, because they left the score unchanged or lowered it, since we
+believe that a record of what did not work is as useful to future
+replications as a record of what did.
+
+% ================= 2. RELATED WORK =================
+\section{Related Work}
+
+\subsection{Cross-Lingual and Multilingual Biomedical Retrieval}
+Cross-lingual information retrieval has traditionally relied on either
+translating the query into the document language, translating documents into
+the query language, or mapping both into a shared multilingual representation
+space~\cite{clirudit2025}. Query translation avoids the cost of translating an
+entire collection but is reported to perform less reliably than document-side
+translation or than translation-free dense retrieval, in part because short
+queries carry less context for a translation model to resolve
+ambiguity~\cite{clirudit2025}. Dedicated multilingual machine translation
+models aimed at this use case, such as those built specifically to cover a
+Vietnamese-Chinese-English language mix, have recently been
+released~\cite{hunyuanmt2025}; our pipeline uses general-purpose query
+translation rather than such a dedicated system, which we view as an
+available avenue for improvement rather than as a closed question. Benchmark
+efforts aimed specifically at Vietnamese text embeddings, built by machine
+translating existing multilingual evaluation suites, have also started to
+appear~\cite{vnmteb2025}, reflecting that cross-lingual retrieval quality for
+Vietnamese specifically is still an actively measured, rather than solved,
+problem.
+
+\subsection{Dense and Hybrid Retrieval with Learned Rerankers}
+Reciprocal rank fusion combines several ranked lists by the reciprocal of
+each item's rank rather than by its raw score, which avoids having to
+calibrate heterogeneous score scales -- a lexical BM25 score and a dense
+cosine similarity, in particular -- onto one another before they can be
+combined~\cite{cormack2009rrf}. A two-stage retrieve-then-rerank design, in
+which an inexpensive first-stage retriever proposes a candidate pool that a
+more expensive cross-encoder then rescores, is standard practice when the
+reranker's per-pair cost makes scoring the full collection impractical.
+General-purpose multilingual embedding and reranking model families released
+in various parameter sizes, evaluated on standard retrieval and reranking
+benchmarks, are reported to perform competitively across several languages
+and model sizes~\cite{qwen3embedding2025}; our pipeline draws its dense
+encoders and cross-encoder rerankers from this kind of openly released,
+general-purpose family, used here without any task-specific fine-tuning.
+
+\subsection{Pseudo-Relevance Feedback and Adaptive Result-Set Sizing}
+Pseudo-relevance feedback re-ranks or re-weights retrieval results using
+information drawn from the system's own top-ranked results, under the
+assumption that most of them are on-topic even without external relevance
+judgments; we use this idea in its simplest dense form, representing the
+``topic'' of a query as the centroid of the embeddings of its currently
+top-ranked passages. Separately from how documents are ranked, deciding how
+many of them to return is a thresholding problem: for a classifier whose
+output can be read as a calibrated probability of relevance, the decision
+threshold that maximizes the expected $F_1$ score is known to equal half of
+the $F_1$ value attained at that threshold, and the corresponding result for
+$F_\beta$ follows the same derivation~\cite{lipton2014thresholding}. Our
+adaptive document-count rule (Sect.~\ref{sec:fusion}) is a direct,
+per-query application of that $F_\beta$-optimal thresholding argument to the
+reranker's output scores, rather than a fixed cutoff tuned once on a held-out
+set, which this task does not provide.
+
+% ================= 3. PROPOSED SYSTEM =================
+\section{Proposed System}
+
+\subsection{System Overview}
+\label{sec:overview}
+
+% PLACEHOLDER (figure to be supplied together with the crawler section).
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=\textwidth]{figs/fig-system-overview.pdf}
+    \caption{Overview of the proposed system: an offline corpus-construction
+    phase (web crawling and archived-snapshot recovery) feeds a query-time
+    ranking phase (multi-run hybrid retrieval, reranker rescoring, and
+    pseudo-relevance-feedback--based adaptive selection).}
+    \label{fig:system}
+\end{figure}
+
+Our system consists of a corpus-construction phase and a query-time ranking
+phase (Fig.~\ref{fig:system}). The corpus-construction phase
+(Sect.~\ref{sec:crawl}) turns the organizers' list of source URLs into
+locally held, quality-checked document text; because not every listed URL
+could be fetched directly, a coverage-recovery step
+(Sect.~\ref{sec:coverage}) separately resolves a subset of the remaining URLs
+through their archived snapshots. The query-time ranking phase processes each
+of the 1{,}200 queries through three stages: multi-run hybrid retrieval
+(Sect.~\ref{sec:module1}), higher-capacity reranker rescoring
+(Sect.~\ref{sec:module2}), and pseudo-relevance feedback with adaptive
+document and passage selection (Sect.~\ref{sec:fusion}). The output of the
+last stage is serialized directly into the submission format required by the
+task, with every passage traced back, by character offset, to an exact,
+contiguous span of the corresponding document's crawled text, so that no
+submitted passage is paraphrased or regenerated.
+% PROVENANCE: the exact-span / non-rewritten guarantee is implemented in
+% cut_chunks() in final_system/prf_rerank.py (slices text[start:end] from the
+% run's corpus) and is stated as a requirement in SYSTEM.md S3 ("chunk_text
+% luôn là một lát cắt liên tục, nguyên văn của văn bản tài liệu").
+
+\subsection{Corpus Construction via Web Crawling}
+\label{sec:crawl}
+
+% PLACEHOLDER: this subsection is intentionally left blank. The description
+% of the crawling pipeline (source list, crawler design, per-run partitioning,
+% quality control, and the resulting per-run document counts) will be
+% supplied separately and inserted here.
+[To be completed.]
+
+\subsection{Coverage Recovery via Archived Snapshots}
+\label{sec:coverage}
+
+Not every URL in the organizers' source list could be retrieved through a
+direct request at crawl time. For the documents that remained missing after
+the main crawl, we recover a subset of them from publicly archived snapshots
+of the same URL, under the same identifier, rather than discarding the query
+coverage those URLs would otherwise contribute.
+% PROVENANCE: SYSTEM.md S4 "B2. Tìm trang chưa crawl được theo URL" and the
+% tool list (slug_retrieval.py, slug_rerank.py, slug_targets.py,
+% final_system/notebooks/archive_fetch_kaggle.ipynb).
+
+This recovery proceeds in four steps. First, because the URL itself is the
+only signal available for a page that was never fetched, we build a sparse
+(BM25) index over the tokens of each unfetched URL's slug and retrieve
+candidate URLs for every query against that index. Second, a general-purpose
+language model scores each (query, candidate) pair using the slug-derived
+title as a proxy for the page's topic, which lets us rank candidate URLs by
+plausible relevance before spending any crawling effort on them. Third, the
+highest-scoring candidate URLs are compiled into a target list. Fourth, for
+each targeted URL we query the Wayback Machine for an archived snapshot and,
+when one is available, treat its content as the document text for that
+identifier, subject to the same quality control as the main crawl.
+Provenance for every archived page -- the archived timestamp and the
+originating URL -- is retained alongside the recovered text.
+% PROVENANCE: SYSTEM.md S3 "Dữ liệu ngoài (web.archive.org)"; provenance
+% files under work/archive*/ (targets.parquet + manifest), listed in
+% final_system/system_submission/manifests/INDEX.md under archive/,
+% archive2/, archive3/.
+
+Documents recovered this way are processed by the same per-run pipeline
+described in Sect.~\ref{sec:module1} as three additional partitions
+(denoted \texttt{run\_archive}, \texttt{run\_archive2}, and
+\texttt{run\_archive3} below), rather than being merged into the partitions
+built from directly crawled text, so that their provenance remains
+separately auditable.
+
+\subsection{Multi-Run Hybrid Retrieval}
+\label{sec:module1}
+
+The crawled and recovered documents are not processed as one monolithic
+corpus. They are instead split into several independently prepared
+\emph{runs} -- contiguous batches of source identifiers, crawled and indexed
+separately -- and queried independently; results are combined only after
+retrieval. This design keeps indexing incremental (a newly crawled batch
+becomes its own run rather than requiring the full index to be rebuilt) and
+lets us vary, per run, which query form is used to search it.
+% PROVENANCE: SYSTEM.md S4 ("B1. Pipeline từng run") lists the 14 runs kept
+% in the final system: run_vi, run_b..run_g, run_zh_a/b/c, run_h, run_archive,
+% run_archive2, run_archive3.
+
+Within each run, a document is split into overlapping passages of up to
+$320$ tokens, with an overlap of $80$ tokens and a hard ceiling of $768$
+tokens per passage, using sentence and paragraph boundaries where available;
+each passage retains the character offsets of its source span. Each run is
+indexed twice: a sparse BM25 index over the passage text, and a dense index
+built with a general-purpose multilingual bi-encoder. Retrieval combines a
+sparse channel, a dense channel using \texttt{BAAI/bge-m3}, and a second
+dense channel using \texttt{Qwen/Qwen3-Embedding-0.6B}, fused by reciprocal
+rank fusion (RRF)~\cite{cormack2009rrf} rather than by combining raw scores,
+precisely because BM25 scores and cosine similarities are not on a comparable
+scale. The fused candidates for each query are then rescored by a first-stage
+cross-encoder reranker -- \texttt{BAAI/bge-reranker-v2-m3} and
+\texttt{Qwen/Qwen3-Reranker-0.6B}, run in sequence within the same run -- to
+produce the per-run candidate score that feeds Sect.~\ref{sec:module2}.
+% PROVENANCE: SYSTEM.md S4 "B1" bullet list and S2 model table; chunking
+% parameters (320/80/768) match src/vibiomir/pipeline.py defaults referenced
+% throughout docs/solution/run_guide.md and training_design.md.
+
+One run, denoted \texttt{run\_zh\_a}, departs from this template in its query
+side only: because a majority of the crawled collection is written in
+Chinese (see Sect.~\ref{sec:dataset}), the original Vietnamese query is first
+translated into Chinese by a general-purpose instruction-tuned language model,
+\texttt{Qwen/Qwen3-4B} in 4-bit quantization, and the translated form is used
+to search that run's sparse and dense indexes. This is the only point in the
+pipeline at which a generative language model produces text that influences
+retrieval; it never produces text that is itself submitted as evidence.
+% PROVENANCE: SYSTEM.md S2 model table (Qwen/Qwen3-4B row, "Dịch câu hỏi
+% sang tiếng Trung cho run_zh_a") and S4 "run_zh_a dịch câu hỏi sang tiếng
+% Trung bằng Qwen3-4B."
+
+\subsection{Higher-Capacity Reranker Rescoring}
+\label{sec:module2}
+
+The first-stage rerankers in Sect.~\ref{sec:module1} are chosen to be cheap
+enough to run within each of the fourteen partitions separately. We treat
+their output only as a way to assemble a manageable, union candidate pool
+across runs, and reserve a substantially larger cross-encoder,
+\texttt{Qwen/Qwen3-Reranker-4B}, to rescore that pool once, after the
+per-run candidates have been merged by query. For every (query, document)
+pair in the pool, we score up to three of the document's highest-ranked
+passages and keep, for that pair, the highest of those three scores together
+with the identity of the scored passage, since the most informative passage
+of a document is not necessarily its first-stage-highest-ranked one.
+% PROVENANCE: SYSTEM.md S4 "B3" ("Mỗi tài liệu ứng viên được chấm 3 đoạn tốt
+% nhất") and S6 pairs_manifest.json rows listing PASSAGE_RANKS=3 behaviour
+% (pool_passages() docstring in final_system/prf_rerank.py).
+
+Because this stage uses a markedly larger model than the rest of the
+pipeline, it is run separately, on paired GPU accelerators, rather than as
+part of the per-run pipeline; the candidate pool is exported once per pooling
+round and scored in that separate environment. We used five pooling rounds
+over the course of development, each covering a different stage of the
+candidate pool as additional runs (including the archive-recovered runs of
+Sect.~\ref{sec:coverage}) became available, plus one supplementary round that
+rescores only the passages of documents sitting near each query's eventual
+document-count cutoff (Sect.~\ref{sec:fusion}) that had not yet been scored
+by any earlier round, so that the adaptive cutoff decision is not made on an
+incompletely scored neighbourhood of candidates.
+% PROVENANCE: SYSTEM.md S4 "B3" round list (rerank_pool4, rerank_pool5,
+% rerank_h_arch, rerank_arch2, rerank_arch3, rerank_extra) and S5 ("Lệnh tái
+% lập") giving pairs_total=2{,}067{,}495 after all rounds and 165{,}331 pairs
+% for the supplementary round; export_extra() / f2_counts() in
+% final_system/prf_rerank.py implement the near-cutoff selection.
+
+\subsection{Pseudo-Relevance Feedback, Fusion, and Adaptive Selection}
+\label{sec:fusion}
+
+The last stage of the pipeline turns the rescored candidate pool into the
+submitted ranking and result-set size for each query, and is implemented
+without any further GPU inference. It combines four decisions: how to fuse
+the two reranker scores available for a document, how to re-rank documents
+using a query-level topic estimate, how many documents and passages to
+return for a given query, and how to cut a submitted passage.
+
+\paragraph{Document scoring.}
+Each candidate document already carries two cross-encoder scores: the
+first-stage score $s_{0.6B}$ from Sect.~\ref{sec:module1} and the
+higher-capacity score $s_{4B}$ from Sect.~\ref{sec:module2}, when the latter
+is available. We combine them linearly,
+\begin{equation}
+s_{\mathrm{doc}} = \mu \cdot s_{4B} + (1-\mu) \cdot s_{0.6B}, \qquad \mu = 0.5,
+\label{eq:mix}
+\end{equation}
+so that a document that was pooled but has not yet received a $4$B score
+degrades gracefully to its first-stage score rather than being dropped.
+% PROVENANCE: pool_passages() in final_system/prf_rerank.py, default
+% --mix 0.5 (argparse default in main()); SYSTEM.md S4 step B4.1.
+
+\paragraph{Pseudo-relevance feedback.}
+For each query, we form a topic vector as the mean \texttt{bge-m3} embedding
+of the best-scoring passage of the top $10$ documents under
+Eq.~\eqref{eq:mix}, then re-rank the candidate pool by
+\begin{equation}
+s_{\mathrm{final}} = z(s_{\mathrm{doc}}) + w \cdot z\!\left(\max_{c \in \mathrm{chunks}(d)} \cos(c, \mathbf{t})\right), \qquad w = 1,
+\label{eq:prf}
+\end{equation}
+where $z(\cdot)$ is the sample $z$-score over the candidate pool of a given
+query, $\mathbf{t}$ is the query's topic vector, and the maximum is taken
+over the passage embeddings of document $d$. Standardizing both terms before
+summing them avoids letting whichever term happens to have the larger raw
+scale dominate the ranking.
+% PROVENANCE: zscore(), and the "base + args.weight * topic" combination in
+% the main orchestration of final_system/prf_rerank.py; SYSTEM.md S4
+% step B4.2 (weight $1 \times$ cosine of best chunk against the topic
+% vector of the top 10 documents).
+
+\paragraph{Adaptive document count.}
+Rather than returning a fixed number of documents for every query, we choose
+a per-query count $N_q$ that maximizes an expected-$F_2$ objective. Reading
+the (calibrated, rescaled) reranker score as an estimate of the probability
+that a candidate is relevant, let $S_N = \sum_{i=1}^{N} v_i$ be the
+cumulative sum of the top-$N$ scores under Eq.~\eqref{eq:prf}'s ranking, and
+let $G_q = c \cdot T_q / \rho$ be the estimated number of relevant documents
+for query $q$, where $T_q$ is the score total over the whole candidate pool,
+$\rho$ is the fraction of official relevant documents estimated to fall
+inside the candidate pool (measured empirically at $\rho \approx 0.73$), and
+$c$ is a single global calibration constant. The per-query count is then
+\begin{equation}
+N_q = \operatorname*{arg\,max}_{\,\mathrm{low} \,\leq\, N \,\leq\, \mathrm{high}} \ \frac{c \cdot S_N}{4\, G_q + N},
+\label{eq:f2}
+\end{equation}
+which is, up to the constant factor $5$, the closed-form optimum of
+$F_2 = 5PR/(4P+R)$ under $P \approx c S_N / N$ and $R \approx c S_N / G_q$ --
+the per-query analogue, under this probabilistic reading of the scores, of
+the result that the $F_\beta$-optimal decision threshold on a calibrated
+score is a fixed function of the achieved $F_\beta$
+value~\cite{lipton2014thresholding}. The single constant $c$ is calibrated,
+by bisection, so that the mean of $N_q$ over all queries equals a target value
+(190 in the configuration reported in Sect.~\ref{sec:results}), and $N_q$ is
+clipped to a plausible range (60--400 documents) to avoid degenerate counts
+on queries whose score distribution is unusually flat or peaked.
+% PROVENANCE: f2_counts() docstring and implementation in
+% final_system/prf_rerank.py ("F2(N) = 5·c·S_N/(4·G+N)", pool_recall default
+% and bisection over log(c)); SYSTEM.md S4 step B4.3 (bounds 60--400, mean
+% target 190).
+
+\paragraph{Passage windowing and submission size.}
+For every selected document, we submit one window of up to $1{,}000$ tokens
+built from whole sentence/paragraph segments around the document's
+highest-scoring passage under Sect.~\ref{sec:module2}; the window is still an
+exact, contiguous slice of the source text, never a concatenation of
+non-adjacent spans. For the $50$ highest-ranked documents of each query, a
+second window is added around the second-highest-scoring passage of the same
+document whenever that passage falls outside the first window, so that a
+long document with two separately relevant sections is not forced to
+compete for a single window. The resulting submission JSON is compressed
+with LZMA at a $512$~MB dictionary size, which we verified byte-for-byte
+against the uncompressed JSON before using it, to keep the submitted archive
+under the task's size limit while introducing no further rewriting of the
+submitted text.
+% PROVENANCE: SYSTEM.md S4 step B4.4-B4.5 (window $\le 1{,}000$ tokens,
+% second window for top 50 documents, JSON capped near 1{,}050 MB) and S5
+% (rezip_lzma.py, --dict-mb 512, byte-level equality check); cut_chunks() in
+% final_system/prf_rerank.py for the verbatim-slice guarantee.
+
+% ================= 4. EXPERIMENTS =================
+\section{Experiments}
+
+\subsection{Dataset and Evaluation Setup}
+\label{sec:dataset}
+
+The task supplies $1{,}200$ Vietnamese-language biomedical queries and a
+fixed list of source identifiers and URLs; participants are responsible for
+crawling the corresponding documents themselves, and only documents on this
+official identifier list may be submitted as evidence. Summed over the
+fourteen retained runs of Sect.~\ref{sec:module1}--\ref{sec:coverage}, the
+per-run document counts reported by the corpus-preparation step total
+$796{,}579$ kept documents and $2{,}763{,}929$ passages before any
+cross-run deduplication; because the same underlying document can in
+principle be crawled into more than one run, this sum should be read as an
+upper bound on the number of distinct documents available to the system,
+not as a deduplicated corpus size.
+% PROVENANCE: sum of documents_kept / chunks over the 14 runs listed in
+% SYSTEM.md S4 (run_vi, run_b..run_g, run_zh_a/b/c, run_h, run_archive,
+% run_archive2, run_archive3), each read from the corresponding
+% */corpus/prepare_manifest.json and */chunks/chunk_manifest.json row in
+% final_system/system_submission/manifests/INDEX.md. Three additional runs
+% present in that index (run_en_a, run_en2, run_en3, together 239{,}441
+% documents) correspond to a PubMed-based English expansion that SYSTEM.md
+% S3 records as tried and not kept ("Không dùng: PubMed (đã thử, không có
+% lợi)"); they are excluded from this total.
+
+Performance is measured by the organizers at two levels of granularity,
+document and passage, using macro-averaged Precision, Recall, and $F_2$ over
+all $1{,}200$ queries; a submitted passage counts as correct for a given
+reference passage when the longest common token subsequence between the two,
+after a fixed normalization, covers at least $40\%$ of the reference
+passage's length. We report the aggregate FINAL score published by the
+leaderboard together with the document-level and passage-level $F_2$ scores
+that compose it. All results below are measured on the public leaderboard of
+the shared task; the task additionally defines a separate private evaluation
+phase over the same submission format, which this paper does not report on
+separately. No labelled development set matching the official judgments was
+available to us during development; the ablations in
+Sect.~\ref{sec:ablation} were therefore evaluated directly against the public
+leaderboard, a methodological limitation we return to in
+Sect.~\ref{sec:limitations}.
+% PROVENANCE: query count, document-identifier policy and the 40% LCS
+% passage-matching rule are stated in docs/note/RULE.txt (sections 3.1-3.2
+% of the task rules); FINAL/DOCS_F2/CHUNKS_F2 column names and values are
+% read from SYSTEM.md S1 and S7.
+
+\subsection{System-Level Results}
+\label{sec:results}
+
+Table~\ref{tab:main} reports the two configurations we submitted as final
+candidates. Both apply every refinement described in
+Sect.~\ref{sec:fusion}; the only difference between them is the passage
+compression budget used by the fitting step that trades the number of
+second-window passages against the JSON size limit (Sect.~\ref{sec:fusion},
+``Passage windowing and submission size''). We designated the slightly
+higher-scoring configuration as our primary submission.
+
+\begin{table}[H]
+\centering
+\caption{Public-leaderboard scores of the two final submission candidates,
+over $1{,}200$ queries.}
+\label{tab:main}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\hline
+Configuration & FINAL & DOCS\_F2 & CHUNKS\_F2 & Role \\
+\hline
+\texttt{f2\_x50\_rx\_small} & \textbf{0.3060} & \textbf{0.3381} & \textbf{0.2739} & primary \\
+\texttt{f2\_x50\_1050\_small} & 0.3055 & 0.3375 & 0.2734 & backup \\
+\hline
+\end{tabular}
+\end{table}
+% PROVENANCE: SYSTEM.md S1 table, verbatim.
+
+\subsection{Incremental Contribution of Each Refinement}
+\label{sec:ablation}
+
+We tracked the public-leaderboard score as each refinement described in
+Sect.~\ref{sec:fusion} was added on top of the previous configuration, keeping
+everything else fixed. Table~\ref{tab:progression} reports this progression;
+each row's FINAL score already includes every refinement in the rows above
+it. The step contributed by the adaptive, per-query document count is
+reported for the document-level score only, because that intermediate
+configuration was submitted before passage windowing had been added to the
+pipeline, and we did not re-run a since-superseded configuration purely to
+backfill a passage-level number.
+
+\begin{table}[H]
+\centering
+\caption{Public-leaderboard FINAL score after each refinement is added, in
+the order it was introduced. Each row includes all refinements listed above
+it.}
+\label{tab:progression}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccl}
+\hline
+Refinement & FINAL & DOCS\_F2 & Note \\
+\hline
+PRF re-ranking + chunk cutting by reranker order & 0.2851 & 0.3158 & fixed-size candidate pool \\
++ Per-query adaptive document count & n/a$^{*}$ & 0.3336 & document-level only \\
++ Per-query passage windowing & 0.3003 & --\, & CHUNKS\_F2 0.2669 \\
++ Expected-$F_2$ count rule, 1{,}000~MB budget & 0.3033 & 0.3375 & \\
++ Second window, 20 $\rightarrow$ 50 documents & 0.3050 $\rightarrow$ 0.3055 & --\, & CHUNKS\_F2 0.2725 $\rightarrow$ 0.2734 \\
++ Supplementary near-cutoff rescoring & \textbf{0.3060} & 0.3381 & CHUNKS\_F2 0.2739 \\
+\hline
+\end{tabular}
+
+\smallskip
+\footnotesize $^{*}$Only the document-level submission of this intermediate
+configuration was scored; a FINAL score for a document-only submission is
+not comparable to the full-pipeline rows above and is omitted here.
+\end{table}
+% PROVENANCE: SYSTEM.md S7, "Các bước đã thử và đóng góp" table, verbatim
+% (including the footnote content, paraphrased from "ước tính, chỉ nộp
+% phần docs").
+
+Every refinement in Table~\ref{tab:progression} is associated with a FINAL
+score at least as high as the configuration before it, and the overall gain
+from the first row to the last is $0.0209$ FINAL. We read this as evidence
+that the three mechanisms of Sect.~\ref{sec:fusion} -- topic-based
+re-ranking, per-query adaptive sizing, and passage windowing -- address
+largely separate sources of error rather than one mechanism substituting for
+another, since each continued to help after the others were already in
+place.
+
+\subsection{Alternatives That Were Not Kept}
+\label{sec:rejected}
+
+We also evaluated several modifications that either left the score
+essentially unchanged or reduced it; Table~\ref{tab:rejected} lists them
+together with the document-level $F_2$ obtained, measured against the
+0.3336 or 0.3375 document-level baselines of the corresponding row in
+Table~\ref{tab:progression} (the two reference points we had available at
+the time each alternative was tried).
+
+\begin{table}[H]
+\centering
+\caption{Design alternatives evaluated and not retained, with the resulting
+document-level $F_2$ on the public leaderboard.}
+\label{tab:rejected}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lc}
+\hline
+Alternative & DOCS\_F2 \\
+\hline
+Expanding candidates beyond the pool by topic similarity & 0.3121 \\
+Qwen-based encoder for the PRF topic vector & 0.3327 \\
+Mean target of 230 documents per query & 0.3324 \\
+Maximum of 600 documents per query & 0.3306 \\
+Minimum of 30 documents per query & 0.3324 \\
+Down-weighting Chinese-language documents by $\times 0.6$ & 0.3294 \\
+Folding the second passage's score into the document score & 0.3360 \\
+Mixing coefficient $\mu = 0.6$ in Eq.~\eqref{eq:mix} & lower \\
+Minimum of 90 documents per query & lower \\
+\hline
+\end{tabular}
+\end{table}
+% PROVENANCE: SYSTEM.md S7, "Các thử nghiệm bị loại" table, verbatim (two
+% rows reported only as "thấp hơn" in the source, reproduced as "lower"
+% since no exact value was recorded there).
+
+We note two alternatives that a reader might expect to help but did not:
+expanding the candidate pool with topically similar but previously unranked
+documents reduced the score rather than increasing it, and down-weighting
+Chinese-language documents -- motivated by the Vietnamese language of the
+queries -- also reduced the score. We read the latter result as consistent
+with the corpus composition described in Sect.~\ref{sec:dataset}: because a
+large share of the collection is Chinese-language, suppressing it is likely
+to remove genuinely relevant documents more often than it removes
+false positives, even though the query language itself is Vietnamese.
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+We highlight four limitations of the present system and of how it was
+evaluated. First, the ablations reported in Sect.~\ref{sec:ablation} and
+Sect.~\ref{sec:rejected} were compared directly on the public leaderboard
+rather than on an independent, labelled development set, because no such set
+matching the official judgments was available to us; the task additionally
+limits the number of submissions allowed per day, which constrains how many
+configurations can be compared this way and raises the ordinary risk of
+indirectly fitting the public split through repeated, score-guided
+decisions. Second, the reported corpus size of $796{,}579$ documents is a
+sum of per-run counts, not a deduplicated figure, since no explicit
+cross-run deduplication step is applied before the per-run statistics are
+computed; the number of distinct documents actually available to the system
+is therefore somewhat smaller than this figure. Third, the coverage-recovery
+step of Sect.~\ref{sec:coverage} depends on a URL's slug carrying enough
+signal for the first retrieval sub-step to rank it, and on that URL having
+been archived publicly, so it is expected to recover only a fraction of the
+documents the main crawl could not fetch rather than closing the coverage
+gap entirely. Fourth, every learned component in the pipeline is used in a
+zero-shot, pretrained configuration; we did not fine-tune any encoder or
+reranker on this task's queries or documents, so headroom that a
+task-specific fine-tuning step might provide is not reflected in the results
+above.
+% PROVENANCE: 796,579 figure is this paper's own sum, reproduced from the
+% per-run manifest table under Sect.~\ref{sec:dataset}'s provenance note,
+% not an independently stated total in SYSTEM.md.
+
+% ================= 5. CONCLUSION =================
+\section{Conclusion}
+
+We presented a retrieval pipeline for cross-lingual biomedical information
+retrieval that is assembled from openly released, pretrained components --
+sparse and dense first-stage retrieval fused by reciprocal rank fusion across
+several independently maintained document partitions, a higher-capacity
+cross-encoder reranker applied only to the resulting candidate pool, and a
+pseudo-relevance-feedback stage that both re-ranks candidates by a per-query
+topic estimate and sets the number of documents and passages returned per
+query by directly maximizing an expected-$F_2$ objective derived from the
+reranker's own scores. A coverage-recovery step that resolves a subset of
+the documents the primary crawl could not fetch directly, through their
+archived snapshots, supplies additional documents to the same pipeline
+without requiring a separate ranking mechanism.
+
+On the public leaderboard of the task, the complete pipeline reaches a FINAL
+score of 0.3060 (document-level $F_2$ 0.3381, passage-level $F_2$ 0.2739),
+and each of the refinements described in Sect.~\ref{sec:fusion} --
+topic-based re-ranking, per-query adaptive document counts, and per-query
+passage windowing -- was associated with a further increase over the
+configuration preceding it, for a combined gain of 0.0209 FINAL over a
+fixed-size pseudo-relevance-feedback baseline. We also reported the design
+alternatives that did not improve the score, including two -- candidate-pool
+expansion by topic similarity and down-weighting the collection's dominant
+language -- that a reader familiar only with the query language might expect
+to help. The main limitation of this evaluation, that every comparison was
+made directly on a rate-limited public leaderboard rather than on an
+independent labelled set, is one we were unable to avoid under the task's
+constraints, and we have tried to report it plainly rather than understate
+it.
+
+% ================= ACKNOWLEDGMENT & REFERENCES =================
+\section*{Acknowledgment}
+This research was supported by The VNUHCM-University of Information Technology's Scientific Research Support Fund.
+
+\bibliographystyle{splncs04}
+\bibliography{ref}
+
+\end{document}
