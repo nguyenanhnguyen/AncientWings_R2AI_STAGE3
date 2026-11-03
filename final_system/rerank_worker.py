@@ -52,14 +52,24 @@ class DummyScorer:
 
 
 class QwenScorer:
-    def __init__(self, model_id, max_length):
+    def __init__(self, model_id, max_length, quant='none'):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         self.torch = torch
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side='left')
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=torch.float16, attn_implementation='sdpa').to('cuda').eval()
+        if quant == 'none':
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id, torch_dtype=torch.float16, attn_implementation='sdpa').to('cuda').eval()
+        else:
+            # 8B in fp16 (~16 GB) does not fit one T4: load 4-bit (~5.5 GB) or 8-bit (~9 GB) with bitsandbytes.
+            from transformers import BitsAndBytesConfig
+            config = (BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4',
+                                         bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True)
+                      if quant == '4bit' else BitsAndBytesConfig(load_in_8bit=True))
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_id, quantization_config=config, torch_dtype=torch.float16, attn_implementation='sdpa',
+                device_map={'': 0}).eval()
         self.yes_id = self.tokenizer.convert_tokens_to_ids('yes')
         self.no_id = self.tokenizer.convert_tokens_to_ids('no')
         self.prefix_ids = self.tokenizer.encode(PREFIX, add_special_tokens=False)
@@ -89,6 +99,8 @@ def main():
     parser.add_argument('--deadline', type=float, default=0, help='Unix time to stop at; 0 = none.')
     parser.add_argument('--tag', default='')
     parser.add_argument('--dummy', action='store_true')
+    parser.add_argument('--quant', choices=['none', '8bit', '4bit'], default='none',
+                        help='Nạp mô hình lượng tử hoá (cần bitsandbytes); dùng cho 8B trên T4.')
     args = parser.parse_args()
 
     table = pq.read_table(args.pairs, columns=['qid', 'query', 'doc_id', 'run', 'chunk_order', 'text'])
@@ -100,7 +112,7 @@ def main():
     print(f'{args.tag} cặp: {len(rows)}, đã chấm: {len(rows) - len(todo)}, còn: {len(todo)}', flush=True)
     if not todo:
         return
-    scorer = DummyScorer() if args.dummy else QwenScorer(args.model, args.max_length)
+    scorer = DummyScorer() if args.dummy else QwenScorer(args.model, args.max_length, args.quant)
     size, position, written, bad = args.batch_size, 0, 0, 0
     started = last_report = time.time()
     with open(args.out, 'a', encoding='utf-8') as out:

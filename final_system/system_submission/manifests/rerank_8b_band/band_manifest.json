@@ -1,0 +1,10 @@
+{
+  "pairs": 304239,
+  "per_query": 253.5,
+  "band": [
+    0.5,
+    2.0
+  ],
+  "without_text": 0,
+  "hours_one_session_4b_at_6_5_per_s": 13.0
+}
