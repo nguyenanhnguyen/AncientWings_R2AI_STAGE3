@@ -9,8 +9,9 @@ Tham số chính xác của từng bước được lưu trong các file manifes
 |---|---|---|---|
 | **`work/prf/f2_x50_rx_small/submission.zip`** (bài chính) | **0,3060** | 0,3381 | 0,2739 |
 | `work/prf/f2_x50_1050_small/submission.zip` (dự phòng) | 0,3055 | 0,3375 | 0,2734 |
+| `work/prf/f2_x50_rx_8b2_small/submission.zip` (thêm Qwen3-Reranker-8B, mục 4 B5) | chưa có | – | – |
 
-Điểm public leaderboard, 1.200 câu, bài nộp ≤ 100 MB.
+Điểm public leaderboard, 1.200 câu, bài nộp ≤ 100 MB. Bài 8B làm sau khi vòng public đóng nên chưa có điểm public.
 
 ## 2. Mô hình
 
@@ -24,6 +25,7 @@ Tất cả là mô hình mở, mỗi mô hình ≤ 15B tham số, phát hành tr
 | `BAAI/bge-reranker-v2-m3` | 568M | 2024 | Reranker trong pipeline (điểm "cũ") |
 | `Qwen/Qwen3-Reranker-0.6B` | 0.6B | 06/2025 | Reranker trong pipeline (điểm "cũ") |
 | `Qwen/Qwen3-Reranker-4B` | 4B | 06/2025 | Bộ xếp hạng chính (Kaggle, 2×T4) |
+| `Qwen/Qwen3-Reranker-8B` (4-bit nf4) | 8B | 06/2025 | Reranker thứ hai cho tài liệu sát hạng cắt (chỉ bài 8B, mục 4 B5) |
 
 Ngoài ra: BM25 (kênh từ khoá). Không dùng LLM đóng, không fine-tune.
 
@@ -33,7 +35,7 @@ Ngoài ra: BM25 (kênh từ khoá). Không dùng LLM đóng, không fine-tune.
 - **Câu hỏi:** `data/query.parquet` (1.200 câu).
 - **Văn bản tài liệu:** đội tự crawl các URL trong danh sách bằng `notebooks/crawl_corpus_kaggle_hf_upload.ipynb`. Kết quả lưu ở HF dataset `AncientWings/AncientWings_R2AI_STAGE3_ds`, dạng file `ids_<đầu>_<cuối>_synced.parquet`, chỉ giữ trang qua QC.
 - **Dữ liệu ngoài (web.archive.org):** các trang không tải được trực tiếp được lấy bản lưu trên Wayback Machine (`notebooks/archive_fetch_kaggle.ipynb`). Danh sách trang và nguồn trích dẫn nằm trong `work/archive*/` (`targets.parquet`, provenance). Nội dung vẫn là nguyên văn của đúng URL trong danh sách BTC.
-- **`lo_004`:** một lô crawl của đội đã có sẵn bài nộp nhưng không còn thư mục run. Chunk của lô này là nguyên văn đoạn đã chấm.
+- **`lo_004` (lô 0,04):** đã chạy lại qua pipeline thành `run_h`. Các lượt chấm 4B xuất trước đó vẫn ghi nguồn là `lo_004` và chứa sẵn văn bản đoạn đã chấm trong `pairs.parquet`, nên khi dựng bài không cần thư mục `lo_004`; tài liệu có ở cả hai nguồn chỉ được tính một lần (lấy đoạn điểm cao nhất).
 - **Không dùng:** PubMed (đã thử, không có lợi) và mọi nhãn bên ngoài.
 
 `chunk_text` luôn là một lát cắt liên tục, nguyên văn của văn bản tài liệu (không viết lại).
@@ -84,6 +86,21 @@ crawl (Kaggle) ──> corpus từng lô ──> pipeline từng run (14 run) �
    - Dung lượng JSON được giới hạn ở 1.050 MB.
 5. **Nén:** `rezip_lzma.py`, LZMA với từ điển 512 MB. Nội dung được kiểm tra trùng khớp từng byte sau khi nén.
 
+**B5. (Bài 8B) Chấm lại vùng sát hạng cắt bằng Qwen3-Reranker-8B** (`prf_rerank.py --export-band` →
+`notebooks/rerank_8b_kaggle.ipynb` → `prf_rerank.py --scores8b`):
+- Với N = số tài liệu của câu (bước B4.3), lấy các tài liệu ở hạng **0,5N–2,0N** theo thứ tự PRF. Mỗi tài liệu
+  chấm lại **đoạn đại diện** (đoạn quyết định điểm của nó, cùng khoá cặp với điểm 4B): 304.239 cặp.
+- Chấm trên Kaggle bằng Qwen3-Reranker-8B lượng tử 4-bit (bitsandbytes nf4), cùng prompt và cùng độ dài tối đa
+  768 token như lượt 4B; khoảng 4 cặp/giây trên 2×T4, chia theo khoảng id câu (1–600, 601–1200). Notebook bỏ qua
+  các cặp đã có điểm, nên lượt sau chỉ chấm phần còn thiếu.
+- Phần 4B của đoạn được thay bằng trung bình hai mô hình: s(p) = 0,5·(0,5·s_4B + 0,5·s_8B) + 0,5·s_old
+  (`--w8b 0.5`). Sau đó chạy lại B4.2–B4.5 như cũ (PRF, số tài liệu theo câu, chunk, nén).
+- Trên 5.095 cặp đo thử: Spearman 8B–4B 0,72 (trung vị trong từng câu 0,57).
+- So với bài 0,3060 (`rank_drop.py`): đổi khoảng **10,8 tài liệu/câu**, gần như toàn bộ ở hạng 0,7N–1,0N
+  (bị bỏ: 6% ở 0,7–0,8N, 14% ở 0,8–0,9N, 34% ở 0,9–1,0N; 0% ở nửa trên danh sách). Vì F2 tính trên tập tài liệu,
+  chấm lại phần đầu danh sách không đổi được kết quả nên không làm. Bản dải hẹp 0,7N–1,5N (179.160 cặp) đổi
+  10,5 tài liệu/câu; mở rộng lên 0,5N–2,0N chỉ đổi thêm khoảng 2,6 tài liệu/câu.
+
 ## 5. Lệnh tái lập bài cuối
 
 Ở thư mục gốc repo, PowerShell, Python trong `env`. Cần có sẵn:
@@ -110,6 +127,17 @@ Chuẩn bị lượt bổ sung (đã chạy; chỉ cần nếu tái lập từ �
 ```
 Lệnh này xuất 165.331 cặp. Chấm trên Kaggle (`rerank_kaggle.ipynb`) với tốc độ khoảng 6,5 cặp/giây trên 2×T4.
 
+Bài 8B (mục 4 B5). Cần thêm 2 file điểm 8B (`scores_8b*.parquet`, mỗi file chứa điểm của mọi lượt trước) trong
+`work/rerank_8b_band/`:
+```powershell
+# Xuất cặp (đã chạy; chỉ cần nếu tái lập từ đầu): 304.239 cặp
+.\env\Scripts\python.exe prf_rerank.py --docs 190 --adaptive --adaptive-rule f2 --band 0.5 2.0 --export-band work/rerank_8b_band
+# Chấm trên Kaggle: notebooks/rerank_8b_kaggle.ipynb, MAX_QUERIES = 0, QID_FROM/QID_TO = 1/600 và 601/1200
+.\env\Scripts\python.exe prf_rerank.py --docs 190 --adaptive --adaptive-rule f2 --chunk-mb 1050 --extra-windows 50 --scores8b "work/rerank_8b_band/scores_8b*.parquet" --w8b 0.5 --out work/prf/f2_x50_rx_8b2
+.\env\Scripts\python.exe rezip_lzma.py work/prf/f2_x50_rx_8b2/submission.zip work/prf/f2_x50_rx_8b2_small/submission.zip --dict-mb 512
+```
+Kết quả phải có dòng `Mô hình thứ hai: 304,239 điểm`.
+
 ## 6. Manifest và kiểm tra
 
 ```powershell
@@ -119,6 +147,15 @@ Lệnh này xuất 165.331 cặp. Chấm trên Kaggle (`rerank_kaggle.ipynb`) v�
 
 - `collect_manifests.py` chép mọi manifest (tham số từng bước, số tài liệu, số cặp, cấu hình bài cuối) và provenance vào một thư mục, kèm `INDEX.md`.
 - `chunk_stats.py` in số tài liệu/chunk mỗi câu và độ dài chunk của bài nộp.
+
+Công cụ phân tích (không cần GPU, không cần đáp án):
+
+| Script | Dùng để |
+|---|---|
+| `compare_submissions.py A B` | Hai bài nộp khác nhau bao nhiêu tài liệu/chunk mỗi câu |
+| `rank_drop.py A B` | Tài liệu của A bị B bỏ nằm ở đâu trong danh sách của A (theo hạng / N) |
+| `source_breakdown.py BÀI [--per-query FILE.csv]` | Bài nộp lấy tài liệu/chunk từ lô nào, theo từng câu |
+| `coverage_check.py --crawl "…"` | Dữ liệu đã crawl có nằm hết trong 14 run chưa |
 
 ## 7. Các bước đã thử và đóng góp
 
@@ -146,10 +183,11 @@ Các thử nghiệm bị loại, DOCS_F2 so với mốc .3336 hoặc .3375:
 | Tính thêm đoạn thứ hai vào điểm | .3360 |
 | Trộn 0,6 điểm 4B | thấp hơn |
 | Tối thiểu 90 tài liệu/câu | thấp hơn |
+| Thêm tài liệu tiếng Anh (`run_en`) | .3323 (FINAL 0,3009) |
 
 ## 8. Danh sách nộp kèm
 
 - **Code:** các script ở thư mục gốc, cùng `src/`, `scripts/`, `notebooks/` và tài liệu này.
 - **Manifest:** `system_submission/manifests/`.
 - **Bài nộp:** `work/prf/f2_x50_rx_small/submission.zip`.
-- **Dữ liệu trung gian:** điểm 4B (`work/rerank_*`) để tái lập mà không cần GPU. Nộp hay chỉ giữ là tuỳ yêu cầu của BTC.
+- **Dữ liệu trung gian:** điểm 4B (`work/rerank_*`) và điểm 8B (`work/rerank_8b_band/scores_8b*.parquet`) để tái lập mà không cần GPU. Nộp hay chỉ giữ là tuỳ yêu cầu của BTC.

@@ -1,6 +1,6 @@
 # Manifest của các bước
 
-448 file, chép từ `work/`.
+375 file, chép từ `work/`.
 
 | File | Số chính |
 |---|---|
@@ -10,51 +10,7 @@
 | `archive2/targets_manifest.json` |  |
 | `archive3/targets.parquet` | 0.53 MB |
 | `archive3/targets_manifest.json` |  |
-| `chunk_ceiling/ceiling_manifest.json` | docs_per_query=222.0, zip_mb=29.4 |
-| `combo_final/combine_manifest.json` | docs_per_query=190.0, chunks_per_query=205.4, zip_mb=168.7 |
-| `combo_prf/combine_manifest.json` | docs_per_query=190.0, chunks_per_query=205.4, zip_mb=168.7 |
-| `combo_w0/combine_manifest.json` | docs_per_query=190.0, chunks_per_query=185.8, zip_mb=152.3 |
-| `combo_w0_top20/append_manifest.json` | chunks_per_query=205.4, zip_mb=168.7 |
-| `diag/f2_zh/subset_manifest.json` | zip_mb=0.15 |
-| `diag_chunkdocs/diag_manifest.json` | zip_mb=0.61 |
-| `final_arch_app20/append_manifest.json` | chunks_per_query=181.9, zip_mb=165.0 |
-| `final_c150_arch2/merge_manifest.json` | json_mb=956.0, zip_mb=158.9 |
-| `final_c180/merge_manifest.json` | json_mb=533.4, zip_mb=91.4 |
-| `final_c180_040/merge_manifest.json` | json_mb=511.7, zip_mb=87.6 |
-| `final_cd_d250/merge_manifest.json` | json_mb=932.2, zip_mb=152.6 |
-| `final_p4_w1000/merge_manifest.json` | json_mb=615.3, zip_mb=104.8 |
-| `final_p4_w1000_arch_h/merge_manifest.json` | json_mb=804.5, zip_mb=133.7 |
-| `final_p5_c150/merge_manifest.json` | json_mb=710.1, zip_mb=121.3 |
-| `final_p5_c150_arch_h/merge_manifest.json` | json_mb=898.7, zip_mb=150.1 |
-| `final_p5_c200/merge_manifest.json` | json_mb=852.8, zip_mb=145.5 |
-| `final_p5_c200_arch_h/merge_manifest.json` | json_mb=1040.6, zip_mb=174.1 |
-| `final_p5_cm07/prune_manifest.json` | zip_mb=109.6 |
-| `final_p5_w1000/merge_manifest.json` | json_mb=628.4, zip_mb=107.5 |
-| `final_p5_w1000_arch_h/merge_manifest.json` | json_mb=817.6, zip_mb=136.4 |
-| `final_p5ha_a2a3/merge_manifest.json` | json_mb=985.6, zip_mb=160.8 |
-| `final_p5ha_a2a3_cd/diag_manifest.json` | zip_mb=160.54 |
-| `final_p5ha_arch2/merge_manifest.json` | json_mb=931.9, zip_mb=152.5 |
-| `final_p5ha_arch2_cd/diag_manifest.json` | zip_mb=152.23 |
-| `final_p5ha_c150/merge_manifest.json` | json_mb=776.1, zip_mb=130.0 |
-| `final_p5ha_c150_arch_h/merge_manifest.json` | json_mb=874.6, zip_mb=143.6 |
-| `final_p5haa2_ah2/merge_manifest.json` | json_mb=926.9, zip_mb=151.1 |
-| `final_p5haa2_ah2_cd/diag_manifest.json` | zip_mb=150.85 |
-| `final_p5haa2_c150/merge_manifest.json` | json_mb=794.7, zip_mb=132.6 |
-| `final_slug4b20/merge_manifest.json` | json_mb=534.5, zip_mb=91.6 |
-| `final_w1200/merge_manifest.json` | json_mb=716.2, zip_mb=100.7 |
-| `final_w1500/merge_manifest.json` | json_mb=789.9, zip_mb=108.2 |
-| `final_w2500_app600/append_manifest.json` | chunks_per_query=203.3, zip_mb=140.3 |
-| `final_w2500_arch20/merge_manifest.json` | json_mb=1060.0, zip_mb=147.6 |
-| `final_w2500_dedup/dedupe_manifest.json` | zip_mb=134.9 |
-| `final_w2500_plus600/merge_manifest.json` | json_mb=1256.0, zip_mb=144.9 |
 | `merged_best_zh_ab_cfull/merge_manifest.json` | json_mb=543.1, zip_mb=93.5 |
-| `merged_c120_p4_w1000/merge_manifest.json` | json_mb=702.2, zip_mb=120.8 |
-| `merged_c120_p5_w1000/merge_manifest.json` | json_mb=711.9, zip_mb=123.0 |
-| `merged_c150_p5_w1000/merge_manifest.json` | json_mb=810.4, zip_mb=139.7 |
-| `merged_c150_p5ha/merge_manifest.json` | json_mb=857.6, zip_mb=145.2 |
-| `merged_c150_p5haa2/merge_manifest.json` | json_mb=875.5, zip_mb=147.6 |
-| `merged_c200_p5_w1000/merge_manifest.json` | json_mb=1016.0, zip_mb=175.1 |
-| `merged_c80_noslug/merge_manifest.json` | json_mb=610.5, zip_mb=105.8 |
 | `merged_g/merge_manifest.json` | json_mb=381.2, zip_mb=98.6 |
 | `pool_test/pool_manifest.json` | zip_mb=2.3 |
 | `pool_test2/pool_manifest.json` | zip_mb=2.9 |
@@ -72,6 +28,9 @@
 | `prf/f2_x20_1050/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=192.8, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=20, json_mb=992.8, zip_mb=278.61, encoder=bge-m3 |
 | `prf/f2_x50_1050/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=196.2, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=50, json_mb=1006.9, zip_mb=282.48, encoder=bge-m3 |
 | `prf/f2_x50_rx/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=196.2, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=50, json_mb=1008.7, zip_mb=282.96, encoder=bge-m3 |
+| `prf/f2_x50_rx_8b/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=196.3, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=50, json_mb=1008.3, zip_mb=283.08, encoder=bge-m3 |
+| `prf/f2_x50_rx_8b2/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=196.3, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=50, json_mb=1007.6, zip_mb=283.03, encoder=bge-m3 |
+| `prf/f2_x50_rx_en/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=196.1, adaptive_rule=f2, chunk_mb=1050.0, extra_windows=50, json_mb=989.9, zip_mb=279.63, encoder=bge-m3 |
 | `prf/f2_zh06/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=0.0, adaptive_rule=f2, chunk_mb=0, extra_windows=0, json_mb=1.9, zip_mb=0.65, encoder=bge-m3 |
 | `prf/m07/prf_manifest.json` | zip_mb=0.68, encoder=bge-m3 |
 | `prf/m10/prf_manifest.json` | zip_mb=0.68, encoder=bge-m3 |
@@ -87,42 +46,14 @@
 | `prf/w1_qwen/prf_manifest.json` | docs_per_query=190.0, chunks_per_query=0.0, zip_mb=0.67, encoder=qwen3-embedding-0.6b |
 | `prf/w1_s20/prf_manifest.json` | zip_mb=0.67, encoder=bge-m3 |
 | `prf/w2/prf_manifest.json` | zip_mb=0.67, encoder=bge-m3 |
-| `pruned_020_noslug/prune_manifest.json` | zip_mb=91.5 |
-| `pruned_030/prune_manifest.json` | zip_mb=87.9 |
-| `pruned_030_c180/prune_manifest.json` | zip_mb=91.3 |
-| `pruned_030_noslug/prune_manifest.json` | zip_mb=87.8 |
-| `pruned_030_p4_w1000/prune_manifest.json` | zip_mb=104.7 |
-| `pruned_030_p5_c150/prune_manifest.json` | zip_mb=121.2 |
-| `pruned_030_p5_c200/prune_manifest.json` | zip_mb=145.4 |
-| `pruned_030_p5_w1000/prune_manifest.json` | zip_mb=107.4 |
-| `pruned_030_p5ha_c150/prune_manifest.json` | zip_mb=129.9 |
-| `pruned_030_p5haa2_c150/prune_manifest.json` | zip_mb=132.5 |
-| `pruned_030_w1200/prune_manifest.json` | zip_mb=100.6 |
-| `pruned_030_w1500/prune_manifest.json` | zip_mb=108.1 |
-| `pruned_040_c180/prune_manifest.json` | zip_mb=87.4 |
-| `pruned_040_noslug/prune_manifest.json` | zip_mb=84.0 |
-| `rerank/A_d100_c70_w2000/rerank_manifest.json` | pairs=work/rerank/pairs.parquet, pairs_total=120000, pairs_scored=120000, zip_mb=84.4 |
-| `rerank/d100_c70_mix05/rerank_manifest.json` | pairs=work/rerank/pairs.parquet, pairs_total=120000, pairs_scored=120000, zip_mb=100.7 |
-| `rerank/d100_c70_mix05_004/merge_manifest.json` | json_mb=478.3, zip_mb=74.9 |
-| `rerank/pairs_manifest.json` | pairs=120000, docs_per_query=100 |
-| `rerank_all/d190_c190/rerank_manifest.json` | pairs_total=1902164, pairs_scored=1902164, zip_mb=160.1 |
+| `rerank_8b_band/band_manifest.json` | pairs=304239 |
+| `rerank_8b_band2/band_manifest.json` | pairs=179160 |
 | `rerank_arch2/pairs_manifest.json` | pairs=93780 |
 | `rerank_arch3/pairs_manifest.json` | pairs=93507 |
 | `rerank_en/pairs_manifest.json` | pairs=72000 |
 | `rerank_en/top5/rerank_manifest.json` | pairs=work/rerank_en/pairs.parquet, pairs_total=72000, pairs_scored=72000, zip_mb=1.9 |
 | `rerank_extra/extra_manifest.json` | pairs=165331 |
 | `rerank_h_arch/pairs_manifest.json` | pairs=184405 |
-| `rerank_p5ha/d150_c150_w1000/rerank_manifest.json` | pairs_total=1714877, pairs_scored=1714877, zip_mb=125.0 |
-| `rerank_p5haa2/d150_c150_w1000/rerank_manifest.json` | pairs_total=1808657, pairs_scored=1808657, zip_mb=125.9 |
-| `rerank_p5haa2/d250_docs/rerank_manifest.json` | pairs_total=1808657, pairs_scored=1808657, zip_mb=1.0 |
-| `rerank_pool/d150_c80_m05/rerank_manifest.json` | pairs=work/rerank_pool/pairs.parquet, pairs_total=310647, pairs_scored=310647, zip_mb=66.0 |
-| `rerank_pool/pairs_manifest.json` | pairs=310647 |
-| `rerank_pool3/d150_c100_m05/rerank_manifest.json` | pairs=work/rerank_pool3/pairs.parquet, pairs_total=496665, pairs_scored=496665, zip_mb=82.4 |
-| `rerank_pool3/d150_c80_m05/rerank_manifest.json` | pairs=work/rerank_pool3/pairs.parquet, pairs_total=496665, pairs_scored=496665, zip_mb=66.1 |
-| `rerank_pool3/d150_c80_w1200/rerank_manifest.json` | pairs=work/rerank_pool3/pairs.parquet, pairs_total=496665, pairs_scored=496665, zip_mb=73.9 |
-| `rerank_pool3/d150_c80_w1500/rerank_manifest.json` | pairs=work/rerank_pool3/pairs.parquet, pairs_total=496665, pairs_scored=496665, zip_mb=82.2 |
-| `rerank_pool3/d250_c80_m05/rerank_manifest.json` | pairs=work/rerank_pool3/pairs.parquet, pairs_total=496665, pairs_scored=496665, zip_mb=66.6 |
-| `rerank_pool3/pairs_manifest.json` | pairs=496665 |
 | `rerank_pool4/d150_c100_w2000/rerank_manifest.json` | pairs=work/rerank_pool4/pairs.parquet, pairs_total=677492, pairs_scored=677492, zip_mb=109.5 |
 | `rerank_pool4/d150_c100_w600/rerank_manifest.json` | pairs=work/rerank_pool4/pairs.parquet, pairs_total=677492, pairs_scored=677492, zip_mb=57.2 |
 | `rerank_pool4/d150_c120_w1000/rerank_manifest.json` | pairs_total=677492, pairs_scored=677492, zip_mb=99.2 |
@@ -445,10 +376,6 @@
 | `run_zh_c/submission_balanced/submission_manifest.json` |  |
 | `run_zh_c/win1000/variant_manifest.json` | json_mb=64.2, zip_mb=22.0 |
 | `run_zh_c/win2000/variant_manifest.json` | json_mb=90.6, zip_mb=30.7 |
-| `slug_4b300_t30/slug_rerank_manifest.json` |  |
-| `slug_4b_top20/slug_rerank_manifest.json` |  |
 | `slug_pool300/slug_manifest.json` |  |
 | `slug_rerank/pairs_manifest.json` | pairs=120000 |
 | `slug_rerank300/pairs_manifest.json` | pairs=360000 |
-| `slug_top10/slug_manifest.json` |  |
-| `slug_top20/slug_manifest.json` |  |

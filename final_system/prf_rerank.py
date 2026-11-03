@@ -271,6 +271,71 @@ def export_extra(args, query_ids, pools, orders, limits, passages, old_best, cen
          f'chia cho N tài khoản: SHARD_COUNT = N, tài khoản i đặt SHARD_INDEX = i).')
 
 
+def export_band(args, query_ids, pools, orders, limits, runs, out_dir, ref_scores=None):
+    """Write pairs.parquet of the passage that defines each document's score (its best 4B-scored passage), for the
+    documents near each query's cut-off, to be scored again by a second reranker (e.g. Qwen3-Reranker-8B).
+    Keys are the same as the 4B pairs, so the two scores can be compared and averaged."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    queries = {int(row['id']): row['query'] for row in load_queries(args.queries)}
+    low, high = args.band
+    wanted = {}  # (qid, doc_id, run, order) -> rank
+    for qid in query_ids:
+        order = orders.get(qid)
+        if not order:
+            continue
+        limit = limits.get(qid, args.docs) if args.adaptive else args.docs
+        for rank in range(int(low * limit), min(int(np.ceil(high * limit)), len(order))):
+            _v, doc_id, run, chunk_order = pools[qid][order[rank]]
+            wanted[(qid, int(doc_id), run, int(chunk_order))] = rank
+    texts, olds = {}, {}
+    text_runs = set(args.text_runs)
+    for path in args.pairs:
+        table = pq.read_table(path, columns=['qid', 'doc_id', 'run', 'chunk_order', 'old_score', 'text'])
+        for qid, doc_id, run, order, old, text in zip(*(table[c].to_pylist() for c in table.column_names)):
+            key = (int(qid), int(doc_id), run, int(order))
+            if key in wanted:
+                olds.setdefault(key, old)
+                if text and key not in texts:
+                    texts[key] = text
+        del table
+    missing_runs = {}
+    for key in wanted:
+        if key not in texts and key[2] in runs and key[2] not in text_runs:
+            missing_runs.setdefault(key[2], set()).add((key[1], key[3]))
+    for run, items in missing_runs.items():
+        docs = pa.array(sorted({d for d, _o in items}), type=pa.int64())
+        table = pq.read_table(Path(runs[run]) / 'chunks' / 'chunks.parquet', columns=['doc_id', 'chunk_order', 'text'])
+        table = table.filter(pc.is_in(table['doc_id'], value_set=docs))
+        found = {(int(d), int(o)): t for d, o, t in zip(*(table[c].to_pylist() for c in table.column_names))}
+        del table
+        for key in wanted:
+            if key[2] == run and key not in texts and (key[1], key[3]) in found:
+                texts[key] = found[(key[1], key[3])]
+    rows = [{'qid': q, 'query': queries[q], 'doc_id': d, 'run': r, 'chunk_order': o, 'old_score': olds.get((q, d, r, o)),
+             'old_doc_rank': 0, 'passage_rank': 0, 'text': texts[(q, d, r, o)]}
+            for (q, d, r, o) in sorted(wanted) if texts.get((q, d, r, o), '').strip()]
+    schema = pq.read_schema(args.pairs[0])
+    schema = pa.schema([schema.field(name) for name in
+                        ('qid', 'query', 'doc_id', 'run', 'chunk_order', 'old_score', 'old_doc_rank', 'passage_rank', 'text')])
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.Table.from_pylist(rows, schema=schema), out_dir / 'pairs.parquet')
+    if ref_scores:
+        # 4B scores of the same pairs, so the Kaggle notebook can compare 8B with 4B without other uploads.
+        keys = [pair_key(r['qid'], r['doc_id'], r['run'], r['chunk_order']) for r in rows]
+        keys = [k for k in keys if k in ref_scores]
+        pq.write_table(pa.table({'key': keys, 'score': pa.array([ref_scores[k] for k in keys], type=pa.float32())}),
+                       out_dir / 'scores_4b_band.parquet')
+    summary = {'pairs': len(rows), 'per_query': round(len(rows) / max(1, len(query_ids)), 1), 'band': args.band,
+               'without_text': len(wanted) - len(rows),
+               'hours_one_session_4b_at_6_5_per_s': round(len(rows) / 6.5 / 3600, 1)}
+    storage.write_json(out_dir / 'band_manifest.json', summary)
+    emit(json.dumps(summary, ensure_ascii=False, indent=2))
+    emit(f'\nUpload cả thư mục {out_dir} (pairs.parquet + scores_4b_band.parquet) thành một dataset Kaggle, '
+         f'chạy notebooks/rerank_8b_kaggle.ipynb.')
+
+
 def cut_chunks(plan, runs, text_runs, pair_paths, window_tokens, extra=None):
     """plan: {qid: [(doc_id, run, chunk_order), ...]} -> {qid: [{'doc_id', 'chunk_text'}, ...]} in plan order.
 
@@ -449,6 +514,13 @@ def main():
     parser.add_argument('--export-extra', default='',
                         help='Thư mục: KHÔNG tạo bài nộp, mà xuất pairs.parquet các đoạn CHƯA chấm của tài liệu gần hạng cắt '
                              'để chấm 4B thêm trên Kaggle. Điểm trả về đặt ở work/rerank_extra/ sẽ được tự dùng.')
+    parser.add_argument('--export-band', default='',
+                        help='Thư mục: KHÔNG tạo bài nộp, mà xuất đoạn tốt nhất (đúng khoá cặp 4B) của tài liệu trong vùng '
+                             '--band quanh hạng cắt, để chấm lại bằng mô hình thứ hai (8B).')
+    parser.add_argument('--scores8b', nargs='*', default=[],
+                        help='Điểm của mô hình thứ hai (scores_8b*.parquet) trên các cặp xuất bằng --export-band.')
+    parser.add_argument('--w8b', type=float, default=0.5,
+                        help='Trọng số mô hình thứ hai: điểm 4B của đoạn được thay bằng (1-w)·4B + w·8B.')
     parser.add_argument('--band', type=float, nargs=2, default=[0.6, 1.6],
                         help='Vùng hạng (nhân với số tài liệu của câu) được chấm thêm, mặc định 0.6 1.6.')
     parser.add_argument('--extra-per-doc', type=int, default=1, help='Số đoạn mới mỗi tài liệu (--export-extra).')
@@ -456,8 +528,8 @@ def main():
     parser.add_argument('--links', default='data/links_corpus_vi_en_zh.parquet')
     parser.add_argument('--out')
     args = parser.parse_args()
-    if not args.out and not args.export_extra:
-        parser.error('Cần --out (hoặc --export-extra)')
+    if not args.out and not args.export_extra and not args.export_band:
+        parser.error('Cần --out (hoặc --export-extra / --export-band)')
     if not args.pairs and not args.scores and glob.glob('work/rerank_extra/scores*.parquet') \
             and Path('work/rerank_extra/pairs.parquet').exists():
         # Extra 4B pass (--export-extra) already scored: use it automatically.
@@ -481,6 +553,21 @@ def main():
     ranked, scored = rank_documents(pairs, all_scores, args.mix)
     del table
     emit(f'Cặp có điểm 4B: {scored:,} | câu có xếp hạng: {len(ranked)}')
+    if args.scores8b:
+        # Second reranker on each document's defining passage: replace its 4B part by (1-w)·4B + w·8B.
+        second = load_scores(args.scores8b)
+        changed = 0
+        for qid, items in ranked.items():
+            new_items = []
+            for value, doc_id, run, order in items:
+                key = pair_key(qid, doc_id, run, order)
+                if key in second and key in all_scores:
+                    share = 1.0 if run in args.text_runs else args.mix
+                    value = value + share * args.w8b * (second[key] - all_scores[key])
+                    changed += 1
+                new_items.append((value, doc_id, run, order))
+            ranked[qid] = sorted(new_items, key=lambda item: (-item[0], item[1]))
+        emit(f'Mô hình thứ hai: {len(second):,} điểm, áp vào {changed:,} tài liệu (w = {args.w8b})')
     query_ids = [int(row['id']) for row in load_queries(args.queries)]
     if args.zh_scale != 1.0:
         for qid, items in ranked.items():
@@ -496,6 +583,7 @@ def main():
             if (int(qid), int(doc_id)) in in_pool and old is not None and np.isfinite(old):
                 key = (int(qid), int(doc_id), run)
                 old_best[key] = max(old, old_best.get(key, float('-inf')))
+    band_scores = all_scores if args.export_band else None
     del pairs, all_scores
     limits, threshold = {}, None
     pool_totals = {qid: float(sum(v for v, _d, _r, _o in pool)) for qid, pool in pools.items()}
@@ -601,6 +689,9 @@ def main():
              f'chạm --min-docs: {int((values <= args.min_docs).sum())} câu, chạm --max-docs: '
              f'{int((values >= args.max_docs).sum())} câu')
 
+    if args.export_band:
+        export_band(args, query_ids, pools, orders, limits, runs, args.export_band, band_scores)
+        return
     if args.export_extra:
         if not args.weight:
             raise SystemExit('--export-extra cần vector chủ đề (--weight > 0).')
@@ -706,7 +797,7 @@ def main():
                'chunk_mode': (args.chunk_mode if args.adaptive else 'fixed') if want_chunks else None,
                'chunk_cap': chunk_cap, 'chunk_share': chunk_share,
                'chunks_per_query': round(sum(len(r['relevant_chunks']) for r in rows) / n, 1),
-               'zh_scale': args.zh_scale,
+               'zh_scale': args.zh_scale, 'scores8b': args.scores8b, 'w8b': args.w8b if args.scores8b else None,
                'chunks_lost': lost, 'second_weight': args.second_weight, 'extra_windows': args.extra_windows,
                'chunk_tokens_median': chunk_tokens[len(chunk_tokens) // 2] if chunk_tokens else 0,
                'json_mb': round(json_path.stat().st_size / 1e6, 1),
