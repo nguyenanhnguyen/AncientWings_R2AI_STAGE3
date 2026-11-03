@@ -1,1 +1,0 @@
-"""ViBioMIR project code."""
