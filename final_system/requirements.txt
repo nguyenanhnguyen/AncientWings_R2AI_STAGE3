@@ -1,0 +1,21 @@
+# Thư viện của hệ thống (pipeline từng run, dịch câu hỏi, dựng bài nộp, công cụ kiểm tra).
+# Cài PyTorch đúng bản CUDA của máy TRƯỚC (https://pytorch.org/get-started/locally/), rồi:
+#   python -m pip install -r requirements.txt
+# Notebook Kaggle (crawl, Wayback, chấm 4B/8B) tự cài thư viện của chúng trong notebook.
+
+numpy>=1.26
+pyarrow>=19.0
+scipy>=1.11              # slug_retrieval.py: BM25 trên chữ trong URL
+
+torch>=2.4               # dựng bài nộp (prf_rerank.py) không cần GPU
+transformers>=4.51,<5    # Qwen3 cần >= 4.51
+tokenizers>=0.20
+safetensors>=0.4
+sentencepiece>=0.2
+protobuf>=4.25
+huggingface_hub>=0.23    # tải mô hình và dataset
+accelerate>=0.30         # nạp Qwen3-4B 4-bit để dịch câu hỏi
+bitsandbytes>=0.43       # lượng tử 4-bit NF4 (dịch câu hỏi; Qwen3-Reranker-8B)
+
+# Tuỳ chọn: tăng tốc tìm kiếm vector (mặc định nhân ma trận numpy).
+# faiss-cpu>=1.8

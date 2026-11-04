@@ -44,3 +44,9 @@ Thumbs.db
 nguyen/
 results/
 docs/
+
+# Môi trường và dữ liệu làm việc khi chạy trong final_system/
+env/
+final_system/work/
+final_system/data/crawl/
+final_system/data/crawl_en/

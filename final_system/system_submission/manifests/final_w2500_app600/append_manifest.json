@@ -1,7 +1,0 @@
-{
-  "base": "work/final_p4_w2500/submission.zip",
-  "extra": "work/rerank_pool4/d150_c100_w600/submission.zip",
-  "added_per_query": 39.3,
-  "chunks_per_query": 203.3,
-  "zip_mb": 140.3
-}

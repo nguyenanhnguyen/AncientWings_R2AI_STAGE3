@@ -1,8 +1,0 @@
-{
-  "base": "work/combo_w0/submission.zip",
-  "extra": "work/rerank_all/d190_c190/submission.zip",
-  "only_new_docs": true,
-  "added_per_query": 19.6,
-  "chunks_per_query": 205.4,
-  "zip_mb": 168.7
-}

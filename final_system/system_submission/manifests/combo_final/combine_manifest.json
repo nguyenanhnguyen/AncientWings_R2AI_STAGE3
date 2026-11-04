@@ -1,9 +1,0 @@
-{
-  "docs_from": "work/prf/w0_final/submission.zip",
-  "chunks_from": "work/combo_w0_top20/submission.zip",
-  "docs_per_query": 190.0,
-  "chunks_per_query": 205.4,
-  "chunk_docs_not_in_docs_per_query": 16.1,
-  "added_chunk_docs_per_query": 0.0,
-  "zip_mb": 168.7
-}

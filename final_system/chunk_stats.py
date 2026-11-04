@@ -38,6 +38,15 @@ def content_md5(path):
     return digest.hexdigest()[:10]
 
 
+def raw_mb(path):
+    """Size of the JSON inside the zip (uncompressed), MB."""
+    path = Path(path)
+    if path.suffix.lower() == '.zip':
+        with zipfile.ZipFile(path) as archive:
+            return archive.infolist()[0].file_size / 1e6
+    return path.stat().st_size / 1e6
+
+
 def percentile(values, share):
     return values[min(len(values) - 1, int(share * len(values)))] if values else 0
 
@@ -67,7 +76,7 @@ def main():
         if not found:
             print(f'(không thấy file nào khớp {pattern})')
         paths += [p for p in found if p not in paths]
-    print(f"{'file':<58} {'MB':>6} {'mã nội dung':>11} {'tl/câu':>7} {'chunk/câu':>9} "
+    print(f"{'file':<58} {'MB':>6} {'JSON MB':>8} {'mã nội dung':>11} {'tl/câu':>7} {'chunk/câu':>9} "
           f"{'token: trung vị':>15} {'p90':>5} {'max':>5} {'%>1024':>7} {'%>2600':>7}")
     for path in paths:
         try:
@@ -77,9 +86,10 @@ def main():
             print(f'{path:<58} lỗi: {error}')
             continue
         size = Path(path).stat().st_size / 1e6
-        print(f"{path:<58} {size:6.1f} {md5:>11} {s['docs']:7.1f} {s['chunks']:9.1f} {s['p50']:15d} "
+        print(f"{path:<58} {size:6.1f} {raw_mb(path):8.1f} {md5:>11} {s['docs']:7.1f} {s['chunks']:9.1f} {s['p50']:15d} "
               f"{s['p90']:5d} {s['max']:5d} {s['over1024']:6.1f}% {s['over2600']:6.1f}%")
-    print('\nCùng "mã nội dung" = cùng nội dung (dù dung lượng khác do cách nén).')
+    print('\nCùng "mã nội dung" = cùng nội dung (dù dung lượng khác do cách nén). '
+          'JSON MB / MB = hệ số nén; bài mới cùng kiểu sẽ nén ra khoảng JSON MB / hệ số đó.')
 
 
 if __name__ == '__main__':
