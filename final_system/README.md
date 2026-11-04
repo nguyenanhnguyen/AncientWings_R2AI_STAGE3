@@ -64,6 +64,11 @@ python -m venv env
 Dòng `torch`: chọn đúng bản CUDA của máy ở https://pytorch.org/get-started/locally/. Mọi lệnh dưới đây chạy ở thư
 mục `final_system`.
 
+Phiên bản thư viện đội đã chạy thật: `requirements-lock.txt` (máy local, Windows + RTX 2050). Cài đúng các phiên bản
+đó: `.\env\Scripts\python.exe -m pip install -r requirements-lock.txt` (cài `torch` như trên trước). Các notebook
+Kaggle tự cài thư viện của chúng; lượt chấm 8B đã chạy với Python 3.13, `torch` 2.11 (CUDA 12.8), `transformers` 5.16,
+`bitsandbytes` bản mới nhất lúc chạy.
+
 ## 2. Dữ liệu và mô hình
 
 - `data/query.parquet`, `data/links_corpus_vi_en_zh.parquet`: dữ liệu của BTC, có sẵn trong repo (bản sao từ HF dataset
@@ -84,6 +89,13 @@ mục `final_system`.
 
 ## 3. Chạy lại từ đầu
 
+**B0. Thu thập văn bản** (đã có sẵn trên HF dataset ở mục 2, có thể bỏ qua). Upload
+`notebooks/crawl_corpus_kaggle_hf_upload.ipynb` lên Kaggle, bật Internet, tạo Kaggle Secret `HF_TOKEN` có quyền ghi
+vào dataset; ở ô cấu hình đặt `ID_FROM` / `ID_TO` (khoảng id trong `links_corpus_vi_en_zh.parquet`, tính cả hai đầu),
+chạy thử với `MAX_NEW = 10` rồi đổi thành `None` và Save Version. Notebook tải bằng Requests, thử lại bằng Selenium
+cho trang lỗi, chạy QC và đẩy `ids_<đầu>_<cuối>_synced.parquet` lên HF; phiên bị ngắt thì gắn output làm Input để chạy
+tiếp. Tiếng Anh (PubMed) lấy bằng `fetch_pubmed.py` (mục 4, bài tiếng Anh).
+
 **B1. Dựng từng run** (GPU). Gộp file thu thập của lô, rồi chạy pipeline:
 ```powershell
 .\env\Scripts\python.exe merge_ids.py "data/crawl/ids_*_synced.parquet" data/crawl/lo_x.parquet --keep-in data/links_corpus_vi_en_zh.parquet
@@ -93,6 +105,10 @@ mục `final_system`.
 - Nguồn, `--limit` và cờ đúng của từng run trong 14 run (`run_vi`, `run_b`…`run_g`, `run_h`, `run_zh_a/b/c`,
   `run_archive`, `run_archive2`, `run_archive3`): `system_submission/manifests/<run>/stages/*.json`, trường `command`.
 - Chạy lại cùng lệnh thì bước đã xong được bỏ qua (kiểm tra SHA-256).
+- Chỉ mục được **tạo** ở bước này (không có bản tải sẵn). Mỗi run ghi ra `work/run_x/`: `corpus/corpus.parquet`
+  (văn bản đã làm sạch), `chunks/chunks.parquet`, `index/bge-m3/` (BM25 + vector bge-m3),
+  `index/qwen3-embedding-0.6b/`, `translations/` (bản dịch câu hỏi), `retrieval/candidates.jsonl` (ứng viên đã
+  rerank), `stages/` và `logs/`. Trên RTX 2050 4 GB, mỗi run mất vài giờ đến hơn 10 giờ tuỳ số tài liệu.
 
 **B2. Trang bị chặn qua Wayback** (đã có sẵn trong HF dataset, có thể bỏ qua):
 ```powershell
